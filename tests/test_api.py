@@ -80,6 +80,15 @@ def client():
             extra_passenger_amount=Decimal("200.00"),
             is_active=True,
         ))
+        db.add(Fare(
+            origin_zone_id=1,
+            destination_zone_id=2,
+            vehicle_type="motorcycle",
+            base_amount=Decimal("800.00"),
+            vehicle_multiplier=Decimal("1.000"),
+            extra_passenger_amount=Decimal("300.00"),
+            is_active=True,
+        ))
         db.commit()
 
     try:
@@ -271,23 +280,23 @@ def test_ride_request_rejects_client_supplied_passenger_id(client):
     assert response.status_code == 422
 
 
-def test_motorcycle_rejects_more_than_one_passenger(client):
+def test_motorcycle_rejects_more_than_two_passengers(client):
     token = login_as_passenger(client)
     response = client.post(
         "/api/v1/ride-requests",
-        json=ride_payload(vehicle_type="motorcycle", passenger_count=2),
+        json=ride_payload(vehicle_type="motorcycle", passenger_count=3),
         headers={"Authorization": f"Bearer {token}"},
     )
 
     assert response.status_code == 422
-    assert "Motorcycle bookings allow at most one passenger" in response.json()["detail"]
+    assert "Motorcycle bookings allow at most two passengers" in response.json()["detail"]
 
 
 def test_ride_request_rejects_unconfigured_fare(client):
     token = login_as_passenger(client)
     response = client.post(
         "/api/v1/ride-requests",
-        json=ride_payload(vehicle_type="motorcycle", passenger_count=1),
+        json=ride_payload(vehicle_type="van", passenger_count=1),
         headers={"Authorization": f"Bearer {token}"},
     )
     assert response.status_code == 422
@@ -439,3 +448,15 @@ def test_five_failed_logins_block_the_next_attempt(client, monkeypatch):
     assert blocked_response.status_code == 429
     assert blocked_response.headers["Retry-After"] == str(window)
     assert failures["count"] == limit
+
+
+def test_motorcycle_two_passengers_quote_includes_surcharge(client):
+    token = login_as_passenger(client)
+    response = client.post(
+        "/api/v1/ride-requests",
+        json=ride_payload(vehicle_type="motorcycle", passenger_count=2),
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["quoted_fare"] == "1100.00"
