@@ -232,11 +232,11 @@ def create_ride_request(
 
     if (
         payload.vehicle_type.strip().lower() in {"motorcycle", "motorbike"}
-        and payload.passenger_count > 2
+        and payload.passenger_count > 1
     ):
         raise HTTPException(
             status_code=422,
-            detail="Motorcycle bookings allow at most two passengers in addition to the rider",
+            detail="Motorcycle bookings allow at most one passenger in addition to the rider",
         )
 
     origin = db.get(Zone, payload.origin_zone_id)
