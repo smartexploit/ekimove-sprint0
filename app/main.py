@@ -230,6 +230,15 @@ def create_ride_request(
             detail="Only passenger accounts can create ride requests",
         )
 
+    if (
+        payload.vehicle_type.strip().lower() in {"motorcycle", "motorbike"}
+        and payload.passenger_count > 1
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Motorcycle bookings allow at most one passenger in addition to the rider",
+        )
+
     origin = db.get(Zone, payload.origin_zone_id)
     destination = db.get(Zone, payload.destination_zone_id)
 

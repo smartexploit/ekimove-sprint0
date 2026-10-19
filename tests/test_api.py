@@ -271,6 +271,18 @@ def test_ride_request_rejects_client_supplied_passenger_id(client):
     assert response.status_code == 422
 
 
+def test_motorcycle_rejects_more_than_one_passenger(client):
+    token = login_as_passenger(client)
+    response = client.post(
+        "/api/v1/ride-requests",
+        json=ride_payload(vehicle_type="motorcycle", passenger_count=2),
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 422
+    assert "Motorcycle bookings allow at most one passenger" in response.json()["detail"]
+
+
 def test_ride_request_rejects_unconfigured_fare(client):
     token = login_as_passenger(client)
     response = client.post(
