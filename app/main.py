@@ -5,7 +5,12 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.auth import create_access_token, get_current_user, verify_password
+from app.auth import (
+    create_access_token,
+    get_current_user,
+    require_super_admin,
+    verify_password,
+)
 from app.config import settings
 from app.database import engine, get_db
 from app.models import Fare, RideRequest, User, Zone
@@ -71,6 +76,42 @@ class RideRequestCreated(BaseModel):
     quoted_fare: Decimal
     currency: str = "NGN"
     status: str
+
+
+@app.get("/api/v1/admin/zones", tags=["admin"])
+def admin_list_zones(
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_super_admin),
+) -> list[dict[str, object]]:
+    """Read all pilot zones, including inactive zones, for admin review."""
+    zones = db.scalars(select(Zone).order_by(Zone.id)).all()
+    return [
+        {"id": zone.id, "name": zone.name, "is_active": zone.is_active}
+        for zone in zones
+    ]
+
+
+@app.get("/api/v1/admin/fares", tags=["admin"])
+def admin_list_fares(
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_super_admin),
+) -> list[dict[str, object]]:
+    """Read all fare rules for admin review; this endpoint never writes."""
+    fares = db.scalars(select(Fare).order_by(Fare.id)).all()
+    return [
+        {
+            "id": fare.id,
+            "origin_zone_id": fare.origin_zone_id,
+            "destination_zone_id": fare.destination_zone_id,
+            "vehicle_type": fare.vehicle_type,
+            "base_amount": fare.base_amount,
+            "vehicle_multiplier": fare.vehicle_multiplier,
+            "extra_passenger_amount": fare.extra_passenger_amount,
+            "is_active": fare.is_active,
+            "currency": "NGN",
+        }
+        for fare in fares
+    ]
 
 
 @app.get("/health", tags=["operations"])

@@ -67,19 +67,38 @@ def client():
                 role="passenger",
                 is_active=False,
             ),
+            User(
+                id=4,
+                phone="08000000004",
+                full_name="Test Super Admin",
+                password_hash=hash_password("SuperAdmin-Test-Password-4!"),
+                role="super_admin",
+                is_active=True,
+            ),
             Zone(id=1, name="Central", is_active=True),
             Zone(id=2, name="North", is_active=True),
         ])
         db.flush()
-        db.add(Fare(
-            origin_zone_id=1,
-            destination_zone_id=2,
-            vehicle_type="standard",
-            base_amount=Decimal("1000.00"),
-            vehicle_multiplier=Decimal("1.000"),
-            extra_passenger_amount=Decimal("200.00"),
-            is_active=True,
-        ))
+        db.add_all([
+            Fare(
+                origin_zone_id=1,
+                destination_zone_id=2,
+                vehicle_type="standard",
+                base_amount=Decimal("1500.00"),
+                vehicle_multiplier=Decimal("1.000"),
+                extra_passenger_amount=Decimal("500.00"),
+                is_active=True,
+            ),
+            Fare(
+                origin_zone_id=1,
+                destination_zone_id=2,
+                vehicle_type="motorcycle",
+                base_amount=Decimal("800.00"),
+                vehicle_multiplier=Decimal("1.000"),
+                extra_passenger_amount=Decimal("0.00"),
+                is_active=True,
+            ),
+        ])
         db.commit()
 
     try:
@@ -256,10 +275,42 @@ def test_create_ride_request_uses_server_fare_and_token_identity(client):
     assert response.status_code == 201, response.text
     body = response.json()
     assert body["passenger_user_id"] == 1
-    assert body["quoted_fare"] == "1200.00"
+    assert body["quoted_fare"] == "2000.00"
     assert body["currency"] == "NGN"
     assert body["status"] == "requested"
 
+
+def test_pilot_standard_car_one_passenger_fare(client):
+    token = login_as_passenger(client)
+    response = client.post(
+        "/api/v1/ride-requests",
+        json=ride_payload(passenger_count=1),
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["quoted_fare"] == "1500.00"
+
+
+def test_pilot_standard_car_three_passenger_fare(client):
+    token = login_as_passenger(client)
+    response = client.post(
+        "/api/v1/ride-requests",
+        json=ride_payload(passenger_count=3),
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["quoted_fare"] == "2500.00"
+
+
+def test_pilot_motorcycle_one_passenger_fare(client):
+    token = login_as_passenger(client)
+    response = client.post(
+        "/api/v1/ride-requests",
+        json=ride_payload(vehicle_type="motorcycle", passenger_count=1),
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["quoted_fare"] == "800.00"
 
 def test_ride_request_rejects_client_supplied_passenger_id(client):
     token = login_as_passenger(client)
@@ -439,3 +490,54 @@ def test_five_failed_logins_block_the_next_attempt(client, monkeypatch):
     assert blocked_response.status_code == 429
     assert blocked_response.headers["Retry-After"] == str(window)
     assert failures["count"] == limit
+
+@pytest.mark.parametrize(
+    "endpoint",
+    ["/api/v1/admin/zones", "/api/v1/admin/fares"],
+)
+def test_admin_endpoints_reject_unauthenticated_requests(client, endpoint):
+    response = client.get(endpoint)
+    assert response.status_code == 401, response.text
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    ["/api/v1/admin/zones", "/api/v1/admin/fares"],
+)
+def test_admin_endpoints_reject_passengers(client, endpoint):
+    token = login_as_passenger(client)
+    response = client.get(
+        endpoint,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 403, response.text
+
+
+def test_super_admin_can_read_admin_zones_and_fares(client):
+    login_response = client.post(
+        "/api/v1/auth/login",
+        json={
+            "phone": "08000000004",
+            "password": "SuperAdmin-Test-Password-4!",
+        },
+    )
+    assert login_response.status_code == 200, login_response.text
+    token = login_response.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    zones_response = client.get("/api/v1/admin/zones", headers=headers)
+    fares_response = client.get("/api/v1/admin/fares", headers=headers)
+
+    assert zones_response.status_code == 200, zones_response.text
+    assert fares_response.status_code == 200, fares_response.text
+
+    zones = zones_response.json()
+    fares = fares_response.json()
+
+    assert len(zones) == 2
+    assert {zone["name"] for zone in zones} == {"Central", "North"}
+    assert len(fares) == 2
+    assert {fare["vehicle_type"] for fare in fares} == {
+        "standard", "motorcycle"
+    }
+    assert all(fare["currency"] == "NGN" for fare in fares)
