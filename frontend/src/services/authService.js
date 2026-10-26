@@ -1,11 +1,19 @@
 ﻿const TOKEN_KEY = 'ekimove_access_token'
 const USER_KEY = 'ekimove_user'
+const API_BASE_URL = (
+  import.meta.env.VITE_API_BASE_URL || ''
+).replace(/\/+$/, '')
+
+function apiUrl(path) {
+  if (/^https?:\/\//i.test(path)) return path
+  return `${API_BASE_URL}/${path.replace(/^\/+/, '')}`
+}
 
 async function requestAuth(endpoint, payload) {
   let response
 
   try {
-    response = await fetch(`/api/v1/auth/${endpoint}`, {
+    response = await fetch(apiUrl(`/api/v1/auth/${endpoint}`), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -47,7 +55,7 @@ export async function apiRequest(path, options = {}) {
   let response
 
   try {
-    response = await fetch(path, { ...options, headers })
+    response = await fetch(apiUrl(path), { ...options, headers })
   } catch {
     throw new Error('Unable to reach EkiMove. Check that the API is running.')
   }

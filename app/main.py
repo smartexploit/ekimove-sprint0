@@ -3,6 +3,7 @@ from typing import Literal
 from app.payments import router as payments_router
 from decimal import Decimal, ROUND_HALF_UP
 from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -37,6 +38,18 @@ app = FastAPI(
 )
 
 
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://ekimove.onrender.com",
+        "http://localhost:5173",
+        "http://localhost:5175",
+    ],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 
 app.include_router(driver_applications_router)
 app.include_router(admin_driver_verification_router)
