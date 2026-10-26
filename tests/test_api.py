@@ -1,8 +1,9 @@
-from decimal import Decimal
+﻿from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from app.rate_limit import RateLimitUnavailable
@@ -11,8 +12,9 @@ from app.auth import hash_password
 from app.config import settings
 from app.database import Base, get_db
 import app.main as main_module
+import app.driver_applications as driver_applications_module
 from app.main import app
-from app.models import Fare, User, Zone
+from app.models import AuditLog, Driver, Fare, Payment, Ride, RideRequest, User, Vehicle, Zone
 
 
 @pytest.fixture()
@@ -79,6 +81,36 @@ def client():
             Zone(id=2, name="North", is_active=True),
         ])
         db.flush()
+        db.add(
+            User(
+                id=5,
+                phone="08000000006",
+                full_name="Test Driver",
+                password_hash=hash_password("Driver-Test-Password-5!"),
+                role="driver",
+                is_active=True,
+            )
+        )
+        db.flush()
+        db.add(
+            Driver(
+                id=1,
+                user_id=5,
+                verification_status="approved",
+                is_online=True,
+            )
+        )
+        db.flush()
+        db.add(
+            Vehicle(
+                id=1,
+                driver_id=1,
+                vehicle_type="standard",
+                plate_number="EKM-TEST-001",
+                capacity=4,
+                is_approved=True,
+            )
+        )
         db.add_all([
             Fare(
                 origin_zone_id=1,
@@ -125,7 +157,7 @@ def bypass_redis_rate_limiter_in_tests(monkeypatch):
 
 
 def login_as_passenger(client, phone="08000000001",
-                       password="Passenger-Test-Password-1!"):
+                    password="Passenger-Test-Password-1!"):
     response = client.post(
         "/api/v1/auth/login",
         json={"phone": phone, "password": password},
@@ -177,6 +209,33 @@ def test_active_zones_endpoint(client):
         {"id": 1, "name": "Central"},
         {"id": 2, "name": "North"},
     ]
+
+
+def test_fare_options_returns_only_active_route_vehicle_types(client):
+    response = client.get(
+        "/api/v1/fare-options",
+        params={"origin_zone_id": 1, "destination_zone_id": 2},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json() == ["motorcycle", "standard"]
+
+
+def test_fare_options_returns_empty_for_same_zone(client):
+    response = client.get(
+        "/api/v1/fare-options",
+        params={"origin_zone_id": 1, "destination_zone_id": 1},
+    )
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_fare_options_returns_empty_for_unknown_zone(client):
+    response = client.get(
+        "/api/v1/fare-options",
+        params={"origin_zone_id": 1, "destination_zone_id": 999},
+    )
+    assert response.status_code == 200
+    assert response.json() == []
 
 
 def test_login_returns_bearer_token(client):
@@ -541,3 +600,880 @@ def test_super_admin_can_read_admin_zones_and_fares(client):
         "standard", "motorcycle"
     }
     assert all(fare["currency"] == "NGN" for fare in fares)
+
+def test_register_creates_passenger_and_returns_token(client):
+    response = client.post(
+        "/api/v1/auth/register",
+        json={
+            "phone": "08000000005",
+            "full_name": "New EkiMove Passenger",
+            "password": "New-Passenger-Password-5!",
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+
+    assert body["access_token"]
+    assert body["token_type"] == "bearer"
+    assert body["user"]["phone"] == "08000000005"
+    assert body["user"]["full_name"] == "New EkiMove Passenger"
+    assert body["user"]["role"] == "passenger"
+    assert body["user"]["is_active"] is True
+    assert "password_hash" not in body["user"]
+
+    # Confirm the issued token works with the existing /me endpoint.
+    me_response = client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {body['access_token']}"},
+    )
+    assert me_response.status_code == 200, me_response.text
+    assert me_response.json()["phone"] == "08000000005"
+
+
+def test_register_rejects_duplicate_phone_number(client):
+    response = client.post(
+        "/api/v1/auth/register",
+        json={
+            "phone": "08000000001",
+            "full_name": "Duplicate Passenger",
+            "password": "Another-Password-123!",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Phone number is already registered"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "phone": "123",
+            "full_name": "Test Passenger",
+            "password": "Valid-Password-123!",
+        },
+        {
+            "phone": "08000000006",
+            "full_name": "A",
+            "password": "Valid-Password-123!",
+        },
+        {
+            "phone": "08000000006",
+            "full_name": "Test Passenger",
+            "password": "short",
+        },
+    ],
+)
+def test_register_rejects_invalid_fields(client, payload):
+    response = client.post("/api/v1/auth/register", json=payload)
+    assert response.status_code == 422, response.text
+
+
+def test_register_rejects_client_supplied_role(client):
+    response = client.post(
+        "/api/v1/auth/register",
+        json={
+            "phone": "08000000006",
+            "full_name": "Attempted Admin",
+            "password": "Valid-Password-123!",
+            "role": "super_admin",
+        },
+    )
+
+    assert response.status_code == 422, response.text
+
+
+def test_newly_registered_passenger_can_login(client):
+    registration = client.post(
+        "/api/v1/auth/register",
+        json={
+            "phone": "08000000007",
+            "full_name": "Registration Login Test",
+            "password": "Registered-Password-7!",
+        },
+    )
+    assert registration.status_code == 201, registration.text
+
+    login = client.post(
+        "/api/v1/auth/login",
+        json={
+            "phone": "08000000007",
+            "password": "Registered-Password-7!",
+        },
+    )
+
+    assert login.status_code == 200, login.text
+    assert login.json()["access_token"]
+
+
+
+
+def test_my_rides_requires_authentication(client):
+    response = client.get("/api/v1/ride-requests/my-rides")
+    assert response.status_code == 401
+
+
+def test_my_rides_returns_only_authenticated_passengers_requests(client):
+    first_token = login_as_passenger(client)
+    first_headers = {"Authorization": f"Bearer {first_token}"}
+
+    created = client.post(
+        "/api/v1/ride-requests",
+        json=ride_payload(),
+        headers=first_headers,
+    )
+    assert created.status_code == 201, created.text
+
+    own_history = client.get(
+        "/api/v1/ride-requests/my-rides",
+        headers=first_headers,
+    )
+    assert own_history.status_code == 200, own_history.text
+    own_data = own_history.json()
+    assert len(own_data) == 1
+    assert own_data[0]["id"] == created.json()["id"]
+    assert own_data[0]["origin_text"] == "Central Market gate"
+    assert own_data[0]["destination_text"] == "North Estate entrance"
+    assert own_data[0]["quoted_fare"] == "2000.00"
+    assert own_data[0]["currency"] == "NGN"
+    assert own_data[0]["status"] == "requested"
+
+    second_token = login_as_passenger(
+        client,
+        phone="08000000002",
+        password="Second-Test-Password-2!",
+    )
+    second_history = client.get(
+        "/api/v1/ride-requests/my-rides",
+        headers={"Authorization": f"Bearer {second_token}"},
+    )
+    assert second_history.status_code == 200, second_history.text
+    assert second_history.json() == []
+
+
+def _login_as_super_admin(client):
+    response = client.post(
+        "/api/v1/auth/login",
+        json={
+            "phone": "08000000004",
+            "password": "SuperAdmin-Test-Password-4!",
+        },
+    )
+    assert response.status_code == 200, response.text
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
+def _create_test_booking(client):
+    token = login_as_passenger(client)
+    response = client.post(
+        "/api/v1/ride-requests",
+        json=ride_payload(),
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()["id"]
+
+
+def test_dispatch_assignment_requires_super_admin(client):
+    request_id = _create_test_booking(client)
+    passenger_token = login_as_passenger(client)
+
+    response = client.post(
+        f"/api/v1/admin/ride-requests/{request_id}/assign",
+        json={"driver_id": 1},
+        headers={"Authorization": f"Bearer {passenger_token}"},
+    )
+    assert response.status_code == 403
+
+
+def test_super_admin_can_assign_ride_to_approved_online_driver(client):
+    request_id = _create_test_booking(client)
+
+    response = client.post(
+        f"/api/v1/admin/ride-requests/{request_id}/assign",
+        json={"driver_id": 1},
+        headers=_login_as_super_admin(client),
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["request_id"] == request_id
+    assert body["driver_id"] == 1
+    assert body["vehicle_id"] == 1
+    assert body["status"] == "assigned"
+    assert body["agreed_fare"] == "2000.00" or body["agreed_fare"] == 2000.0
+
+
+def test_dispatch_rejects_duplicate_assignment(client):
+    request_id = _create_test_booking(client)
+    headers = _login_as_super_admin(client)
+    url = f"/api/v1/admin/ride-requests/{request_id}/assign"
+
+    first = client.post(url, json={"driver_id": 1}, headers=headers)
+    assert first.status_code == 201, first.text
+
+    second = client.post(url, json={"driver_id": 1}, headers=headers)
+    assert second.status_code == 409
+
+
+def _change_dispatch_fixture(client, **changes):
+    """Modify the isolated test driver, account, or vehicle."""
+    db_generator = app.dependency_overrides[get_db]()
+    db = next(db_generator)
+    try:
+        driver = db.get(Driver, 1)
+        driver_user = db.get(User, 5)
+        vehicle = db.get(Vehicle, 1)
+
+        if driver is None or driver_user is None or vehicle is None:
+            raise AssertionError("Expected dispatch test fixtures were not found.")
+
+        if "verification_status" in changes:
+            driver.verification_status = changes["verification_status"]
+        if "is_online" in changes:
+            driver.is_online = changes["is_online"]
+        if "account_active" in changes:
+            driver_user.is_active = changes["account_active"]
+        if "vehicle_approved" in changes:
+            vehicle.is_approved = changes["vehicle_approved"]
+        if "vehicle_type" in changes:
+            vehicle.vehicle_type = changes["vehicle_type"]
+        if "vehicle_capacity" in changes:
+            vehicle.capacity = changes["vehicle_capacity"]
+
+        db.commit()
+    finally:
+        db_generator.close()
+
+
+def _assert_booking_remains_unassigned(client, request_id):
+    """Verify a rejected dispatch creates no Ride and leaves the request unchanged."""
+    db_generator = app.dependency_overrides[get_db]()
+    db = next(db_generator)
+    try:
+        ride_request = db.get(RideRequest, request_id)
+        assert ride_request is not None
+        assert ride_request.status == "requested"
+        assert db.query(Ride).filter_by(request_id=request_id).count() == 0
+    finally:
+        db_generator.close()
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_detail"),
+    [
+        (
+            {"verification_status": "pending"},
+            "Driver must be approved and online",
+        ),
+        (
+            {"is_online": False},
+            "Driver must be approved and online",
+        ),
+        (
+            {"account_active": False},
+            "Driver account is not active",
+        ),
+        (
+            {"vehicle_approved": False},
+            "Driver has no approved matching vehicle with sufficient capacity",
+        ),
+        (
+            {"vehicle_type": "motorcycle"},
+            "Driver has no approved matching vehicle with sufficient capacity",
+        ),
+        (
+            {"vehicle_capacity": 1},
+            "Driver has no approved matching vehicle with sufficient capacity",
+        ),
+    ],
+)
+def test_dispatch_rejects_ineligible_driver_or_vehicle(
+    client, mutation, expected_detail
+):
+    request_id = _create_test_booking(client)
+    _change_dispatch_fixture(client, **mutation)
+
+    response = client.post(
+        f"/api/v1/admin/ride-requests/{request_id}/assign",
+        json={"driver_id": 1},
+        headers=_login_as_super_admin(client),
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == expected_detail
+    _assert_booking_remains_unassigned(client, request_id)
+
+
+def _get_test_db_session():
+    session_generator = app.dependency_overrides[get_db]()
+    return next(session_generator), session_generator
+
+
+def test_driver_application_creates_pending_driver_and_unapproved_vehicle(
+    client, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        driver_applications_module, "PRIVATE_UPLOAD_DIR", tmp_path
+    )
+    photo_bytes = b"\x89PNG\r\n\x1a\nfake-test-image"
+
+    response = client.post(
+        "/api/v1/driver-applications",
+        data={
+            "full_name": "New Test Driver",
+            "phone": "08000000991",
+            "password": "New-Driver-Test-Password-1!",
+            "vehicle_type": "car",
+            "plate_number": "EKM-NEW-901",
+            "capacity": "4",
+        },
+        files={
+            "face_photo": ("face.png", photo_bytes, "image/png"),
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["status"] == "pending_review"
+
+    db, session_generator = _get_test_db_session()
+    try:
+        user = db.scalar(
+            select(User).where(User.phone == "08000000991")
+        )
+        assert user is not None
+        assert user.role == "driver"
+
+        driver = db.scalar(
+            select(Driver).where(Driver.user_id == user.id)
+        )
+        assert driver is not None
+        assert driver.verification_status == "pending"
+        assert driver.is_online is False
+        assert driver.photo_path is not None
+        assert driver.photo_path.startswith(str(tmp_path))
+        assert Path(driver.photo_path).is_file()
+
+        vehicle = db.scalar(
+            select(Vehicle).where(Vehicle.driver_id == driver.id)
+        )
+        assert vehicle is not None
+        assert vehicle.plate_number == "EKM-NEW-901"
+        assert vehicle.is_approved is False
+    finally:
+        session_generator.close()
+
+
+def test_driver_application_rejects_invalid_image_signature(
+    client, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        driver_applications_module, "PRIVATE_UPLOAD_DIR", tmp_path
+    )
+
+    response = client.post(
+        "/api/v1/driver-applications",
+        data={
+            "full_name": "Invalid Photo Driver",
+            "phone": "08000000992",
+            "password": "Invalid-Photo-Password-1!",
+            "vehicle_type": "car",
+            "plate_number": "EKM-NEW-902",
+            "capacity": "4",
+        },
+        files={
+            "face_photo": (
+                "face.png",
+                b"this is not a PNG image",
+                "image/png",
+            ),
+        },
+    )
+
+    assert response.status_code == 415, response.text
+
+    db, session_generator = _get_test_db_session()
+    try:
+        user = db.scalar(
+            select(User).where(User.phone == "08000000992")
+        )
+        assert user is None
+        assert list(tmp_path.iterdir()) == []
+    finally:
+        session_generator.close()
+
+
+def test_driver_application_rejects_registered_phone(
+    client, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        driver_applications_module, "PRIVATE_UPLOAD_DIR", tmp_path
+    )
+
+    response = client.post(
+        "/api/v1/driver-applications",
+        data={
+            "full_name": "Duplicate Phone Driver",
+            "phone": "08000000001",
+            "password": "Duplicate-Phone-Password-1!",
+            "vehicle_type": "car",
+            "plate_number": "EKM-NEW-903",
+            "capacity": "4",
+        },
+        files={
+            "face_photo": (
+                "face.png",
+                b"\x89PNG\r\n\x1a\nfake-test-image",
+                "image/png",
+            ),
+        },
+    )
+
+    assert response.status_code == 409, response.text
+    assert "already registered" in response.json()["detail"]
+    assert list(tmp_path.iterdir()) == []
+
+
+# --- Payment lifecycle tests ---
+
+from decimal import Decimal
+
+from sqlalchemy import select
+
+from app.database import Base, get_db
+from app.models import AuditLog, Payment, Ride, RideRequest
+
+
+def login(client, phone, password):
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"phone": phone, "password": password},
+    )
+    assert response.status_code == 200, response.text
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
+def create_assigned_ride(client):
+    passenger_headers = login(
+        client, "08000000001", "Passenger-Test-Password-1!"
+    )
+    response = client.post(
+        "/api/v1/ride-requests",
+        json={
+            "origin_zone_id": 1,
+            "destination_zone_id": 2,
+            "origin_text": "Central Market gate",
+            "destination_text": "North Estate entrance",
+            "vehicle_type": "standard",
+            "passenger_count": 2,
+        },
+        headers=passenger_headers,
+    )
+    assert response.status_code in (200, 201), response.text
+    request_id = response.json()["id"]
+
+    admin_headers = login(
+        client, "08000000004", "SuperAdmin-Test-Password-4!"
+    )
+    response = client.post(
+        f"/api/v1/admin/ride-requests/{request_id}/assign",
+        json={"driver_id": 1},
+        headers=admin_headers,
+    )
+    assert response.status_code in (200, 201), response.text
+    return passenger_headers, admin_headers, request_id
+
+
+def get_ride_id_from_request(client, request_id, passenger_headers):
+    response = client.get(
+        "/api/v1/ride-requests/my-rides",
+        headers=passenger_headers,
+    )
+    assert response.status_code == 200, response.text
+    item = next(r for r in response.json() if r["id"] == request_id)
+    # Payment endpoints require the assigned Ride.id, not RideRequest.id.
+    # The test resolves it from the test database through the fixture override.
+    override = client.app.dependency_overrides[get_db]
+    generator = override()
+    db = next(generator)
+    try:
+        ride = db.scalar(
+            select(Ride).where(Ride.request_id == request_id)
+        )
+        assert ride is not None
+        return ride.id
+    finally:
+        generator.close()
+
+
+def test_payment_initiation_is_idempotent_and_transfer_only(client):
+    passenger_headers, _, request_id = create_assigned_ride(client)
+    ride_id = get_ride_id_from_request(
+        client, request_id, passenger_headers
+    )
+    url = f"/api/v1/payments/rides/{ride_id}/initiate"
+
+    first = client.post(url, headers=passenger_headers)
+    second = client.post(url, headers=passenger_headers)
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert first.json()["id"] == second.json()["id"]
+    assert first.json()["method"] == "bank_transfer"
+    assert first.json()["currency"] == "NGN"
+    assert first.json()["status"] == "pending"
+
+
+def test_transfer_reference_does_not_confirm_payment(client):
+    passenger_headers, _, request_id = create_assigned_ride(client)
+    ride_id = get_ride_id_from_request(
+        client, request_id, passenger_headers
+    )
+    client.post(
+        f"/api/v1/payments/rides/{ride_id}/initiate",
+        headers=passenger_headers,
+    )
+
+    response = client.post(
+        f"/api/v1/payments/rides/{ride_id}/submit-transfer",
+        headers=passenger_headers,
+        json={"transfer_reference": "TEST-BANK-REF-001"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "awaiting_confirmation"
+    assert response.json()["transfer_reference"] == "TEST-BANK-REF-001"
+    assert response.json()["confirmed_at"] is None
+
+
+def test_another_passenger_cannot_initiate_or_view_payment(client):
+    passenger_headers, _, request_id = create_assigned_ride(client)
+    ride_id = get_ride_id_from_request(
+        client, request_id, passenger_headers
+    )
+    other_headers = login(
+        client, "08000000002", "Second-Test-Password-2!"
+    )
+
+    initiate = client.post(
+        f"/api/v1/payments/rides/{ride_id}/initiate",
+        headers=other_headers,
+    )
+    status = client.get(
+        f"/api/v1/payments/rides/{ride_id}",
+        headers=other_headers,
+    )
+
+    assert initiate.status_code == 404
+    assert status.status_code == 404
+
+
+def test_only_super_admin_can_reconcile_payment(client):
+    passenger_headers, admin_headers, request_id = create_assigned_ride(client)
+    ride_id = get_ride_id_from_request(
+        client, request_id, passenger_headers
+    )
+    client.post(
+        f"/api/v1/payments/rides/{ride_id}/initiate",
+        headers=passenger_headers,
+    )
+    client.post(
+        f"/api/v1/payments/rides/{ride_id}/submit-transfer",
+        headers=passenger_headers,
+        json={"transfer_reference": "TEST-BANK-REF-002"},
+    )
+
+    response = client.post(
+        "/api/v1/admin/payments/1/reconcile",
+        headers=passenger_headers,
+        json={
+            "decision": "confirm",
+            "reason": "Attempted passenger self-confirmation",
+        },
+    )
+    assert response.status_code in (401, 403)
+
+    # Use the actual payment ID, which is expected to be 1 in this isolated test.
+    admin_response = client.post(
+        "/api/v1/admin/payments/1/reconcile",
+        headers=admin_headers,
+        json={
+            "decision": "confirm",
+            "reason": "Test only: bank transfer independently verified",
+        },
+    )
+    assert admin_response.status_code == 200, admin_response.text
+    assert admin_response.json()["status"] == "confirmed"
+    assert admin_response.json()["confirmed_at"] is not None
+
+
+def get_assigned_ride_id(client, request_id):
+    override = client.app.dependency_overrides[get_db]
+    generator = override()
+    db = next(generator)
+    try:
+        ride = db.scalar(
+            select(Ride).where(Ride.request_id == request_id)
+        )
+        assert ride is not None
+        return ride.id
+    finally:
+        generator.close()
+
+
+def test_driver_can_progress_ride_and_timestamps_are_recorded(client):
+    passenger_headers, admin_headers, request_id = create_assigned_ride(client)
+    ride_id = get_assigned_ride_id(client, request_id)
+
+    initiate = client.post(
+        f"/api/v1/payments/rides/{ride_id}/initiate",
+        headers=passenger_headers,
+    )
+    assert initiate.status_code == 200, initiate.text
+    payment_id = initiate.json()["id"]
+
+    transfer = client.post(
+        f"/api/v1/payments/rides/{ride_id}/submit-transfer",
+        headers=passenger_headers,
+        json={"transfer_reference": "TEST-RIDE-START-001"},
+    )
+    assert transfer.status_code == 200, transfer.text
+    assert transfer.json()["status"] == "awaiting_confirmation"
+
+    reconcile = client.post(
+        f"/api/v1/admin/payments/{payment_id}/reconcile",
+        headers=admin_headers,
+        json={
+            "decision": "confirm",
+            "reason": "Test only: bank transfer independently verified",
+        },
+    )
+    assert reconcile.status_code == 200, reconcile.text
+    assert reconcile.json()["status"] == "confirmed"
+
+    driver_headers = login(
+        client, "08000000006", "Driver-Test-Password-5!"
+    )
+    url = f"/api/v1/driver/rides/{ride_id}/status"
+
+    response = client.patch(
+        url, json={"status": "driver_arriving"}, headers=driver_headers
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "driver_arriving"
+
+    response = client.patch(
+        url, json={"status": "in_progress"}, headers=driver_headers
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "in_progress"
+    assert response.json()["started_at"] is not None
+    assert response.json()["completed_at"] is None
+
+    response = client.patch(
+        url, json={"status": "completed"}, headers=driver_headers
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "completed"
+    assert response.json()["started_at"] is not None
+    assert response.json()["completed_at"] is not None
+
+
+def test_driver_cannot_skip_ride_status(client):
+    _, _, request_id = create_assigned_ride(client)
+    ride_id = get_assigned_ride_id(client, request_id)
+    driver_headers = login(
+        client, "08000000006", "Driver-Test-Password-5!"
+    )
+
+    response = client.patch(
+        f"/api/v1/driver/rides/{ride_id}/status",
+        json={"status": "completed"},
+        headers=driver_headers,
+    )
+
+    assert response.status_code == 409
+
+
+def test_passenger_cannot_update_driver_ride_status(client):
+    passenger_headers, _, request_id = create_assigned_ride(client)
+    ride_id = get_assigned_ride_id(client, request_id)
+
+    response = client.patch(
+        f"/api/v1/driver/rides/{ride_id}/status",
+        json={"status": "driver_arriving"},
+        headers=passenger_headers,
+    )
+
+    assert response.status_code == 403
+
+
+def test_driver_status_changes_are_audited(client):
+    _, _, request_id = create_assigned_ride(client)
+    ride_id = get_assigned_ride_id(client, request_id)
+    driver_headers = login(
+        client, "08000000006", "Driver-Test-Password-5!"
+    )
+
+    response = client.patch(
+        f"/api/v1/driver/rides/{ride_id}/status",
+        json={"status": "driver_arriving"},
+        headers=driver_headers,
+    )
+    assert response.status_code == 200, response.text
+
+    override = client.app.dependency_overrides[get_db]
+    generator = override()
+    db = next(generator)
+    try:
+        entries = db.scalars(
+            select(AuditLog).where(
+                AuditLog.entity_type == "ride",
+                AuditLog.entity_id == str(ride_id),
+                AuditLog.action == "ride.status_changed",
+            )
+        ).all()
+        assert len(entries) == 1
+        assert "assigned" in entries[0].details
+        assert "driver_arriving" in entries[0].details
+    finally:
+        generator.close()
+
+
+def test_driver_cannot_start_ride_without_confirmed_payment(client):
+    passenger_headers, _, request_id = create_assigned_ride(client)
+    ride_id = get_assigned_ride_id(client, request_id)
+
+    initiate = client.post(
+        f"/api/v1/payments/rides/{ride_id}/initiate",
+        headers=passenger_headers,
+    )
+    assert initiate.status_code == 200, initiate.text
+    assert initiate.json()["status"] == "pending"
+
+    driver_headers = login(
+        client, "08000000006", "Driver-Test-Password-5!"
+    )
+    url = f"/api/v1/driver/rides/{ride_id}/status"
+
+    arriving = client.patch(
+        url, json={"status": "driver_arriving"}, headers=driver_headers
+    )
+    assert arriving.status_code == 200, arriving.text
+
+    # Pending payment must not allow the trip to start.
+    blocked = client.patch(
+        url, json={"status": "in_progress"}, headers=driver_headers
+    )
+    assert blocked.status_code == 409, blocked.text
+    assert "payment" in blocked.json()["detail"].lower()
+
+    # A submitted transfer reference is not proof of payment.
+    transfer = client.post(
+        f"/api/v1/payments/rides/{ride_id}/submit-transfer",
+        headers=passenger_headers,
+        json={"transfer_reference": "TEST-UNVERIFIED-TRANSFER-002"},
+    )
+    assert transfer.status_code == 200, transfer.text
+    assert transfer.json()["status"] == "awaiting_confirmation"
+
+    blocked_again = client.patch(
+        url, json={"status": "in_progress"}, headers=driver_headers
+    )
+    assert blocked_again.status_code == 409, blocked_again.text
+    assert "payment" in blocked_again.json()["detail"].lower()
+
+# Ekimove SOS regression tests
+
+# Ekimove SOS regression tests
+
+def test_passenger_sos_creates_incident_and_admin_can_review(client):
+    passenger_headers, admin_headers, request_id = create_assigned_ride(client)
+    ride_id = get_assigned_ride_id(client, request_id)
+
+    response = client.post(
+        f"/api/v1/rides/{ride_id}/sos",
+        headers=passenger_headers,
+        json={"description": "I need immediate assistance during this trip."},
+    )
+
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["ride_id"] == ride_id
+    assert result["severity"] == "critical"
+    assert result["incident_status"] == "open"
+    assert result["ride_status"] == "incident_review"
+    assert "does not automatically contact emergency services" in result["message"].lower()
+
+    incident_id = result["incident_id"]
+
+    # The administrative incident queue must be accessible to a super-admin.
+    queue = client.get("/api/v1/admin/incidents", headers=admin_headers)
+    assert queue.status_code == 200, queue.text
+    assert str(incident_id) in queue.text
+
+    # An authorized super-admin can begin investigating the incident.
+    review = client.patch(
+        f"/api/v1/admin/incidents/{incident_id}",
+        headers=admin_headers,
+        json={
+            "status": "investigating",
+            "note": "SOS received; incident review initiated.",
+        },
+    )
+    assert review.status_code == 200, review.text
+
+
+def test_sos_for_nonexistent_ride_returns_404(client):
+    passenger_headers = {"Authorization": f"Bearer {login_as_passenger(client)}"}
+
+    response = client.post(
+        "/api/v1/rides/999999999/sos",
+        headers=passenger_headers,
+        json={"description": "I need assistance with this ride."},
+    )
+
+    assert response.status_code == 404, response.text
+
+
+@pytest.mark.parametrize(
+    ("method", "endpoint", "payload"),
+    [
+        ("get", "/api/v1/admin/incidents", None),
+        (
+            "patch",
+            "/api/v1/admin/incidents/999999999",
+            {"status": "investigating", "note": "Unauthorized access test."},
+        ),
+    ],
+)
+def test_incident_admin_endpoints_reject_unauthenticated_requests(
+    client, method, endpoint, payload
+):
+    response = (client.get(endpoint) if method == "get" else client.patch(endpoint, json=payload))
+    assert response.status_code == 401, response.text
+
+
+@pytest.mark.parametrize(
+    ("method", "endpoint", "payload"),
+    [
+        ("get", "/api/v1/admin/incidents", None),
+        (
+            "patch",
+            "/api/v1/admin/incidents/999999999",
+            {"status": "investigating", "note": "Unauthorized access test."},
+        ),
+    ],
+)
+def test_incident_admin_endpoints_reject_passengers(
+    client, method, endpoint, payload
+):
+    token = login_as_passenger(client)
+    headers = {"Authorization": f"Bearer {token}"}
+    response = (
+        client.get(endpoint, headers=headers)
+        if method == "get"
+        else client.patch(endpoint, headers=headers, json=payload)
+    )
+    assert response.status_code == 403, response.text

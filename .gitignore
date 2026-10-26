@@ -34,3 +34,9 @@ Thumbs.db
 # Timestamped local backups
 *.backup-*
 *.bak
+
+# Private driver application uploads
+.private_uploads/
+
+# Frontend starter backup files
+frontend/src/starter-backup/
