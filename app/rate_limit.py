@@ -6,6 +6,9 @@ from redis import Redis
 from redis.exceptions import RedisError
 
 from app.config import settings
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 CHECK_SCRIPT = """
@@ -116,6 +119,10 @@ def _run_script(script: str, ip_address: str, phone: str, *args: int) -> tuple[b
         )
         return bool(int(result[0])), max(0, int(result[1]))
     except RedisError as exc:
+        logger.error(
+            "Redis rate limiter failed: %s",
+            type(exc).__name__,
+        )
         raise RateLimitUnavailable from exc
     finally:
         if client is not None:
