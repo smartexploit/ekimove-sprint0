@@ -17,11 +17,27 @@ export default function DriverApplicationPage() {
     const form = new FormData(formElement)
 
     try {
-      const response = await fetch('/api/v1/driver-applications', {
-        method: 'POST',
-        body: form,
-      })
-      const data = await response.json().catch(() => ({}))
+      const apiBaseUrl = (
+        import.meta.env.VITE_API_BASE_URL ||
+        'https://ekimove-api.onrender.com'
+      ).replace(/\/+$/, '')
+
+      const response = await fetch(
+        `${apiBaseUrl}/api/v1/driver-applications`,
+        {
+          method: 'POST',
+          body: form,
+        },
+      )
+
+      const contentType = response.headers.get('content-type') || ''
+      if (!contentType.includes('application/json')) {
+        throw new Error(
+          'Unexpected response from EkiMove API. Please try again later.',
+        )
+      }
+
+      const data = await response.json()
       if (!response.ok) {
         throw new Error(
           typeof data.detail === 'string'
@@ -92,3 +108,5 @@ export default function DriverApplicationPage() {
     </AppPage>
   )
 }
+
+
