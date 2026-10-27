@@ -39,18 +39,6 @@ app = FastAPI(
 
 
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "https://ekimove.onrender.com",
-        "http://localhost:5173",
-        "http://localhost:5175",
-    ],
-    allow_credentials=False,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type"],
-)
-
 app.include_router(driver_applications_router)
 app.include_router(admin_driver_verification_router)
 app.include_router(payments_router)
@@ -1035,3 +1023,20 @@ def update_driver_ride_status(
         "started_at": ride.started_at,
         "completed_at": ride.completed_at,
     }
+
+# Apply CORS around the complete application, including application error responses.
+from starlette.middleware.cors import CORSMiddleware as OuterCORSMiddleware
+
+# Keep `app` as FastAPI for tests and dependency overrides.
+# Render serves `application`, which wraps the complete app in CORS.
+application = OuterCORSMiddleware(
+    app=app,
+    allow_origins=[
+        "https://ekimove.onrender.com",
+        "http://localhost:5173",
+        "http://localhost:5175",
+    ],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+)
