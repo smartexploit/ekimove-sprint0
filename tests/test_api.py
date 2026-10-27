@@ -914,8 +914,13 @@ def _get_test_db_session():
 def test_driver_application_creates_pending_driver_and_unapproved_vehicle(
     client, monkeypatch, tmp_path
 ):
+    test_photo_ref = (
+        "cloudinary:ekimove/driver-photos/test-image|png"
+    )
     monkeypatch.setattr(
-        driver_applications_module, "PRIVATE_UPLOAD_DIR", tmp_path
+        driver_applications_module,
+        "upload_driver_photo",
+        lambda _photo_bytes: test_photo_ref,
     )
     photo_bytes = b"\x89PNG\r\n\x1a\nfake-test-image"
 
@@ -951,9 +956,7 @@ def test_driver_application_creates_pending_driver_and_unapproved_vehicle(
         assert driver is not None
         assert driver.verification_status == "pending"
         assert driver.is_online is False
-        assert driver.photo_path is not None
-        assert driver.photo_path.startswith(str(tmp_path))
-        assert Path(driver.photo_path).is_file()
+        assert driver.photo_path == test_photo_ref
 
         vehicle = db.scalar(
             select(Vehicle).where(Vehicle.driver_id == driver.id)

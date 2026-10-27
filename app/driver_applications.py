@@ -1,5 +1,4 @@
-﻿import os
-import uuid
+import os
 from pathlib import Path
 
 from fastapi import Body, APIRouter, Depends, File, Form, HTTPException, UploadFile, status
@@ -11,6 +10,7 @@ from app.auth import hash_password
 from app.config import settings
 from app.database import get_db
 from app.models import Driver, User, Vehicle
+from app.photo_storage import PhotoStorageError, upload_driver_photo, delete_driver_photo
 
 router = APIRouter(tags=["driver applications"])
 
@@ -80,14 +80,10 @@ async def submit_driver_application(
     if not signature_check(photo_bytes):
         raise HTTPException(status_code=415, detail="Photo contents do not match the image type")
 
-    PRIVATE_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    photo_name = f"{uuid.uuid4().hex}{extension}"
-    photo_path = PRIVATE_UPLOAD_DIR / photo_name
+    photo_ref = None
 
     try:
-        # Exclusive creation prevents accidental overwrite.
-        with photo_path.open("xb") as photo_file:
-            photo_file.write(photo_bytes)
+        photo_ref = upload_driver_photo(photo_bytes)
 
         user = User(
             phone=phone,
@@ -103,7 +99,7 @@ async def submit_driver_application(
             user_id=user.id,
             verification_status="pending",
             is_online=False,
-            photo_path=str(photo_path),
+            photo_path=photo_ref,
         )
         db.add(driver)
         db.flush()
@@ -124,14 +120,14 @@ async def submit_driver_application(
 
     except IntegrityError:
         db.rollback()
-        photo_path.unlink(missing_ok=True)
+        delete_driver_photo(photo_ref)
         raise HTTPException(
             status_code=409,
             detail="Phone number or vehicle plate number is already registered",
         ) from None
-    except (SQLAlchemyError, OSError):
+    except (SQLAlchemyError, OSError, PhotoStorageError):
         db.rollback()
-        photo_path.unlink(missing_ok=True)
+        delete_driver_photo(photo_ref)
         raise HTTPException(
             status_code=503,
             detail="Unable to submit the application. Please try again later.",

@@ -1,8 +1,8 @@
-﻿
+
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -11,6 +11,7 @@ from app.auth import require_super_admin
 from app.database import get_db
 from app.driver_applications import PRIVATE_UPLOAD_DIR
 from app.models import Driver, User, Vehicle
+from app.photo_storage import PHOTO_PREFIX, download_driver_photo
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin driver verification"])
 
@@ -77,6 +78,25 @@ def driver_application_photo(
     if driver is None or not driver.photo_path:
         raise HTTPException(status_code=404, detail="Driver photo not found")
 
+    if driver.photo_path.startswith(PHOTO_PREFIX):
+        try:
+            photo_bytes, content_type = download_driver_photo(driver.photo_path)
+        except FileNotFoundError:
+            raise HTTPException(
+                status_code=404, detail="Driver photo not found"
+            ) from None
+        except Exception:
+            raise HTTPException(
+                status_code=502, detail="Unable to retrieve driver photo"
+            ) from None
+
+        return Response(
+            content=photo_bytes,
+            media_type=content_type,
+            headers={"Cache-Control": "private, no-store"},
+        )
+
+    # Backward compatibility for photos saved before Cloudinary was enabled.
     photo_path = Path(driver.photo_path).resolve()
     upload_root = PRIVATE_UPLOAD_DIR.resolve()
 
@@ -86,7 +106,10 @@ def driver_application_photo(
     ):
         raise HTTPException(status_code=404, detail="Driver photo not found")
 
-    return FileResponse(photo_path)
+    return FileResponse(
+        photo_path,
+        headers={"Cache-Control": "private, no-store"},
+    )
 
 
 @router.post("/driver-applications/{driver_id}/decision")

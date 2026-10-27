@@ -10,3 +10,5 @@ pwdlib[argon2]>=0.2,<1.0
 PyJWT>=2.8,<3.0
 redis>=5,<7
 python-multipart>=0.0.20,<1.0
+cloudinary>=1.44,<2.0
+requests>=2.31,<3.0
