@@ -1,4 +1,3 @@
-
 import { useCallback, useEffect, useState } from 'react'
 import AppPage from '../../layouts/AppPage.jsx'
 import { apiRequest, getAccessToken } from '../../services/authService.js'
@@ -66,8 +65,13 @@ export default function AdminDriverVerificationPage() {
       const token = getAccessToken()
       if (!token) throw new Error('Your session has expired. Please sign in again.')
 
+      const apiBaseUrl = (
+        import.meta.env.VITE_API_BASE_URL ||
+        'https://ekimove-api.onrender.com'
+      ).replace(/\/+$/, '')
+
       const response = await fetch(
-        `/api/v1/admin/driver-applications/${driverId}/photo`,
+        `${apiBaseUrl}/api/v1/admin/driver-applications/${driverId}/photo`,
         { headers: { Authorization: `Bearer ${token}` } },
       )
 
@@ -75,8 +79,15 @@ export default function AdminDriverVerificationPage() {
         throw new Error(
           response.status === 401 || response.status === 403
             ? 'Admin access is required to view this photo.'
-            : 'Unable to load this driver photo.',
+            : response.status === 404
+              ? 'Photo not found on the API server. The uploaded file may be missing.'
+              : 'Unable to load this driver photo.',
         )
+      }
+
+      const contentType = response.headers.get('content-type') || ''
+      if (!contentType.startsWith('image/')) {
+        throw new Error('The API did not return an image. Check the photo endpoint.')
       }
 
       const blob = await response.blob()
@@ -169,13 +180,13 @@ export default function AdminDriverVerificationPage() {
           ))}
         </div>
         <button type="button" onClick={loadApplications} disabled={loading || Boolean(busy)}>
-          {loading ? 'Loading…' : 'Refresh applications'}
+          {loading ? 'Loading...' : 'Refresh applications'}
         </button>
 
         {error && <p role="alert">{error}</p>}
         {message && <p role="status">{message}</p>}
 
-        {loading && <p>Loading pending applications…</p>}
+        {loading && <p>Loading pending applications...</p>}
         {!loading && !error && applications.length === 0 && (
           <p>No {selectedStatus === 'all' ? '' : selectedStatus + ' '}driver applications found.</p>
         )}
@@ -200,7 +211,7 @@ export default function AdminDriverVerificationPage() {
               disabled={Boolean(busy) || !application.photo_available}
               onClick={() => viewPhoto(application.driver_id)}
             >
-              {busy === `photo-${application.driver_id}` ? 'Loading photo…' : 'View private face photo'}
+              {busy === `photo-${application.driver_id}` ? 'Loading photo...' : 'View private face photo'}
             </button>
 
             {photoDriverId === application.driver_id && photoUrl && (
