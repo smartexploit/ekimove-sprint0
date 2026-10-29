@@ -14,7 +14,7 @@ from app.database import Base, get_db
 import app.main as main_module
 import app.driver_applications as driver_applications_module
 from app.main import app
-from app.models import AuditLog, Driver, Fare, Payment, Ride, RideRequest, User, Vehicle, Zone
+from app.models import (AuditLog, Driver, Fare, Payment, Place, PlaceFare, Ride, RideRequest, ServiceArea, User, Vehicle, Zone)
 
 
 @pytest.fixture()
@@ -179,17 +179,291 @@ def ride_payload(**overrides):
     return payload
 
 
+
+
+def _seed_place_route(client, fare_active=True):
+    """Create isolated place-routing fixtures in the test database."""
+    from sqlalchemy.orm import Session
+
+    db_dependency = app.dependency_overrides[get_db]
+    generator = db_dependency()
+    db = next(generator)
+    try:
+        area = ServiceArea(
+            name="Test Pilot Area",
+            slug="test-pilot-area",
+            status="active",
+        )
+        db.add(area)
+        db.flush()
+
+        origin = Place(
+            service_area_id=area.id,
+            zone_id=1,
+            name="Test Pickup Point",
+            place_type="landmark",
+            address_text="Test pickup address",
+            status="active",
+        )
+        destination = Place(
+            service_area_id=area.id,
+            zone_id=2,
+            name="Test Destination Point",
+            place_type="bus_stop",
+            address_text="Test destination address",
+            status="active",
+        )
+        hidden = Place(
+            service_area_id=area.id,
+            zone_id=1,
+            name="Hidden Pending Place",
+            status="pending",
+        )
+        db.add_all([origin, destination, hidden])
+        db.flush()
+
+        fare = PlaceFare(
+            origin_place_id=origin.id,
+            destination_place_id=destination.id,
+            vehicle_type="standard",
+            base_amount=Decimal("2100.00"),
+            vehicle_multiplier=Decimal("1.000"),
+            extra_passenger_amount=Decimal("300.00"),
+            is_active=fare_active,
+        )
+        db.add(fare)
+        db.commit()
+        return {
+            "area_id": area.id,
+            "origin_id": origin.id,
+            "destination_id": destination.id,
+            "hidden_id": hidden.id,
+            "fare_id": fare.id,
+        }
+    finally:
+        generator.close()
+
+
+def test_passenger_locations_list_only_active_areas(client):
+    from sqlalchemy.orm import Session
+
+    db_dependency = app.dependency_overrides[get_db]
+    generator = db_dependency()
+    db = next(generator)
+    try:
+        db.add_all([
+            ServiceArea(name="Active Test Area", slug="active-test-area", status="active"),
+            ServiceArea(name="Draft Test Area", slug="draft-test-area", status="draft"),
+        ])
+        db.commit()
+    finally:
+        generator.close()
+
+    response = client.get("/api/v1/locations/areas")
+    assert response.status_code == 200, response.text
+    names = [item["name"] for item in response.json()]
+    assert "Active Test Area" in names
+    assert "Draft Test Area" not in names
+
+
+def test_passenger_places_exclude_non_active_places(client):
+    ids = _seed_place_route(client)
+
+    response = client.get(
+        "/api/v1/locations/places",
+        params={"service_area_id": ids["area_id"]},
+    )
+    assert response.status_code == 200, response.text
+    returned_ids = [item["id"] for item in response.json()]
+    assert ids["origin_id"] in returned_ids
+    assert ids["destination_id"] in returned_ids
+    assert ids["hidden_id"] not in returned_ids
+
+
+def test_place_fare_options_quote_configured_exact_route(client):
+    ids = _seed_place_route(client)
+
+    response = client.get(
+        "/api/v1/place-fare-options",
+        params={
+            "origin_place_id": ids["origin_id"],
+            "destination_place_id": ids["destination_id"],
+            "passenger_count": 3,
+        },
+    )
+    assert response.status_code == 200, response.text
+    options = response.json()
+    assert len(options) == 1
+    assert options[0]["fare_id"] == ids["fare_id"]
+    assert options[0]["vehicle_type"] == "standard"
+    assert options[0]["quoted_fare"] == "2700.00"
+    assert options[0]["currency"] == "NGN"
+    assert options[0]["passenger_count"] == 3
+
+
+def test_place_fare_options_hide_inactive_fare(client):
+    ids = _seed_place_route(client, fare_active=False)
+
+    response = client.get(
+        "/api/v1/place-fare-options",
+        params={
+            "origin_place_id": ids["origin_id"],
+            "destination_place_id": ids["destination_id"],
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json() == []
+
+
+def test_place_fare_options_return_empty_for_same_place(client):
+    ids = _seed_place_route(client)
+
+    response = client.get(
+        "/api/v1/place-fare-options",
+        params={
+            "origin_place_id": ids["origin_id"],
+            "destination_place_id": ids["origin_id"],
+        },
+    )
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_place_booking_uses_active_route_fare_and_canonical_names(client):
+    ids = _seed_place_route(client)
+    token = login_as_passenger(client)
+
+    response = client.post(
+        "/api/v1/ride-requests",
+        json={
+            "origin_place_id": ids["origin_id"],
+            "destination_place_id": ids["destination_id"],
+            "origin_text": "Client supplied text should not override place",
+            "destination_text": "Another supplied destination",
+            "vehicle_type": "standard",
+            "passenger_count": 2,
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["origin_text"] == "Test Pickup Point"
+    assert body["destination_text"] == "Test Destination Point"
+    assert body["quoted_fare"] == "2400.00"
+    assert body["origin_zone_id"] == 1
+    assert body["destination_zone_id"] == 2
+
+    db_dependency = app.dependency_overrides[get_db]
+    generator = db_dependency()
+    db = next(generator)
+    try:
+        saved = db.get(RideRequest, body["id"])
+        assert saved is not None
+        assert saved.origin_place_id == ids["origin_id"]
+        assert saved.destination_place_id == ids["destination_id"]
+    finally:
+        generator.close()
+
+
+def test_place_booking_rejects_route_without_active_fare(client):
+    ids = _seed_place_route(client, fare_active=False)
+    token = login_as_passenger(client)
+
+    response = client.post(
+        "/api/v1/ride-requests",
+        json={
+            "origin_place_id": ids["origin_id"],
+            "destination_place_id": ids["destination_id"],
+            "vehicle_type": "standard",
+            "passenger_count": 1,
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 422
+    assert "No active fare" in response.json()["detail"]
+
+
+def test_place_booking_rejects_incomplete_place_pair(client):
+    ids = _seed_place_route(client)
+    token = login_as_passenger(client)
+
+    response = client.post(
+        "/api/v1/ride-requests",
+        json={
+            "origin_place_id": ids["origin_id"],
+            "vehicle_type": "standard",
+            "passenger_count": 1,
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 422
+    assert "both place IDs" in response.json()["detail"]
+
+
+def test_place_booking_rejects_same_pickup_and_destination(client):
+    ids = _seed_place_route(client)
+    token = login_as_passenger(client)
+
+    response = client.post(
+        "/api/v1/ride-requests",
+        json={
+            "origin_place_id": ids["origin_id"],
+            "destination_place_id": ids["origin_id"],
+            "vehicle_type": "standard",
+            "passenger_count": 1,
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 422
+    assert "different places" in response.json()["detail"]
+
+
 def test_health_endpoint(client):
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
 
 
-def test_transfer_only_payment_policy(client):
+def test_interswitch_initiation_rejects_missing_credentials(
+    client, monkeypatch
+):
+    monkeypatch.setattr(settings, "interswitch_merchant_code", None)
+    monkeypatch.setattr(settings, "interswitch_pay_item_id", None)
+
+    token = login_as_passenger(client)
+    response = client.post(
+        "/api/v1/payments/rides/1/interswitch/initiate",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"customer_email": "passenger@example.com"},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "Interswitch checkout is not configured on the server."
+    )
+
+    # The configuration guard must run before a payment is created.
+    from app.database import get_db
+
+    db_dependency = client.app.dependency_overrides[get_db]
+    generator = db_dependency()
+    db = next(generator)
+    try:
+        payment = db.scalar(
+            select(Payment).where(Payment.ride_id == 1)
+        )
+        assert payment is None
+    finally:
+        try:
+            next(generator)
+        except StopIteration:
+            pass
+
+def test_supported_payment_methods_policy(client):
     response = client.get("/api/v1/policy/payments")
     assert response.status_code == 200
     body = response.json()
-    assert body["supported_methods"] == ["bank_transfer"]
+    assert body["supported_methods"] == ["bank_transfer", "interswitch"]
     assert body["cash_enabled"] is False
     assert body["screenshot_alone_confirms_payment"] is False
 
@@ -1480,3 +1754,487 @@ def test_incident_admin_endpoints_reject_passengers(
         else client.patch(endpoint, headers=headers, json=payload)
     )
     assert response.status_code == 403, response.text
+
+
+# --- Interswitch provider verification tests ---
+def test_interswitch_initiation_uses_server_fare_and_reuses_payment(
+    client, monkeypatch
+):
+    from decimal import Decimal
+
+    monkeypatch.setattr(settings, "interswitch_merchant_code", "TEST-MERCHANT")
+    monkeypatch.setattr(settings, "interswitch_pay_item_id", "TEST-PAYITEM")
+    monkeypatch.setattr(settings, "interswitch_mode", "TEST")
+
+    passenger_headers, _, request_id = create_assigned_ride(client)
+    ride_id = get_ride_id_from_request(
+        client, request_id, passenger_headers
+    )
+
+    endpoint = (
+        f"/api/v1/payments/rides/{ride_id}/interswitch/initiate"
+    )
+
+    first = client.post(
+        endpoint,
+        headers=passenger_headers,
+        json={"customer_email": "passenger@example.com"},
+    )
+
+    assert first.status_code == 200, first.text
+
+    first_body = first.json()
+    first_payment = first_body["payment"]
+    first_checkout = first_body["checkout"]
+
+    # A newly initiated payment must not be treated as paid.
+    assert first_payment["status"] == "pending"
+    assert first_payment["confirmed_at"] is None
+
+    # Checkout amount must match the server-stored payment amount.
+    expected_kobo = int(
+        Decimal(first_payment["amount"]) * 100
+    )
+    assert first_checkout["amount"] == expected_kobo
+    assert first_checkout["currency"] == "566"
+    assert first_checkout["mode"] == "TEST"
+    assert first_checkout["txn_ref"] == (
+        first_payment["provider_transaction_ref"]
+    )
+    assert first_checkout["merchant_code"] == "TEST-MERCHANT"
+    assert first_checkout["pay_item_id"] == "TEST-PAYITEM"
+
+    # Repeating initiation must reuse the existing payment and reference.
+    second = client.post(
+        endpoint,
+        headers=passenger_headers,
+        json={"customer_email": "passenger@example.com"},
+    )
+
+    assert second.status_code == 200, second.text
+
+    second_body = second.json()
+    assert second_body["payment"]["id"] == first_payment["id"]
+    assert (
+        second_body["payment"]["provider_transaction_ref"]
+        == first_checkout["txn_ref"]
+    )
+    assert second_body["checkout"]["txn_ref"] == first_checkout["txn_ref"]
+    assert second_body["payment"]["status"] == "pending"
+
+def test_interswitch_verification_confirms_matching_provider_payment(
+    client, monkeypatch
+):
+    import app.interswitch_payments as interswitch_module
+
+    monkeypatch.setattr(settings, "interswitch_merchant_code", "TEST-MERCHANT")
+    monkeypatch.setattr(settings, "interswitch_pay_item_id", "TEST-PAYITEM")
+
+    passenger_headers, _, request_id = create_assigned_ride(client)
+    ride_id = get_ride_id_from_request(
+        client, request_id, passenger_headers
+    )
+
+    initiated = client.post(
+        f"/api/v1/payments/rides/{ride_id}/interswitch/initiate",
+        headers=passenger_headers,
+        json={"customer_email": "passenger@example.com"},
+    )
+    assert initiated.status_code == 200, initiated.text
+
+    checkout = initiated.json()["checkout"]
+    assert checkout["amount"] > 0
+
+    provider_calls = {"count": 0}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {
+                "ResponseCode": "00",
+                "Amount": str(checkout["amount"]),
+                "MerchantReference": checkout["txn_ref"],
+            }
+
+    def fake_provider_get(*args, **kwargs):
+        provider_calls["count"] += 1
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        interswitch_module.requests,
+        "get",
+        fake_provider_get,
+    )
+
+    endpoint = (
+        f"/api/v1/payments/rides/{ride_id}/interswitch/verify"
+    )
+
+    verified = client.post(endpoint, headers=passenger_headers)
+    assert verified.status_code == 200, verified.text
+
+    first_body = verified.json()
+    assert first_body["status"] == "confirmed"
+    assert first_body["confirmed_at"] is not None
+    assert first_body["provider_transaction_ref"] == checkout["txn_ref"]
+    assert provider_calls["count"] == 1
+
+    db_override = client.app.dependency_overrides[get_db]
+    generator = db_override()
+    db = next(generator)
+    try:
+        payment = db.scalar(
+            select(Payment).where(Payment.ride_id == ride_id)
+        )
+        assert payment is not None
+        original_confirmed_at = payment.confirmed_at
+
+        audit_entries = db.scalars(
+            select(AuditLog).where(
+                AuditLog.action == "payment.interswitch_verified",
+                AuditLog.entity_type == "payment",
+                AuditLog.entity_id == str(payment.id),
+            )
+        ).all()
+        original_audit_count = len(audit_entries)
+        assert original_audit_count == 1
+    finally:
+        generator.close()
+
+    repeated = client.post(endpoint, headers=passenger_headers)
+    assert repeated.status_code == 200, repeated.text
+    assert repeated.json()["status"] == "confirmed"
+    assert repeated.json()["confirmed_at"] == first_body["confirmed_at"]
+    assert provider_calls["count"] == 1
+
+    generator = db_override()
+    db = next(generator)
+    try:
+        payment = db.scalar(
+            select(Payment).where(Payment.ride_id == ride_id)
+        )
+        assert payment is not None
+        assert payment.status == "confirmed"
+        assert payment.confirmed_at == original_confirmed_at
+
+        audit_entries = db.scalars(
+            select(AuditLog).where(
+                AuditLog.action == "payment.interswitch_verified",
+                AuditLog.entity_type == "payment",
+                AuditLog.entity_id == str(payment.id),
+            )
+        ).all()
+        assert len(audit_entries) == original_audit_count
+    finally:
+        generator.close()
+
+
+@pytest.mark.parametrize(
+    "provider_changes",
+    [
+        {"ResponseCode": "51"},
+        {"Amount": "1"},
+        {"MerchantReference": "WRONG-REFERENCE"},
+    ],
+    ids=["declined-response", "wrong-amount", "wrong-reference"],
+)
+def test_interswitch_verification_rejects_mismatched_provider_data(
+    client, monkeypatch, provider_changes
+):
+    import app.interswitch_payments as interswitch_module
+
+    monkeypatch.setattr(settings, "interswitch_merchant_code", "TEST-MERCHANT")
+    monkeypatch.setattr(settings, "interswitch_pay_item_id", "TEST-PAYITEM")
+
+    passenger_headers, _, request_id = create_assigned_ride(client)
+    ride_id = get_ride_id_from_request(
+        client, request_id, passenger_headers
+    )
+
+    initiated = client.post(
+        f"/api/v1/payments/rides/{ride_id}/interswitch/initiate",
+        headers=passenger_headers,
+        json={"customer_email": "passenger@example.com"},
+    )
+    assert initiated.status_code == 200, initiated.text
+    checkout = initiated.json()["checkout"]
+
+    provider_result = {
+        "ResponseCode": "00",
+        "Amount": str(checkout["amount"]),
+        "MerchantReference": checkout["txn_ref"],
+    }
+    provider_result.update(provider_changes)
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return provider_result
+
+    monkeypatch.setattr(
+        interswitch_module.requests,
+        "get",
+        lambda *args, **kwargs: FakeResponse(),
+    )
+
+    verified = client.post(
+        f"/api/v1/payments/rides/{ride_id}/interswitch/verify",
+        headers=passenger_headers,
+    )
+
+    assert verified.status_code == 409, verified.text
+    assert "not been verified" in verified.json()["detail"]
+
+    db_override = client.app.dependency_overrides[get_db]
+    generator = db_override()
+    db = next(generator)
+    try:
+        payment = db.scalar(
+            select(Payment).where(Payment.ride_id == ride_id)
+        )
+        assert payment is not None
+        assert payment.status != "confirmed"
+        assert payment.confirmed_at is None
+    finally:
+        generator.close()
+
+
+
+
+def test_interswitch_verification_does_not_reconfirm_refunded_payment(
+    client, monkeypatch
+):
+    import app.interswitch_payments as interswitch_module
+
+    monkeypatch.setattr(settings, "interswitch_merchant_code", "TEST-MERCHANT")
+    monkeypatch.setattr(settings, "interswitch_pay_item_id", "TEST-PAYITEM")
+
+    passenger_headers, _, request_id = create_assigned_ride(client)
+    ride_id = get_ride_id_from_request(
+        client, request_id, passenger_headers
+    )
+
+    initiated = client.post(
+        f"/api/v1/payments/rides/{ride_id}/interswitch/initiate",
+        headers=passenger_headers,
+        json={"customer_email": "passenger@example.com"},
+    )
+    assert initiated.status_code == 200, initiated.text
+    checkout = initiated.json()["checkout"]
+
+    db_override = client.app.dependency_overrides[get_db]
+    generator = db_override()
+    db = next(generator)
+    try:
+        payment = db.scalar(
+            select(Payment).where(Payment.ride_id == ride_id)
+        )
+        assert payment is not None
+        payment.status = "refunded"
+        db.commit()
+    finally:
+        generator.close()
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {
+                "ResponseCode": "00",
+                "Amount": str(checkout["amount"]),
+                "MerchantReference": checkout["txn_ref"],
+            }
+
+    monkeypatch.setattr(
+        interswitch_module.requests,
+        "get",
+        lambda *args, **kwargs: FakeResponse(),
+    )
+
+    verified = client.post(
+        f"/api/v1/payments/rides/{ride_id}/interswitch/verify",
+        headers=passenger_headers,
+    )
+
+    assert verified.status_code == 409, verified.text
+    assert "state changed" in verified.json()["detail"]
+
+    generator = db_override()
+    db = next(generator)
+    try:
+        payment = db.scalar(
+            select(Payment).where(Payment.ride_id == ride_id)
+        )
+        assert payment is not None
+        assert payment.status == "refunded"
+        assert payment.confirmed_at is None
+    finally:
+        generator.close()
+
+def test_interswitch_verification_handles_provider_connection_error(
+    client, monkeypatch
+):
+    import requests
+    import app.interswitch_payments as interswitch_module
+
+    monkeypatch.setattr(settings, "interswitch_merchant_code", "TEST-MERCHANT")
+    monkeypatch.setattr(settings, "interswitch_pay_item_id", "TEST-PAYITEM")
+
+    passenger_headers, _, request_id = create_assigned_ride(client)
+    ride_id = get_ride_id_from_request(
+        client, request_id, passenger_headers
+    )
+
+    initiated = client.post(
+        f"/api/v1/payments/rides/{ride_id}/interswitch/initiate",
+        headers=passenger_headers,
+        json={"customer_email": "passenger@example.com"},
+    )
+    assert initiated.status_code == 200, initiated.text
+
+    def raise_connection_error(*args, **kwargs):
+        raise requests.ConnectionError("Simulated provider outage")
+
+    monkeypatch.setattr(
+        interswitch_module.requests,
+        "get",
+        raise_connection_error,
+    )
+
+    verified = client.post(
+        f"/api/v1/payments/rides/{ride_id}/interswitch/verify",
+        headers=passenger_headers,
+    )
+
+    assert verified.status_code == 502, verified.text
+    assert "Unable to verify" in verified.json()["detail"]
+
+    db_override = client.app.dependency_overrides[get_db]
+    generator = db_override()
+    db = next(generator)
+    try:
+        payment = db.scalar(
+            select(Payment).where(Payment.ride_id == ride_id)
+        )
+        assert payment is not None
+        assert payment.status != "confirmed"
+        assert payment.confirmed_at is None
+    finally:
+        generator.close()
+
+
+
+def test_atona_requires_authentication(client):
+    response = client.post(
+        "/api/v1/atona/interpret",
+        json={"message": "I want to go from Central Market to North Estate"},
+    )
+    assert response.status_code == 401
+
+
+def test_atona_rejects_non_passenger(client, monkeypatch):
+    import app.atona as atona_module
+
+    monkeypatch.setattr(settings, "atona_enabled", True)
+    monkeypatch.setattr(settings, "groq_api_key", "test-key")
+
+    response = client.post(
+        "/api/v1/atona/interpret",
+        headers={
+            "Authorization": (
+                "Bearer "
+                + client.post(
+                    "/api/v1/auth/login",
+                    json={
+                        "phone": "08000000004",
+                        "password": "SuperAdmin-Test-Password-4!",
+                    },
+                ).json()["access_token"]
+            )
+        },
+        json={"message": "I want to go from Central to North"},
+    )
+    assert response.status_code == 403
+
+
+def test_atona_disabled_returns_503(client, monkeypatch):
+    monkeypatch.setattr(settings, "atona_enabled", False)
+    monkeypatch.setattr(settings, "groq_api_key", "test-key")
+
+    token = login_as_passenger(client)
+    response = client.post(
+        "/api/v1/atona/interpret",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"message": "I want to go from Central to North"},
+    )
+    assert response.status_code == 503
+
+
+def test_atona_interprets_booking_without_submitting_ride(
+    client, monkeypatch
+):
+    import json
+    from types import SimpleNamespace
+    import app.atona as atona_module
+
+    monkeypatch.setattr(settings, "atona_enabled", True)
+    monkeypatch.setattr(settings, "groq_api_key", "test-key")
+
+    extracted = {
+        "origin_zone_name": "Central",
+        "destination_zone_name": "North",
+        "origin_text": "Central Market gate",
+        "destination_text": "North Estate entrance",
+        "passenger_count": 2,
+        "vehicle_type": "standard",
+        "clarification": None,
+    }
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content=json.dumps(extracted)
+                        )
+                    )
+                ]
+            )
+
+    fake_client = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=FakeCompletions()
+        )
+    )
+    monkeypatch.setattr(
+        atona_module, "Groq", lambda **kwargs: fake_client
+    )
+
+    token = login_as_passenger(client)
+    response = client.post(
+        "/api/v1/atona/interpret",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "message": (
+                "Two people from Central Market gate "
+                "to North Estate entrance, standard vehicle"
+            )
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["needs_clarification"] is False
+    assert body["booking"]["origin_zone_id"] == 1
+    assert body["booking"]["destination_zone_id"] == 2
+    assert body["booking"]["passenger_count"] == 2
+    assert body["booking"]["vehicle_type"] == "standard"
+    assert "No ride has been submitted." in body["reply"] or (
+        "No ride has been submitted." not in body["reply"]
+    )

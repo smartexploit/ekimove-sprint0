@@ -1,5 +1,7 @@
-﻿import { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import '../../App.css'
+import '../../prototype-home-scoped.css'
+import AtonaFloatingAssistant from '../../components/AtonaFloatingAssistant.jsx'
 
 const API_BASE = '/api/v1'
 
@@ -110,14 +112,52 @@ function App() {
         is_active: true,
       }))
 
+  function applyAtonaBooking(booking) {
+    const validOrigin = zones.find(
+      (zone) => zone.is_active !== false &&
+        String(zone.id) === String(booking.origin_zone_id),
+    )
+    const validDestination = zones.find(
+      (zone) => zone.is_active !== false &&
+        String(zone.id) === String(booking.destination_zone_id),
+    )
+
+    if (!validOrigin || !validDestination) {
+      setNotice('At??n? could not match this trip to active service zones. Please try again when live zones are available.')
+      return
+    }
+
+    if (String(validOrigin.id) === String(validDestination.id)) {
+      setNotice('Choose two different zones for this trip.')
+      return
+    }
+
+    const count = Number(booking.passenger_count || 1)
+    if (!Number.isInteger(count) || count < 1 || count > 6) {
+      setNotice('Please review the passenger count in the booking form.')
+      return
+    }
+
+    setOriginZone(String(validOrigin.id))
+    setDestinationZone(String(validDestination.id))
+    setPickup(booking.origin_text || '')
+    setDestination(booking.destination_text || '')
+    setPassengers(count)
+    if (booking.vehicle_type === 'motorcycle' || booking.vehicle_type === 'standard') {
+      setVehicle(booking.vehicle_type)
+    }
+    setNotice('At??n? prepared your trip details. Review them before continuing. No ride has been submitted.')
+    document.getElementById('book')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
   return (
-    <div className="site-shell">
+    <div className="prototype-home site-shell">
       <header className="topbar">
         <a className="brand" href="#home" aria-label="EkiMove home">
           <span className="brand-mark">E</span>
           <span>
             <strong>EkiMove</strong>
-            <small>Move around Ekiti</small>
+            <small>Anywhere in Ekiti</small>
           </span>
         </a>
 
@@ -136,15 +176,15 @@ function App() {
         <section className="hero">
           <div className="hero-copy">
             <div className="eyebrow"><span className="live-dot" /> BUILT FOR EKITI</div>
-            <h1>Your city.<br />Your journey.<br /><span>Your move.</span></h1>
+            <h1>Move smarter.<br />Move freely.<br /><span>Anywhere in Ekiti.</span></h1>
             <p className="hero-description">
-              A simpler way to plan your next ride around Ekiti.
+              A simpler way to plan your next journey, wherever you need to go across Ekiti State.
               Choose your route and get ready to move.
             </p>
             <a className="primary-button" href="#book">Plan your ride <span>→</span></a>
             <div className="hero-proof">
               <span className="proof-icon">⌖</span>
-              <span><strong>Local by design</strong><small>Starting with six pilot zones</small></span>
+              <span><strong>Local by design</strong><small>Service coverage depends on active zones</small></span>
             </div>
           </div>
 
@@ -277,6 +317,45 @@ function App() {
           </p>
         </section>
 
+        <section className="services-section" id="services">
+          <div className="services-heading">
+            <div>
+              <span className="eyebrow">OUR SERVICES</span>
+              <h2>Ride options for every need</h2>
+            </div>
+            <p>Find the ride that fits your journey. Availability depends on configured services and locations.</p>
+          </div>
+          <div className="service-card-grid">
+            <article className="service-card">
+              <div className="service-icon">🚘</div>
+              <h3>Standard Ride</h3>
+              <p>Comfortable, practical journeys for everyday travel.</p>
+              <span className="service-link">Explore ride options →</span>
+              <img src="https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&w=600&q=80" alt="Modern passenger car" loading="lazy" />
+            </article>
+            <article className="service-card">
+              <div className="service-icon">🚙</div>
+              <h3>SUV Ride</h3>
+              <p>More space for passengers and luggage.</p>
+              <span className="service-link">Availability to be confirmed</span>
+              <img src="https://images.unsplash.com/photo-1519641471654-76ce0107ad1b?auto=format&fit=crop&w=600&q=80" alt="SUV vehicle" loading="lazy" />
+            </article>
+            <article className="service-card">
+              <div className="service-icon">🏍️</div>
+              <h3>Bike Ride</h3>
+              <p>A motorcycle option for short journeys where supported.</p>
+              <span className="service-link">Motorcycle option</span>
+              <img src="https://images.unsplash.com/photo-1558981806-ec527fa84c39?auto=format&fit=crop&w=600&q=80" alt="Motorcycle" loading="lazy" />
+            </article>
+            <article className="service-card">
+              <div className="service-icon">🚐</div>
+              <h3>Van Ride</h3>
+              <p>Space for group journeys and larger loads.</p>
+              <span className="service-link">Availability to be confirmed</span>
+              <img src="https://images.unsplash.com/photo-1519003722824-194d4455a60c?auto=format&fit=crop&w=600&q=80" alt="Passenger van" loading="lazy" />
+            </article>
+          </div>
+        </section>
         <section className="how-section" id="how-it-works">
           <div className="eyebrow">STRAIGHTFORWARD BY DESIGN</div>
           <h2>A smoother way to move.</h2>
@@ -296,8 +375,14 @@ function App() {
             <article className="feature-card">
               <span className="feature-number">03</span>
               <div className="feature-icon">↗</div>
-              <h3>Get ready to go</h3>
-              <p>Booking and payment confirmation will follow verified service steps.</p>
+              <h3>Take your ride</h3>
+              <p>Follow the trip status available in your account.</p>
+            </article>
+            <article className="feature-card">
+              <span className="feature-number">04</span>
+              <div className="feature-icon">✓</div>
+              <h3>Arrive safely</h3>
+              <p>Complete your journey and review the trip details.</p>
             </article>
           </div>
         </section>
@@ -319,11 +404,12 @@ function App() {
       <footer className="footer">
         <a className="brand footer-brand" href="#home">
           <span className="brand-mark">E</span>
-          <span><strong>EkiMove</strong><small>Move around Ekiti</small></span>
+          <span><strong>EkiMove</strong><small>Anywhere in Ekiti</small></span>
         </a>
-        <p>Made for the way Ekiti moves.</p>
+        <p>Move smarter. Anywhere in Ekiti.</p>
         <span>© {new Date().getFullYear()} EkiMove</span>
       </footer>
+      <AtonaFloatingAssistant onApplyBooking={applyAtonaBooking} />
     </div>
   )
 }

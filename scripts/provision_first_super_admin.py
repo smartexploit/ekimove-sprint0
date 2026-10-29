@@ -19,11 +19,14 @@ def provision(phone: str, full_name: str, password: str, apply: bool) -> str:
             # Serialize concurrent first-admin provisioning attempts.
             db.execute(text("SELECT pg_advisory_xact_lock(721904281, 2)"))
 
-            user_count = db.scalar(select(func.count()).select_from(User))
-            if user_count != 0:
+            admin_count = db.scalar(
+                select(func.count())
+                .select_from(User)
+                .where(User.role == "super_admin")
+            )
+            if admin_count != 0:
                 raise RuntimeError(
-                    "Provisioning refused: users already exist. "
-                    "Use the existing-account recovery process instead."
+                    "Provisioning refused: a Super Admin already exists."
                 )
 
             duplicate = db.scalar(
@@ -32,7 +35,8 @@ def provision(phone: str, full_name: str, password: str, apply: bool) -> str:
             if duplicate is not None:
                 raise RuntimeError("Provisioning refused: phone already exists.")
 
-            print("Database user count: 0")
+            user_count = db.scalar(select(func.count()).select_from(User))
+            print(f"Database user count: {user_count}")
             print("Target role: super_admin")
 
             if not apply:
@@ -116,3 +120,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+

@@ -1,0 +1,311 @@
+﻿.atona-widget {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 1000;
+  font-family: inherit;
+}
+
+.atona-launcher {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 50px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: 999px;
+  background: #087f5b;
+  color: #fff;
+  box-shadow: 0 8px 28px rgb(0 0 0 / 20%);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.atona-launcher:hover {
+  background: #066b4c;
+}
+
+.atona-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(380px, calc(100vw - 32px));
+  max-height: min(620px, calc(100dvh - 110px));
+  margin-bottom: 12px;
+  overflow: hidden;
+  border: 1px solid #dce8e2;
+  border-radius: 18px;
+  background: #fff;
+  color: #172b23;
+  box-shadow: 0 16px 48px rgb(0 0 0 / 20%);
+}
+
+.atona-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px;
+  background: #087f5b;
+  color: #fff;
+}
+
+.atona-header strong,
+.atona-header span {
+  display: block;
+}
+
+.atona-header strong {
+  font-size: 1.05rem;
+}
+
+.atona-header span {
+  margin-top: 3px;
+  font-size: 0.78rem;
+  opacity: 0.9;
+}
+
+.atona-close {
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 15%);
+  color: #fff;
+  font-size: 1.5rem;
+  cursor: pointer;
+}
+
+.atona-messages {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 100px;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.atona-message {
+  max-width: 90%;
+  padding: 11px 13px;
+  border-radius: 13px;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.atona-message-assistant {
+  align-self: flex-start;
+  border: 1px solid #e0ebe5;
+  border-bottom-left-radius: 4px;
+  background: #f1f7f3;
+}
+
+.atona-message-user {
+  align-self: flex-end;
+  border-bottom-right-radius: 4px;
+  background: #087f5b;
+  color: #fff;
+}
+
+.atona-typing {
+  margin: 0;
+  color: #52685d;
+  font-size: 0.82rem;
+}
+
+.atona-booking-preview {
+  margin: 0 12px 12px;
+  padding: 13px;
+  border: 1px solid #b7dfca;
+  border-radius: 12px;
+  background: #f3faf5;
+  font-size: 0.87rem;
+}
+
+.atona-booking-preview p {
+  margin: 7px 0;
+  overflow-wrap: anywhere;
+}
+
+.atona-booking-preview button,
+.atona-compose button {
+  border: 0;
+  border-radius: 9px;
+  background: #087f5b;
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.atona-booking-preview button {
+  width: 100%;
+  margin-top: 8px;
+  padding: 11px;
+}
+
+.atona-compose {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  padding: 12px;
+  border-top: 1px solid #e5ece8;
+}
+
+.atona-compose textarea {
+  flex: 1;
+  min-width: 0;
+  resize: vertical;
+  padding: 10px;
+  border: 1px solid #cad8d0;
+  border-radius: 10px;
+  color: #172b23;
+  font: inherit;
+  font-size: 0.88rem;
+}
+
+.atona-compose button {
+  align-self: flex-end;
+  padding: 10px 13px;
+}
+
+.atona-compose button:disabled,
+.atona-launcher:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.atona-error {
+  margin: 0 12px 10px;
+  color: #b42318;
+  font-size: 0.85rem;
+}
+
+.atona-disclaimer {
+  margin: 0;
+  padding: 0 12px 12px;
+  color: #617168;
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.atona-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 480px) {
+  .atona-widget {
+    right: 12px;
+    bottom: 12px;
+  }
+
+  .atona-panel {
+    width: calc(100vw - 24px);
+    max-height: calc(100dvh - 90px);
+  }
+
+  .atona-launcher {
+    min-height: 46px;
+    padding: 0 16px;
+  }
+}
+
+/* Visibility enhancement: EkiMove Atọ́nà */
+.atona-widget {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 9999;
+}
+
+.atona-launcher {
+  min-height: 60px;
+  min-width: 172px;
+  padding: 14px 22px;
+  border: 2px solid #ffffff;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #087f5b 0%, #00a878 55%, #35c98a 100%);
+  color: #ffffff;
+  box-shadow: 0 8px 28px rgba(0, 90, 60, 0.38),
+              0 0 0 4px rgba(0, 168, 120, 0.16);
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  cursor: pointer;
+  animation: atona-attention 3s ease-in-out infinite;
+  transition: transform 180ms ease, box-shadow 180ms ease;
+}
+
+.atona-launcher:hover {
+  transform: translateY(-3px) scale(1.025);
+  box-shadow: 0 12px 32px rgba(0, 90, 60, 0.45),
+              0 0 0 5px rgba(0, 168, 120, 0.2);
+}
+
+.atona-launcher:focus-visible {
+  outline: 3px solid #102a43;
+  outline-offset: 4px;
+}
+
+.atona-launcher span:first-child {
+  font-size: 23px;
+  line-height: 1;
+}
+
+.atona-panel {
+  box-shadow: 0 18px 55px rgba(0, 30, 20, 0.28);
+  border: 1px solid rgba(0, 168, 120, 0.32);
+}
+
+@keyframes atona-attention {
+  0%, 100% {
+    box-shadow: 0 8px 28px rgba(0, 90, 60, 0.38),
+                0 0 0 4px rgba(0, 168, 120, 0.16);
+  }
+  50% {
+    box-shadow: 0 10px 32px rgba(0, 90, 60, 0.44),
+                0 0 0 8px rgba(0, 168, 120, 0.09);
+  }
+}
+
+@media (max-width: 600px) {
+  .atona-widget {
+    right: 14px;
+    bottom: 16px;
+  }
+
+  .atona-launcher {
+    min-height: 56px;
+    min-width: 156px;
+    padding: 12px 18px;
+    font-size: 15px;
+  }
+
+  .atona-panel {
+    width: min( calc(100vw - 28px), 380px);
+    max-height: min(70vh, 620px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .atona-launcher {
+    animation: none;
+    transition: none;
+  }
+}

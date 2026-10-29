@@ -18,3 +18,17 @@ export async function submitTransferReference(rideId, transferReference) {
 export async function getRidePayment(rideId) {
   return apiRequest(`/api/v1/payments/rides/${rideId}`)
 }
+
+
+export async function initiateInterswitchPayment(rideId, customerEmail) {
+  return apiRequest(`/api/v1/payments/rides/${rideId}/interswitch/initiate`, {
+    method: 'POST',
+    body: JSON.stringify({ customer_email: customerEmail.trim() }),
+  })
+}
+
+export async function verifyInterswitchPayment(rideId) {
+  return apiRequest(`/api/v1/payments/rides/${rideId}/interswitch/verify`, {
+    method: 'POST',
+  })
+}

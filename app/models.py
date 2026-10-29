@@ -1,4 +1,4 @@
-from datetime import datetime
+﻿from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, func
@@ -74,6 +74,13 @@ class RideRequest(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     passenger_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
+    origin_place_id: Mapped[int | None] = mapped_column(
+        ForeignKey("places.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    destination_place_id: Mapped[int | None] = mapped_column(
+        ForeignKey("places.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+
     origin_text: Mapped[str] = mapped_column(String(255))
     destination_text: Mapped[str] = mapped_column(String(255))
     vehicle_type: Mapped[str] = mapped_column(String(32))
@@ -99,7 +106,7 @@ class Ride(Base):
 class Payment(Base):
     __tablename__ = "payments"
     __table_args__ = (
-        CheckConstraint("method = 'bank_transfer'", name="ck_payments_bank_transfer_only"),
+        CheckConstraint("method IN ('bank_transfer', 'interswitch')", name="ck_payments_method"),
         CheckConstraint("status IN ('pending', 'awaiting_confirmation', 'confirmed', 'rejected', 'refunded')", name="ck_payments_status"),
         CheckConstraint("amount >= 0", name="ck_payments_amount_nonnegative"),
     )
@@ -109,6 +116,7 @@ class Payment(Base):
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     method: Mapped[str] = mapped_column(String(24), default="bank_transfer", nullable=False)
     transfer_reference: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    provider_transaction_ref: Mapped[str | None] = mapped_column(String(120), nullable=True, unique=True, index=True)
     status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False, index=True)
     confirmed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=True)
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -220,3 +228,67 @@ class Place(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class PlaceFare(Base):
+    """Manually configured fare for a specific place-to-place route."""
+
+    __tablename__ = "place_fares"
+    __table_args__ = (
+        CheckConstraint(
+            "origin_place_id <> destination_place_id",
+            name="ck_place_fares_distinct_places",
+        ),
+        CheckConstraint(
+            "base_amount >= 0",
+            name="ck_place_fares_base_amount_nonnegative",
+        ),
+        CheckConstraint(
+            "vehicle_multiplier > 0",
+            name="ck_place_fares_multiplier_positive",
+        ),
+        CheckConstraint(
+            "extra_passenger_amount >= 0",
+            name="ck_place_fares_extra_passenger_nonnegative",
+        ),
+        UniqueConstraint(
+            "origin_place_id",
+            "destination_place_id",
+            "vehicle_type",
+            name="uq_place_fares_route_vehicle",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    origin_place_id: Mapped[int] = mapped_column(
+        ForeignKey("places.id", ondelete="RESTRICT"),
+        index=True,
+        nullable=False,
+    )
+    destination_place_id: Mapped[int] = mapped_column(
+        ForeignKey("places.id", ondelete="RESTRICT"),
+        index=True,
+        nullable=False,
+    )
+    vehicle_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    base_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    vehicle_multiplier: Mapped[Decimal] = mapped_column(
+        Numeric(6, 3), default=Decimal("1.000"), nullable=False
+    )
+    extra_passenger_amount: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2), default=Decimal("0.00"), nullable=False
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+

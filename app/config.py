@@ -19,6 +19,19 @@ class Settings(BaseSettings):
     redis_password: str | None = None
     redis_ssl: bool = True
 
+    # Atọ́nà AI booking assistant
+    groq_api_key: str | None = None
+    groq_model: str = "llama-3.3-70b-versatile"
+    atona_enabled: bool = False
+    # Optional map and geocoding provider; disabled without a key.
+    geoapify_api_key: str | None = None
+
+    # Interswitch Web Checkout. TEST is the safe default.
+    interswitch_merchant_code: str | None = None
+    interswitch_pay_item_id: str | None = None
+    interswitch_mode: str = "TEST"
+    interswitch_requery_base_url: str = "https://sandbox.interswitchng.com/collections/api/v1/gettransaction.json"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -27,3 +40,4 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+

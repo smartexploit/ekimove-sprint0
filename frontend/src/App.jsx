@@ -13,7 +13,8 @@ import DriverTripsPage from './pages/driver/DriverTripsPage.jsx'
 import ProtectedRoute from './routes/ProtectedRoute.jsx'
 import AdminDriverVerificationPage from './pages/admin/AdminDriverVerificationPage.jsx'
 import AdminPaymentsPage from './pages/admin/AdminPaymentsPage.jsx'
-import AdminIncidentsPage from './pages/admin/AdminIncidentsPage.jsx'
+import AdminIncidentsPage from './pages/admin/AdminIncidentsPage.jsx'
+import AdminLocationsPage from './pages/admin/AdminLocationsPage.jsx'
 
 export default function App() {
   return (
@@ -34,6 +35,7 @@ export default function App() {
   <Route path="/admin/dispatch" element={<AdminDispatchPage />} />
   <Route path="/admin/payments" element={<AdminPaymentsPage />} />
   <Route path="/admin/incidents" element={<AdminIncidentsPage />} />
+        <Route path="/admin/locations" element={<AdminLocationsPage />} />
   <Route
     path="/admin/drivers"
     element={<AdminDriverVerificationPage />}
@@ -51,3 +53,4 @@ export default function App() {
     </Routes>
   )
 }
+

@@ -1,13 +1,15 @@
-﻿
-import { useEffect, useState } from 'react'
+﻿import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import AppPage from '../../layouts/AppPage.jsx'
 import { apiRequest } from '../../services/authService.js'
+import AtonaFloatingAssistant from '../../components/AtonaFloatingAssistant.jsx'
 
 export default function BookRidePage() {
-  const [zones, setZones] = useState([])
+  const [areas, setAreas] = useState([])
+  const [places, setPlaces] = useState([])
   const [fareOptions, setFareOptions] = useState([])
-  const [loadingZones, setLoadingZones] = useState(true)
+  const [loadingAreas, setLoadingAreas] = useState(true)
+  const [loadingPlaces, setLoadingPlaces] = useState(false)
   const [loadingFareOptions, setLoadingFareOptions] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
@@ -15,8 +17,9 @@ export default function BookRidePage() {
   const [submitting, setSubmitting] = useState(false)
 
   const [form, setForm] = useState({
-    origin_zone_id: '',
-    destination_zone_id: '',
+    service_area_id: '',
+    origin_place_id: '',
+    destination_place_id: '',
     origin_text: '',
     destination_text: '',
     vehicle_type: '',
@@ -26,48 +29,77 @@ export default function BookRidePage() {
   useEffect(() => {
     let active = true
 
-    apiRequest('/api/v1/zones')
+    apiRequest('/api/v1/locations/areas')
       .then((data) => {
-        if (active) setZones(data)
+        if (active) setAreas(data)
       })
       .catch((err) => {
         if (active) setError(err.message)
       })
       .finally(() => {
-        if (active) setLoadingZones(false)
+        if (active) setLoadingAreas(false)
       })
 
-    return () => {
-      active = false
-    }
+    return () => { active = false }
   }, [])
 
   useEffect(() => {
     let active = true
 
-    if (
-      !form.origin_zone_id ||
-      !form.destination_zone_id ||
-      form.origin_zone_id === form.destination_zone_id
-    ) {
-      return () => {
-        active = false
-      }
+    setPlaces([])
+    setFareOptions([])
+    setForm((current) => ({
+      ...current,
+      origin_place_id: '',
+      destination_place_id: '',
+      origin_text: '',
+      destination_text: '',
+      vehicle_type: '',
+    }))
+
+    if (!form.service_area_id) {
+      setLoadingPlaces(false)
+      return () => { active = false }
     }
 
+    setLoadingPlaces(true)
     apiRequest(
-      `/api/v1/fare-options?origin_zone_id=${encodeURIComponent(form.origin_zone_id)}&destination_zone_id=${encodeURIComponent(form.destination_zone_id)}`,
+      `/api/v1/locations/places?service_area_id=${encodeURIComponent(form.service_area_id)}`,
+    )
+      .then((data) => {
+        if (active) setPlaces(data)
+      })
+      .catch((err) => {
+        if (active) setError(err.message)
+      })
+      .finally(() => {
+        if (active) setLoadingPlaces(false)
+      })
+
+    return () => { active = false }
+  }, [form.service_area_id])
+
+  useEffect(() => {
+    let active = true
+
+    setFareOptions([])
+    setForm((current) => ({ ...current, vehicle_type: '' }))
+
+    if (
+      !form.origin_place_id ||
+      !form.destination_place_id ||
+      form.origin_place_id === form.destination_place_id
+    ) {
+      setLoadingFareOptions(false)
+      return () => { active = false }
+    }
+
+    setLoadingFareOptions(true)
+    apiRequest(
+      `/api/v1/place-fare-options?origin_place_id=${encodeURIComponent(form.origin_place_id)}&destination_place_id=${encodeURIComponent(form.destination_place_id)}&passenger_count=${encodeURIComponent(form.passenger_count)}`,
     )
       .then((options) => {
-        if (!active) return
-
-        setFareOptions(options)
-        setForm((current) => ({
-          ...current,
-          vehicle_type: options.includes(current.vehicle_type)
-            ? current.vehicle_type
-            : options[0] || '',
-        }))
+        if (active) setFareOptions(options)
       })
       .catch((err) => {
         if (active) setError(err.message)
@@ -76,20 +108,58 @@ export default function BookRidePage() {
         if (active) setLoadingFareOptions(false)
       })
 
-    return () => {
-      active = false
-    }
-  }, [form.origin_zone_id, form.destination_zone_id])
+    return () => { active = false }
+  }, [
+    form.origin_place_id,
+    form.destination_place_id,
+    form.passenger_count,
+  ])
+
+  function applyAtonaBooking(booking) {
+    setForm((current) => ({
+      ...current,
+      origin_text: booking.origin_text || '',
+      destination_text: booking.destination_text || '',
+      passenger_count: String(booking.passenger_count || 1),
+      origin_place_id: '',
+      destination_place_id: '',
+      vehicle_type: '',
+    }))
+    setFareOptions([])
+    setError('')
+    setMessage(
+      'Atọ́nà added your trip details. Select the service area, pickup place and destination place to continue.',
+    )
+    setRide(null)
+  }
 
   function updateField(event) {
     const { name, value } = event.target
-    const zoneChanged =
-      name === 'origin_zone_id' || name === 'destination_zone_id'
 
     setForm((current) => {
       const next = { ...current, [name]: value }
 
-      if (zoneChanged) {
+      if (name === 'service_area_id') {
+        next.origin_place_id = ''
+        next.destination_place_id = ''
+        next.origin_text = ''
+        next.destination_text = ''
+        next.vehicle_type = ''
+      }
+
+      if (name === 'origin_place_id') {
+        next.origin_text =
+          places.find((place) => String(place.id) === value)?.name || ''
+        next.vehicle_type = ''
+      }
+
+      if (name === 'destination_place_id') {
+        next.destination_text =
+          places.find((place) => String(place.id) === value)?.name || ''
+        next.vehicle_type = ''
+      }
+
+      if (name === 'passenger_count') {
         next.vehicle_type = ''
       }
 
@@ -103,18 +173,7 @@ export default function BookRidePage() {
       return next
     })
 
-    if (zoneChanged) {
-      const originId =
-        name === 'origin_zone_id' ? value : form.origin_zone_id
-      const destinationId =
-        name === 'destination_zone_id' ? value : form.destination_zone_id
-
-      setFareOptions([])
-      setLoadingFareOptions(
-        Boolean(originId && destinationId && originId !== destinationId),
-      )
-    }
-
+    setFareOptions([])
     setError('')
     setMessage('')
     setRide(null)
@@ -126,18 +185,24 @@ export default function BookRidePage() {
     setMessage('')
     setRide(null)
 
-    if (!form.origin_zone_id || !form.destination_zone_id) {
-      setError('Choose both a pickup zone and a destination zone.')
+    if (
+      !form.service_area_id ||
+      !form.origin_place_id ||
+      !form.destination_place_id
+    ) {
+      setError('Choose a service area, pickup place and destination place.')
       return
     }
 
-    if (form.origin_zone_id === form.destination_zone_id) {
-      setError('Choose different pickup and destination zones.')
+    if (form.origin_place_id === form.destination_place_id) {
+      setError('Choose different pickup and destination places.')
       return
     }
 
-    if (!fareOptions.includes(form.vehicle_type)) {
-      setError('Choose an available vehicle for this route.')
+    if (!fareOptions.some(
+      (option) => option.vehicle_type === form.vehicle_type,
+    )) {
+      setError('Choose a vehicle with an active fare for this exact route.')
       return
     }
 
@@ -147,9 +212,9 @@ export default function BookRidePage() {
       const result = await apiRequest('/api/v1/ride-requests', {
         method: 'POST',
         body: JSON.stringify({
-          ...form,
-          origin_zone_id: Number(form.origin_zone_id),
-          destination_zone_id: Number(form.destination_zone_id),
+          origin_place_id: Number(form.origin_place_id),
+          destination_place_id: Number(form.destination_place_id),
+          vehicle_type: form.vehicle_type,
           passenger_count: Number(form.passenger_count),
         }),
       })
@@ -170,11 +235,11 @@ export default function BookRidePage() {
   )
 
   if (ride) {
-    const originZone = zones.find(
-      (zone) => String(zone.id) === String(ride.origin_zone_id),
+    const originPlace = places.find(
+      (place) => String(place.id) === String(ride.origin_place_id),
     )
-    const destinationZone = zones.find(
-      (zone) => String(zone.id) === String(ride.destination_zone_id),
+    const destinationPlace = places.find(
+      (place) => String(place.id) === String(ride.destination_place_id),
     )
 
     return (
@@ -187,31 +252,12 @@ export default function BookRidePage() {
       >
         <section className="ride-result" aria-live="polite">
           <h3>Request received</h3>
-          <p>
-            Request number: <strong>#{ride.id}</strong>
-          </p>
-          <p>
-            Status: <strong>{ride.status || 'requested'}</strong>
-          </p>
-          <p>
-            Pickup zone: <strong>{originZone?.name || 'Selected zone'}</strong>
-          </p>
-          <p>
-            Pickup landmark: <strong>{ride.origin_text}</strong>
-          </p>
-          <p>
-            Destination zone:{' '}
-            <strong>{destinationZone?.name || 'Selected zone'}</strong>
-          </p>
-          <p>
-            Destination landmark: <strong>{ride.destination_text}</strong>
-          </p>
-          <p>
-            Vehicle: <strong>{ride.vehicle_type}</strong>
-          </p>
-          <p>
-            Passengers: <strong>{ride.passenger_count}</strong>
-          </p>
+          <p>Request number: <strong>#{ride.id}</strong></p>
+          <p>Status: <strong>{ride.status || 'requested'}</strong></p>
+          <p>Pickup place: <strong>{originPlace?.name || ride.origin_text || form.origin_text || 'Selected pickup'}</strong></p>
+          <p>Destination place: <strong>{destinationPlace?.name || ride.destination_text || form.destination_text || 'Selected destination'}</strong></p>
+          <p>Vehicle: <strong>{ride.vehicle_type}</strong></p>
+          <p>Passengers: <strong>{ride.passenger_count}</strong></p>
           <p>
             Quoted fare:{' '}
             <strong>
@@ -222,9 +268,7 @@ export default function BookRidePage() {
               })}
             </strong>
           </p>
-          <p>
-            Payment method: <strong>Bank transfer only</strong>
-          </p>
+          <p>Payment method: <strong>Bank transfer only</strong></p>
           <p>
             Neither the ride nor the payment is confirmed yet. A payment
             screenshot alone does not confirm payment.
@@ -242,12 +286,12 @@ export default function BookRidePage() {
     <AppPage
       eyebrow="RIDE BOOKING"
       title="Plan your journey"
-      description="Enter your pickup and destination details to submit a ride request."
+      description="Choose your pickup and destination to see available vehicles and fares."
       sectionTitle="Ride details"
-      sectionText="The fare is calculated by the EkiMove server using an active route fare. A submitted request is not a confirmed ride."
+      sectionText="The server calculates the fare using an active fare for your exact route. Submitting a request does not confirm a ride."
     >
-      {loadingZones ? (
-        <p role="status">Loading active zones…</p>
+      {loadingAreas ? (
+        <p role="status">Loading active service areas…</p>
       ) : (
         <form className="passenger-booking-form" onSubmit={handleSubmit}>
           {error && (
@@ -263,93 +307,93 @@ export default function BookRidePage() {
           )}
 
           <label>
-            Pickup zone
+            Service area
             <select
-              name="origin_zone_id"
-              value={form.origin_zone_id}
+              name="service_area_id"
+              value={form.service_area_id}
               onChange={updateField}
               required
             >
-              <option value="">Choose pickup zone</option>
-              {zones.map((zone) => (
-                <option key={zone.id} value={String(zone.id)}>
-                  {zone.name}
+              <option value="">Choose service area</option>
+              {areas.map((area) => (
+                <option key={area.id} value={String(area.id)}>
+                  {area.name}
                 </option>
               ))}
             </select>
           </label>
 
           <label>
-            Destination zone
+            Pickup place
             <select
-              name="destination_zone_id"
-              value={form.destination_zone_id}
+              name="origin_place_id"
+              value={form.origin_place_id}
               onChange={updateField}
+              disabled={!form.service_area_id || loadingPlaces}
               required
             >
-              <option value="">Choose destination zone</option>
-              {zones.map((zone) => (
-                <option key={zone.id} value={String(zone.id)}>
-                  {zone.name}
+              <option value="">
+                {loadingPlaces ? 'Loading places…' : 'Choose pickup place'}
+              </option>
+              {places.map((place) => (
+                <option key={place.id} value={String(place.id)}>
+                  {place.name}
                 </option>
               ))}
             </select>
           </label>
 
           <label>
-            Pickup address or landmark
-            <input
-              name="origin_text"
-              value={form.origin_text}
+            Destination place
+            <select
+              name="destination_place_id"
+              value={form.destination_place_id}
               onChange={updateField}
-              minLength={3}
-              maxLength={255}
-              placeholder="e.g. a nearby landmark in your pickup zone"
+              disabled={!form.service_area_id || loadingPlaces}
               required
-            />
+            >
+              <option value="">Choose destination place</option>
+              {places.map((place) => (
+                <option key={place.id} value={String(place.id)}>
+                  {place.name}
+                </option>
+              ))}
+            </select>
           </label>
 
           <label>
-            Destination address or landmark
-            <input
-              name="destination_text"
-              value={form.destination_text}
-              onChange={updateField}
-              minLength={3}
-              maxLength={255}
-              placeholder="Enter your destination landmark"
-              required
-            />
-          </label>
-
-          <label>
-            Vehicle type
+            Vehicle type and quoted fare
             <select
               name="vehicle_type"
               value={form.vehicle_type}
               onChange={updateField}
               disabled={
                 loadingFareOptions ||
-                !form.origin_zone_id ||
-                !form.destination_zone_id ||
-                form.origin_zone_id === form.destination_zone_id ||
+                !form.origin_place_id ||
+                !form.destination_place_id ||
+                form.origin_place_id === form.destination_place_id ||
                 fareOptions.length === 0
               }
               required
             >
               <option value="">
                 {loadingFareOptions
-                  ? 'Loading available vehicles…'
+                  ? 'Loading route fares…'
                   : 'Choose an available vehicle'}
               </option>
-              {fareOptions.map((vehicle) => (
-                <option key={vehicle} value={vehicle}>
-                  {vehicle.charAt(0).toUpperCase() + vehicle.slice(1)}
+              {fareOptions.map((option) => (
+                <option key={option.fare_id} value={option.vehicle_type}>
+                  {option.vehicle_type.charAt(0).toUpperCase() +
+                    option.vehicle_type.slice(1)}{' '}
+                  — ₦{Number(option.quoted_fare).toLocaleString('en-NG', {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
                 </option>
               ))}
             </select>
             <span className="field-hint">
-              Vehicle options depend on the selected route.
+              Only vehicles with an active fare for this exact route are shown.
             </span>
           </label>
 
@@ -380,60 +424,43 @@ export default function BookRidePage() {
           </p>
 
           {!loadingFareOptions &&
-            form.origin_zone_id &&
-            form.destination_zone_id &&
-            form.origin_zone_id !== form.destination_zone_id &&
+            form.origin_place_id &&
+            form.destination_place_id &&
+            form.origin_place_id !== form.destination_place_id &&
             fareOptions.length === 0 && (
               <p className="field-hint" role="status">
-                No vehicles are currently configured for this route.
+                No active fare is configured for this exact route and
+                passenger count.
               </p>
             )}
+
+          {areas.length === 0 && (
+            <p className="field-hint" role="status">
+              No active service areas are available. Booking requires an active
+              area, places and configured route fares.
+            </p>
+          )}
 
           <button
             className="submit-button"
             type="submit"
             disabled={
               submitting ||
+              loadingPlaces ||
               loadingFareOptions ||
-              zones.length < 2 ||
-              fareOptions.length === 0
+              !form.origin_place_id ||
+              !form.destination_place_id ||
+              form.origin_place_id === form.destination_place_id ||
+              !fareOptions.some(
+                (option) => option.vehicle_type === form.vehicle_type,
+              )
             }
           >
             {submitting ? 'Submitting request…' : 'Submit ride request'}
           </button>
-
-          {zones.length === 0 && (
-            <p className="field-hint">
-              No active zones are configured yet. Ride booking is unavailable
-              until zones are added.
-            </p>
-          )}
         </form>
       )}
-
-      {ride && (
-        <section className="ride-result" aria-live="polite">
-          <h3>Ride request submitted</h3>
-          <p>
-            Request number: <strong>#{ride.id}</strong>
-          </p>
-          <p>
-            Status: <strong>{ride.status || 'requested'}</strong>
-          </p>
-          <p>
-            Quoted fare:{' '}
-            <strong>
-              {ride.currency || 'NGN'}{' '}
-              {Number(ride.quoted_fare).toLocaleString('en-NG', {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })}
-            </strong>
-          </p>
-          <p>Payment is not confirmed by submitting this request.</p>
-          <Link to="/dashboard">Return to dashboard</Link>
-        </section>
-      )}
+      <AtonaFloatingAssistant onApplyBooking={applyAtonaBooking} />
     </AppPage>
   )
 }

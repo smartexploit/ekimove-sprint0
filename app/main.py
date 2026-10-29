@@ -1,6 +1,9 @@
-﻿from datetime import datetime, timezone
+﻿from app.admin_locations import router as admin_locations_router
+from app.atona import router as atona_router
+from datetime import datetime, timezone
 from typing import Literal
 from app.payments import router as payments_router
+from app.interswitch_payments import router as interswitch_payments_router
 from decimal import Decimal, ROUND_HALF_UP
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,7 +22,7 @@ from app.auth import (
 from app.config import settings
 from app.database import engine, get_db
 from app.driver_applications import router as driver_applications_router
-from app.models import AuditLog, Driver, Fare, Incident, Payment, Ride, RideRequest, User, Vehicle, Zone
+from app.models import AuditLog, Driver, Fare, Incident, Payment, Place, PlaceFare, Ride, RideRequest, ServiceArea, User, Vehicle, Zone
 
 from app.admin_driver_verification import router as admin_driver_verification_router
 from app.rate_limit import (
@@ -42,6 +45,9 @@ app = FastAPI(
 app.include_router(driver_applications_router)
 app.include_router(admin_driver_verification_router)
 app.include_router(payments_router)
+app.include_router(interswitch_payments_router)
+app.include_router(atona_router)
+app.include_router(admin_locations_router)
 
 class LoginRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
@@ -79,14 +85,16 @@ class AuthenticatedResponse(BaseModel):
     user: CurrentUserResponse
 
 class RideRequestCreate(BaseModel):
-    """A ride request; passenger identity comes from the access token."""
+    """A ride request using either legacy zones or configured places."""
 
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
 
-    origin_zone_id: int = Field(gt=0)
-    destination_zone_id: int = Field(gt=0)
-    origin_text: str = Field(min_length=3, max_length=255)
-    destination_text: str = Field(min_length=3, max_length=255)
+    origin_zone_id: int | None = Field(default=None, gt=0)
+    destination_zone_id: int | None = Field(default=None, gt=0)
+    origin_place_id: int | None = Field(default=None, gt=0)
+    destination_place_id: int | None = Field(default=None, gt=0)
+    origin_text: str | None = Field(default=None, min_length=3, max_length=255)
+    destination_text: str | None = Field(default=None, min_length=3, max_length=255)
     vehicle_type: str = Field(min_length=2, max_length=32)
     passenger_count: int = Field(default=1, ge=1, le=8)
 
@@ -370,11 +378,11 @@ def database_health_check() -> dict[str, str]:
 
 @app.get("/api/v1/policy/payments", tags=["policy"])
 def payment_policy() -> dict[str, object]:
-    """Expose the transfer-only payment policy."""
+    """Expose supported payment methods and confirmation rules."""
     return {
-        "supported_methods": ["bank_transfer"],
+        "supported_methods": ["bank_transfer", "interswitch"],
         "cash_enabled": False,
-        "confirmation_rule": "trusted_provider_confirmation_or_authorized_reconciliation",
+        "confirmation_rule": "server_side_provider_verification_or_authorized_reconciliation",
         "screenshot_alone_confirms_payment": False,
     }
 
@@ -468,14 +476,15 @@ def login(
             detail="Authentication is not configured",
         )
 
+    # Normalize surrounding whitespace consistently across login operations.
+    phone = payload.phone.strip()
+
     ip_address = (
         request.client.host if request.client is not None else "unknown"
     )
 
     try:
-        allowed, retry_after = check_login_allowed(
-            ip_address, payload.phone
-        )
+        allowed, retry_after = check_login_allowed(ip_address, phone)
     except RateLimitUnavailable:
         raise HTTPException(
             status_code=503,
@@ -489,7 +498,7 @@ def login(
             headers={"Retry-After": str(max(1, retry_after))},
         )
 
-    user = db.scalar(select(User).where(User.phone == payload.phone))
+    user = db.scalar(select(User).where(User.phone == phone))
 
     if (
         user is None
@@ -497,9 +506,7 @@ def login(
         or not verify_password(payload.password, user.password_hash)
     ):
         try:
-            recorded, retry_after = record_failed_login(
-                ip_address, payload.phone
-            )
+            recorded, retry_after = record_failed_login(ip_address, phone)
         except RateLimitUnavailable:
             raise HTTPException(
                 status_code=503,
@@ -524,8 +531,6 @@ def login(
         access_token=token,
         expires_in=settings.access_token_expire_minutes * 60,
     )
-
-
 @app.get(
     "/api/v1/auth/me",
     tags=["authentication"],
@@ -551,6 +556,138 @@ def list_active_zones(db: Session = Depends(get_db)) -> list[dict[str, object]]:
         select(Zone).where(Zone.is_active.is_(True)).order_by(Zone.name)
     ).all()
     return [{"id": zone.id, "name": zone.name} for zone in zones]
+
+
+@app.get("/api/v1/locations/areas", tags=["booking"])
+def list_passenger_service_areas(
+    db: Session = Depends(get_db),
+) -> list[dict[str, object]]:
+    """List active service areas available to passengers."""
+    areas = db.scalars(
+        select(ServiceArea)
+        .where(ServiceArea.status == "active")
+        .order_by(ServiceArea.name)
+    ).all()
+    return [
+        {"id": area.id, "name": area.name, "slug": area.slug}
+        for area in areas
+    ]
+
+
+@app.get("/api/v1/locations/places", tags=["booking"])
+def list_passenger_places(
+    service_area_id: int,
+    db: Session = Depends(get_db),
+) -> list[dict[str, object]]:
+    """List active places in an active service area and active zones."""
+    if service_area_id <= 0:
+        raise HTTPException(status_code=422, detail="Service area ID must be positive")
+
+    area = db.get(ServiceArea, service_area_id)
+    if area is None or area.status != "active":
+        return []
+
+    rows = db.execute(
+        select(Place, Zone)
+        .join(Zone, Place.zone_id == Zone.id)
+        .where(
+            Place.service_area_id == service_area_id,
+            Place.status == "active",
+            Zone.is_active.is_(True),
+        )
+        .order_by(Place.name)
+    ).all()
+
+    return [
+        {
+            "id": place.id,
+            "name": place.name,
+            "place_type": place.place_type,
+            "address_text": place.address_text,
+            "service_area_id": place.service_area_id,
+            "zone_id": place.zone_id,
+        }
+        for place, zone in rows
+    ]
+
+
+@app.get("/api/v1/place-fare-options", tags=["booking"])
+def list_active_place_fare_options(
+    origin_place_id: int,
+    destination_place_id: int,
+    passenger_count: int = 1,
+    db: Session = Depends(get_db),
+) -> list[dict[str, object]]:
+    """Return server-calculated quotes for explicitly active place fares."""
+    if origin_place_id <= 0 or destination_place_id <= 0:
+        raise HTTPException(status_code=422, detail="Place IDs must be positive")
+    if passenger_count < 1 or passenger_count > 8:
+        raise HTTPException(
+            status_code=422,
+            detail="Passenger count must be between 1 and 8",
+        )
+    if origin_place_id == destination_place_id:
+        return []
+
+    origin_place = db.get(Place, origin_place_id)
+    destination_place = db.get(Place, destination_place_id)
+    if (
+        origin_place is None
+        or destination_place is None
+        or origin_place.status != "active"
+        or destination_place.status != "active"
+    ):
+        return []
+
+    origin_area = db.get(ServiceArea, origin_place.service_area_id)
+    destination_area = db.get(ServiceArea, destination_place.service_area_id)
+    origin_zone = db.get(Zone, origin_place.zone_id)
+    destination_zone = db.get(Zone, destination_place.zone_id)
+    if (
+        origin_area is None
+        or destination_area is None
+        or origin_area.status != "active"
+        or destination_area.status != "active"
+        or origin_zone is None
+        or destination_zone is None
+        or not origin_zone.is_active
+        or not destination_zone.is_active
+    ):
+        return []
+
+    fares = db.scalars(
+        select(PlaceFare)
+        .where(
+            PlaceFare.origin_place_id == origin_place_id,
+            PlaceFare.destination_place_id == destination_place_id,
+            PlaceFare.is_active.is_(True),
+        )
+        .order_by(PlaceFare.vehicle_type)
+    ).all()
+
+    options = []
+    for fare in fares:
+        if (
+            fare.vehicle_type.strip().lower() in {"motorcycle", "motorbike"}
+            and passenger_count > 1
+        ):
+            continue
+
+        amount = (
+            Decimal(fare.base_amount) * Decimal(fare.vehicle_multiplier)
+            + Decimal(fare.extra_passenger_amount) * (passenger_count - 1)
+        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+        options.append(
+            {
+                "fare_id": fare.id,
+                "vehicle_type": fare.vehicle_type,
+                "quoted_fare": amount,
+                "currency": "NGN",
+                "passenger_count": passenger_count,
+            }
+        )
+    return options
 
 
 @app.get("/api/v1/fare-options", tags=["booking"])
@@ -666,6 +803,112 @@ def create_ride_request(
             detail="Only passenger accounts can create ride requests",
         )
 
+    use_places = (
+        payload.origin_place_id is not None
+        or payload.destination_place_id is not None
+    )
+    if use_places:
+        if (
+            payload.origin_place_id is None
+            or payload.destination_place_id is None
+            or payload.origin_zone_id is not None
+            or payload.destination_zone_id is not None
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="Provide both place IDs, without zone IDs",
+            )
+        if payload.origin_place_id == payload.destination_place_id:
+            raise HTTPException(
+                status_code=422,
+                detail="Pickup and destination must be different places",
+            )
+
+        origin_place = db.get(Place, payload.origin_place_id)
+        destination_place = db.get(Place, payload.destination_place_id)
+        if (
+            origin_place is None
+            or destination_place is None
+            or origin_place.status != "active"
+            or destination_place.status != "active"
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="Pickup and destination must be active places",
+            )
+
+        origin_area = db.get(ServiceArea, origin_place.service_area_id)
+        destination_area = db.get(ServiceArea, destination_place.service_area_id)
+        origin = db.get(Zone, origin_place.zone_id)
+        destination = db.get(Zone, destination_place.zone_id)
+
+        if (
+            origin_area is None
+            or destination_area is None
+            or origin_area.status != "active"
+            or destination_area.status != "active"
+            or origin is None
+            or destination is None
+            or not origin.is_active
+            or not destination.is_active
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="Places must belong to active service areas and zones",
+            )
+
+        fare = db.scalar(
+            select(PlaceFare).where(
+                PlaceFare.origin_place_id == origin_place.id,
+                PlaceFare.destination_place_id == destination_place.id,
+                PlaceFare.vehicle_type == payload.vehicle_type,
+                PlaceFare.is_active.is_(True),
+            )
+        )
+        origin_text = origin_place.name
+        destination_text = destination_place.name
+    else:
+        if (
+            payload.origin_zone_id is None
+            or payload.destination_zone_id is None
+            or payload.origin_text is None
+            or payload.destination_text is None
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="Provide both zone IDs and pickup/destination text",
+            )
+
+        origin = db.get(Zone, payload.origin_zone_id)
+        destination = db.get(Zone, payload.destination_zone_id)
+        if (
+            origin is None
+            or destination is None
+            or not origin.is_active
+            or not destination.is_active
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="Pickup and destination must be active zones",
+            )
+
+        fare = db.scalar(
+            select(Fare).where(
+                Fare.origin_zone_id == payload.origin_zone_id,
+                Fare.destination_zone_id == payload.destination_zone_id,
+                Fare.vehicle_type == payload.vehicle_type,
+                Fare.is_active.is_(True),
+            )
+        )
+        origin_text = payload.origin_text
+        destination_text = payload.destination_text
+
+    if fare is None:
+        raise HTTPException(
+            status_code=422,
+            detail="No active fare is configured for this route and vehicle type",
+        )
+
     if (
         payload.vehicle_type.strip().lower() in {"motorcycle", "motorbike"}
         and payload.passenger_count > 1
@@ -675,35 +918,6 @@ def create_ride_request(
             detail="Motorcycle bookings allow at most one passenger in addition to the rider",
         )
 
-    origin = db.get(Zone, payload.origin_zone_id)
-    destination = db.get(Zone, payload.destination_zone_id)
-
-    if (
-        origin is None
-        or destination is None
-        or not origin.is_active
-        or not destination.is_active
-    ):
-        raise HTTPException(
-            status_code=422,
-            detail="Pickup and destination must be active zones",
-        )
-
-    fare = db.scalar(
-        select(Fare).where(
-            Fare.origin_zone_id == payload.origin_zone_id,
-            Fare.destination_zone_id == payload.destination_zone_id,
-            Fare.vehicle_type == payload.vehicle_type,
-            Fare.is_active.is_(True),
-        )
-    )
-
-    if fare is None:
-        raise HTTPException(
-            status_code=422,
-            detail="No active fare is configured for this route and vehicle type",
-        )
-
     calculated = (
         Decimal(fare.base_amount) * Decimal(fare.vehicle_multiplier)
         + Decimal(fare.extra_passenger_amount) * (payload.passenger_count - 1)
@@ -711,8 +925,10 @@ def create_ride_request(
 
     request = RideRequest(
         passenger_user_id=current_user.id,
-        origin_text=payload.origin_text,
-        destination_text=payload.destination_text,
+        origin_place_id=origin_place.id if use_places else None,
+        destination_place_id=destination_place.id if use_places else None,
+        origin_text=origin_text,
+        destination_text=destination_text,
         vehicle_type=payload.vehicle_type,
         passenger_count=payload.passenger_count,
         quoted_fare=calculated,
@@ -1040,3 +1256,5 @@ application = OuterCORSMiddleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
+
+

@@ -70,6 +70,7 @@ export default function AppPage({
                   <Link to="/admin/incidents">
                     Incident management
                   </Link>
+                  <Link to="/admin/locations">Locations &amp; pricing</Link>
                 </>
               ) : (
                 <>
@@ -126,3 +127,4 @@ export default function AppPage({
     </div>
   )
 }
+

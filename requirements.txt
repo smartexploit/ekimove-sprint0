@@ -12,3 +12,5 @@ redis>=5,<7
 python-multipart>=0.0.20,<1.0
 cloudinary>=1.44,<2.0
 requests>=2.31,<3.0
+
+groq>=1.7,<2
