@@ -151,6 +151,144 @@ def admin_list_zones(
     ]
 
 
+@app.post("/api/v1/admin/zones", tags=["admin"])
+def admin_create_zone(
+    payload: dict[str, object],
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_super_admin),
+) -> dict[str, object]:
+    """Create a zone manually from the admin interface."""
+    name = payload.get("name")
+    is_active = payload.get("is_active", False)
+
+    if not isinstance(name, str) or not 2 <= len(name.strip()) <= 100:
+        raise HTTPException(
+            status_code=422,
+            detail="Zone name must contain between 2 and 100 characters",
+        )
+
+    if not isinstance(is_active, bool):
+        raise HTTPException(
+            status_code=422,
+            detail="Zone status must be active or inactive",
+        )
+
+    name = name.strip()
+    existing_zones = db.scalars(select(Zone)).all()
+
+    if any(zone.name.casefold() == name.casefold() for zone in existing_zones):
+        raise HTTPException(
+            status_code=409,
+            detail="A zone with this name already exists",
+        )
+
+    zone = Zone(name=name, is_active=is_active)
+    db.add(zone)
+    db.flush()
+
+    db.add(AuditLog(
+        actor_user_id=admin.id,
+        action="zone.created",
+        entity_type="zone",
+        entity_id=str(zone.id),
+        details=f"Created zone: {name}"[:2000],
+    ))
+
+    try:
+        db.commit()
+        db.refresh(zone)
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="A zone with this name already exists",
+        ) from exc
+
+    return {
+        "id": zone.id,
+        "name": zone.name,
+        "is_active": zone.is_active,
+    }
+
+
+@app.patch("/api/v1/admin/zones/{zone_id}", tags=["admin"])
+def admin_update_zone(
+    zone_id: int,
+    payload: dict[str, object],
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_super_admin),
+) -> dict[str, object]:
+    """Rename a zone or change its activation status."""
+    zone = db.get(Zone, zone_id)
+
+    if zone is None:
+        raise HTTPException(status_code=404, detail="Zone not found")
+
+    if not payload or set(payload) - {"name", "is_active"}:
+        raise HTTPException(
+            status_code=422,
+            detail="Provide a zone name or activation status",
+        )
+
+    if "name" in payload:
+        name = payload["name"]
+
+        if not isinstance(name, str) or not 2 <= len(name.strip()) <= 100:
+            raise HTTPException(
+                status_code=422,
+                detail="Zone name must contain between 2 and 100 characters",
+            )
+
+        name = name.strip()
+        existing_zones = db.scalars(select(Zone)).all()
+
+        if any(
+            item.id != zone.id and item.name.casefold() == name.casefold()
+            for item in existing_zones
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="A zone with this name already exists",
+            )
+
+        zone.name = name
+
+    if "is_active" in payload:
+        is_active = payload["is_active"]
+
+        if not isinstance(is_active, bool):
+            raise HTTPException(
+                status_code=422,
+                detail="Zone status must be active or inactive",
+            )
+
+        zone.is_active = is_active
+
+    db.add(AuditLog(
+        actor_user_id=admin.id,
+        action="zone.updated",
+        entity_type="zone",
+        entity_id=str(zone.id),
+        details=f"Updated zone: {zone.name}"[:2000],
+    ))
+
+    try:
+        db.commit()
+        db.refresh(zone)
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="The zone update conflicts with existing data",
+        ) from exc
+
+    return {
+        "id": zone.id,
+        "name": zone.name,
+        "is_active": zone.is_active,
+    }
+
+
 @app.get("/api/v1/admin/fares", tags=["admin"])
 def admin_list_fares(
     db: Session = Depends(get_db),

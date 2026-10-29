@@ -25,6 +25,8 @@ export default function AdminLocationsPage() {
   const [places, setPlaces] = useState([])
   const [fares, setFares] = useState([])
   const [zones, setZones] = useState([])
+  const [zoneForm, setZoneForm] = useState({ name: '', is_active: false })
+  const [editingZone, setEditingZone] = useState(null)
   const [areaForm, setAreaForm] = useState(emptyArea)
   const [placeForm, setPlaceForm] = useState(emptyPlace)
   const [fareForm, setFareForm] = useState(emptyFare)
@@ -72,6 +74,35 @@ export default function AdminLocationsPage() {
     } finally {
       setBusy(false)
     }
+  }
+
+  const saveZone = (e) => {
+    e.preventDefault()
+    const name = zoneForm.name.trim()
+    if (name.length < 2 || name.length > 100) {
+      setError('Zone name must contain between 2 and 100 characters.')
+      return
+    }
+
+    runSave(async () => {
+      await apiRequest(
+        editingZone
+          ? `/api/v1/admin/zones/${editingZone}`
+          : '/api/v1/admin/zones',
+        {
+          method: editingZone ? 'PATCH' : 'POST',
+          body: JSON.stringify({ name, is_active: zoneForm.is_active }),
+        },
+      )
+      setEditingZone(null)
+      setZoneForm({ name: '', is_active: false })
+    })
+  }
+
+  const editZone = (zone) => {
+    setEditingZone(zone.id)
+    setZoneForm({ name: zone.name, is_active: Boolean(zone.is_active) })
+    setTab('zones')
   }
 
   const saveArea = (e) => {
@@ -256,7 +287,46 @@ export default function AdminLocationsPage() {
             <button aria-pressed={tab === 'areas'} onClick={() => setTab('areas')}>Service areas</button>
             <button aria-pressed={tab === 'places'} onClick={() => setTab('places')}>Locations & axes</button>
             <button aria-pressed={tab === 'fares'} onClick={() => setTab('fares')}>Route pricing</button>
+            <button aria-pressed={tab === 'zones'} onClick={() => setTab('zones')}>Zones</button>
           </div>
+
+          {tab === 'zones' && <>
+            <h3>{editingZone ? `Edit zone #${editingZone}` : 'Create a zone'}</h3>
+            <form className="admin-form" onSubmit={saveZone}>
+              {input('Zone name', zoneForm.name, v => setZoneForm({ ...zoneForm, name: v }))}
+              <label className="admin-field">
+                <span>Status</span>
+                <select
+                  value={zoneForm.is_active ? 'active' : 'inactive'}
+                  onChange={e => setZoneForm({ ...zoneForm, is_active: e.target.value === 'active' })}
+                >
+                  <option value="inactive">Inactive</option>
+                  <option value="active">Active</option>
+                </select>
+              </label>
+              <button className="admin-submit" disabled={busy}>
+                {editingZone ? 'Save zone changes' : 'Create zone'}
+              </button>
+              {editingZone && (
+                <button type="button" onClick={() => {
+                  setEditingZone(null)
+                  setZoneForm({ name: '', is_active: false })
+                }}>
+                  Cancel edit
+                </button>
+              )}
+            </form>
+            <h3>Existing zones ({zones.length})</h3>
+            {zones.map(zone => (
+              <div className="admin-record" key={zone.id}>
+                <div>
+                  <strong>{zone.name}</strong>
+                  <small>#{zone.id} ? {zone.is_active ? 'Active' : 'Inactive'}</small>
+                </div>
+                <button type="button" onClick={() => editZone(zone)}>Edit</button>
+              </div>
+            ))}
+          </>}
 
           {tab === 'areas' && <>
             <h3>{editingArea ? `Edit service area #${editingArea}` : 'Add a service area'}</h3>
