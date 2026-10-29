@@ -274,7 +274,7 @@ export default function PaymentsPage() {
           disabled={busy}
         >
           <option value="bank_transfer">Bank transfer</option>
-          <option value="interswitch">Interswitch checkout</option>
+          <option value="interswitch">Card, transfer or supported digital wallets</option>
         </select>
 
         {method === 'bank_transfer' ? (
@@ -307,7 +307,7 @@ export default function PaymentsPage() {
             </p>
             <div className="payment-actions">
               <button type="button" disabled={busy} onClick={startInterswitch}>
-                {busy ? 'Please wait...' : 'Pay with Interswitch'}
+                {busy ? 'Please wait...' : 'Continue to secure checkout'}
               </button>
               <button type="button" disabled={busy} onClick={checkStatus}>
                 Verify payment status
@@ -319,15 +319,15 @@ export default function PaymentsPage() {
 
       {payment && (
         <div className="payment-policy-card" aria-live="polite">
-          <span className="payment-policy-mark" aria-hidden="true">â‚¦</span>
+          <span className="payment-policy-mark" aria-hidden="true">₦</span>
           <h3>Payment details</h3>
           <p>Ride ID: <strong>{payment.ride_id}</strong></p>
-          <p>Amount: <strong>â‚¦{Number(payment.amount).toLocaleString('en-NG', {
+          <p>Amount: <strong>₦{Number(payment.amount).toLocaleString('en-NG', {
             minimumFractionDigits: 2,
             maximumFractionDigits: 2,
           })}</strong></p>
           <p>Method: <strong>{
-            payment.method === 'interswitch' ? 'Interswitch' : 'Bank transfer'
+            payment.method === 'interswitch' ? 'Interswitch checkout' : 'Bank transfer'
           }</strong></p>
           <p>Status: <strong>{String(payment.status).replaceAll('_', ' ')}</strong></p>
 
