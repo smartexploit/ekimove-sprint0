@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import AppPage from '../../layouts/AppPage.jsx'
 import { apiRequest } from '../../services/authService.js'
 
@@ -119,6 +119,12 @@ export default function AdminLocationsPage() {
 
   const saveFare = (e) => {
     e.preventDefault()
+    if (fareForm.is_active && !canActivateSelectedFare) {
+      setError(
+        'To activate a route, select two different places whose places, service areas and zones are all active.',
+      )
+      return
+    }
     if (fareForm.origin_place_id && fareForm.origin_place_id === fareForm.destination_place_id) {
       setError('Origin and destination must be different places.')
       return
@@ -179,8 +185,39 @@ export default function AdminLocationsPage() {
     setTab('fares')
   }
 
-  const placeName = (id) => places.find((p) => p.id === id)?.name || `Place #${id}`
-  const areaName = (id) => areas.find((a) => a.id === id)?.name || `Area #${id}`
+  const placeName = (id) =>
+    places.find((p) => Number(p.id) === Number(id))?.name || `Place #${id}`
+
+  const areaName = (id) =>
+    areas.find((a) => Number(a.id) === Number(id))?.name || `Area #${id}`
+
+  const placeIsPublicEligible = (place) => {
+    if (!place || place.status !== 'active') return false
+
+    const area = areas.find(
+      (a) => Number(a.id) === Number(place.service_area_id),
+    )
+    const zone = zones.find(
+      (z) => Number(z.id) === Number(place.zone_id),
+    )
+
+    return area?.status === 'active' && zone?.is_active === true
+  }
+
+  const selectedOrigin = places.find(
+    (p) => Number(p.id) === Number(fareForm.origin_place_id),
+  )
+
+  const selectedDestination = places.find(
+    (p) => Number(p.id) === Number(fareForm.destination_place_id),
+  )
+
+  const canActivateSelectedFare =
+    Boolean(selectedOrigin) &&
+    Boolean(selectedDestination) &&
+    Number(selectedOrigin.id) !== Number(selectedDestination.id) &&
+    placeIsPublicEligible(selectedOrigin) &&
+    placeIsPublicEligible(selectedDestination)
 
   const input = (label, value, onChange, options = {}) => (
     <label className="admin-field">
@@ -258,13 +295,104 @@ export default function AdminLocationsPage() {
           {tab === 'fares' && <>
             <h3>{editingFare ? `Edit route fare #${editingFare}` : 'Configure an exact-route fare'}</h3>
             <form className="admin-form" onSubmit={saveFare}>
-              <label className="admin-field"><span>Origin</span><select required value={fareForm.origin_place_id} onChange={e => setFareForm({...fareForm,origin_place_id:e.target.value})}><option value="">Choose origin</option>{places.map(p => <option key={p.id} value={p.id}>{p.name} · {p.status}</option>)}</select></label>
-              <label className="admin-field"><span>Destination</span><select required value={fareForm.destination_place_id} onChange={e => setFareForm({...fareForm,destination_place_id:e.target.value})}><option value="">Choose destination</option>{places.map(p => <option key={p.id} value={p.id}>{p.name} · {p.status}</option>)}</select></label>
+              <p className="admin-alert">
+                Public booking requires an active service area, active pickup and
+                destination places, active zones, and an active fare for the exact
+                route and vehicle type. Changes become available through the public
+                API once all these conditions are satisfied.
+              </p>
+              <label className="admin-field">
+                <span>Origin / pickup</span>
+                <select
+                  required
+                  value={fareForm.origin_place_id}
+                  onChange={(e) => {
+                    const originId = e.target.value
+                    setError('')
+                    setFareForm((current) => ({
+                      ...current,
+                      origin_place_id: originId,
+                      destination_place_id:
+                        current.destination_place_id === originId
+                          ? ''
+                          : current.destination_place_id,
+                    }))
+                  }}
+                >
+                  <option value="">Choose pickup</option>
+                  {places.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} · {p.status}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="admin-field">
+                <span>Destination</span>
+                <select
+                  required
+                  value={fareForm.destination_place_id}
+                  onChange={(e) => {
+                    setError('')
+                    setFareForm({
+                      ...fareForm,
+                      destination_place_id: e.target.value,
+                    })
+                  }}
+                >
+                  <option value="">Choose destination</option>
+                  {places
+                    .filter(
+                      (p) => String(p.id) !== fareForm.origin_place_id,
+                    )
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} · {p.status}
+                      </option>
+                    ))}
+                </select>
+              </label>
               <label className="admin-field"><span>Vehicle type</span><select value={fareForm.vehicle_type} onChange={e => setFareForm({...fareForm,vehicle_type:e.target.value})}>{['car','motorcycle','tricycle','van'].map(v => <option key={v} value={v}>{v}</option>)}</select></label>
               {input('Base amount (NGN)',fareForm.base_amount,v=>setFareForm({...fareForm,base_amount:v}),{type:'number',min:'0',step:'0.01'})}
               {input('Vehicle multiplier',fareForm.vehicle_multiplier,v=>setFareForm({...fareForm,vehicle_multiplier:v}),{type:'number',min:'0.001',step:'0.001'})}
               {input('Extra passenger amount (NGN)',fareForm.extra_passenger_amount,v=>setFareForm({...fareForm,extra_passenger_amount:v}),{type:'number',min:'0',step:'0.01'})}
-              <label className="admin-field"><span>Route status</span><select value={String(fareForm.is_active)} onChange={e=>setFareForm({...fareForm,is_active:e.target.value==='true'})}><option value="false">Inactive</option><option value="true">Active</option></select></label>
+              <label className="admin-field">
+                <span>Route status</span>
+                <select
+                  value={String(fareForm.is_active)}
+                  onChange={(e) => {
+                    const activate = e.target.value === 'true'
+
+                    if (activate && !canActivateSelectedFare) {
+                      setError(
+                        'Activate the service area, both places and both zones before activating this fare.',
+                      )
+                      return
+                    }
+
+                    setError('')
+                    setFareForm({
+                      ...fareForm,
+                      is_active: activate,
+                    })
+                  }}
+                >
+                  <option value="false">Inactive</option>
+                  <option
+                    value="true"
+                    disabled={!canActivateSelectedFare && !fareForm.is_active}
+                  >
+                    Active — available for eligible bookings
+                  </option>
+                </select>
+                <small>
+                  {canActivateSelectedFare
+                    ? 'Both places are eligible for a public route fare.'
+                    : fareForm.is_active
+                      ? 'This fare is currently marked active, but its route is ineligible. Deactivate it before saving, or restore eligibility before keeping it active.'
+                      : 'Activate the required service area, places and zones before publishing this fare.'}
+                </small>
+              </label>
               <div className="admin-field"><span>Estimated fare for one passenger</span><strong>{money(Number(fareForm.base_amount || 0) * Number(fareForm.vehicle_multiplier || 0))}</strong><small>Backend formula: base amount × vehicle multiplier, plus extra-passenger charges where applicable.</small></div>
               <button className="admin-submit" disabled={busy || !places.length}>{editingFare ? 'Save fare changes' : 'Create route fare'}</button>
               {editingFare && <button type="button" onClick={() => {setEditingFare(null);setFareForm(emptyFare)}}>Cancel edit</button>}
