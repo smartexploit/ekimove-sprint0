@@ -3,7 +3,7 @@ import re
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -171,12 +171,32 @@ def create_area(
     slug = payload.slug or re.sub(r"[^a-z0-9]+", "-", payload.name.lower()).strip("-")
     if not slug or len(slug) > 100:
         raise HTTPException(status_code=422, detail="A valid slug could not be generated")
+    existing_area = db.scalar(
+        select(ServiceArea).where(
+            (func.lower(ServiceArea.name) == payload.name.lower())
+            | (func.lower(ServiceArea.slug) == slug.lower())
+        )
+    )
+    if existing_area is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A service area with this name or slug already exists. Edit the existing area instead.",
+        )
+
     area = ServiceArea(
         name=payload.name, slug=slug, description=payload.description,
         status=payload.status,
     )
     db.add(area)
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A service area with this name or slug already exists. Edit the existing area instead.",
+        ) from exc
+
     _audit(db, admin, "location.area_created", "service_area", area.id, f"Created area {area.name}")
     _save(db, "A service area with this name or slug already exists")
     db.refresh(area)
