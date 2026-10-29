@@ -99,7 +99,7 @@ export default function AdminLocationsPage() {
       ...placeForm,
       service_area_id: Number(placeForm.service_area_id),
       zone_id: Number(placeForm.zone_id),
-      aliases: placeForm.aliases.split(',').map((x) => x.trim()).filter(Boolean),
+      aliases: placeForm.aliases.trim() || null,
       latitude: placeForm.latitude === '' ? null : Number(placeForm.latitude),
       longitude: placeForm.longitude === '' ? null : Number(placeForm.longitude),
       address_text: placeForm.address_text.trim() || null,
@@ -158,7 +158,7 @@ export default function AdminLocationsPage() {
       zone_id: String(p.zone_id ?? ''),
       name: p.name || '', place_type: p.place_type || 'other',
       address_text: p.address_text || '',
-      aliases: Array.isArray(p.aliases) ? p.aliases.join(', ') : '',
+      aliases: typeof p.aliases === 'string' ? p.aliases : (Array.isArray(p.aliases) ? p.aliases.join(', ') : ''),
       latitude: p.latitude ?? '', longitude: p.longitude ?? '',
       notes: p.notes || '', status: p.status || 'pending',
     })
@@ -277,4 +277,3 @@ export default function AdminLocationsPage() {
     </AppPage>
   )
 }
-
