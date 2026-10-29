@@ -173,7 +173,13 @@ export default function BookRidePage() {
       return next
     })
 
-    setFareOptions([])
+    if (
+      ['service_area_id', 'origin_place_id', 'destination_place_id', 'passenger_count']
+        .includes(name)
+    ) {
+      setFareOptions([])
+    }
+
     setError('')
     setMessage('')
     setRide(null)
