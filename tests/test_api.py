@@ -2137,6 +2137,27 @@ def test_atona_requires_authentication(client):
     assert response.status_code == 401
 
 
+def test_atona_geography_requires_authentication(client):
+    response = client.post(
+        "/api/v1/atona/geography",
+        json={"message": "Where is Central Market?"},
+    )
+    assert response.status_code == 401
+
+
+def test_atona_geography_disabled_returns_503(client, monkeypatch):
+    monkeypatch.setattr(settings, "atona_enabled", False)
+    monkeypatch.setattr(settings, "groq_api_key", "test-key")
+
+    token = login_as_passenger(client)
+    response = client.post(
+        "/api/v1/atona/geography",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"message": "Where is Central Market?"},
+    )
+    assert response.status_code == 503
+
+
 def test_atona_rejects_non_passenger(client, monkeypatch):
     import app.atona as atona_module
 

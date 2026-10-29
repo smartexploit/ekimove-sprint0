@@ -46,8 +46,6 @@ app.include_router(driver_applications_router)
 app.include_router(admin_driver_verification_router)
 app.include_router(payments_router)
 app.include_router(interswitch_payments_router)
-app.include_router(atona_router)
-app.include_router(admin_locations_router)
 
 class LoginRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
@@ -1245,6 +1243,9 @@ from starlette.middleware.cors import CORSMiddleware as OuterCORSMiddleware
 
 # Keep `app` as FastAPI for tests and dependency overrides.
 # Render serves `application`, which wraps the complete app in CORS.
+app.include_router(atona_router)
+app.include_router(admin_locations_router)
+
 application = OuterCORSMiddleware(
     app=app,
     allow_origins=[

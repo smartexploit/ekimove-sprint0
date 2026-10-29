@@ -15,6 +15,35 @@ export default function AtonaFloatingAssistant({ onApplyBooking }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
+  function chooseEndpoint(message) {
+    const text = message.toLowerCase()
+
+    const bookingTerms = [
+      'book a ride', 'book me', 'request a ride', 'request a trip',
+      'i need a ride', 'need a ride', 'pick me up', 'i want to book',
+      'order a ride', 'get me a driver', 'i need transport',
+    ]
+
+    if (bookingTerms.some((term) => text.includes(term))) {
+      return '/api/v1/atona/interpret'
+    }
+
+    const geographyTerms = [
+      'direction', 'where is', 'where are', 'describe',
+      'geographic', 'landmark', 'how far', 'distance between',
+      'route to', 'route from', 'navigate', 'navigation',
+      'how do i get', 'how can i get', 'way to', 'location of',
+      'tell me about', 'which area', 'what is near', 'what is around',
+      'how do i reach', 'how can i reach', 'driving to', 'drive to',
+    ]
+
+    if (geographyTerms.some((term) => text.includes(term))) {
+      return '/api/v1/atona/geography'
+    }
+
+    return '/api/v1/atona/interpret'
+  }
+
   async function sendMessage(event) {
     event.preventDefault()
     const message = input.trim()
@@ -40,16 +69,26 @@ export default function AtonaFloatingAssistant({ onApplyBooking }) {
     }
 
     try {
-      const result = await apiRequest('/api/v1/atona/interpret', {
+      const endpoint = chooseEndpoint(message)
+      const result = await apiRequest(endpoint, {
         method: 'POST',
         body: JSON.stringify({ message }),
       })
+
+      let assistantText = result.reply || 'I could not prepare a reliable answer. Please try again.'
+
+      if (Array.isArray(result.route?.steps) && result.route.steps.length > 0) {
+        assistantText += '\n\nSuggested driving directions:\n'
+        assistantText += result.route.steps
+          .map((step, index) => `${index + 1}. ${step}`)
+          .join('\n')
+      }
 
       setMessages((current) => [
         ...current,
         {
           role: 'assistant',
-          text: result.reply || 'I could not prepare those trip details. Please use the booking form.',
+          text: assistantText,
         },
       ])
 
@@ -70,7 +109,7 @@ export default function AtonaFloatingAssistant({ onApplyBooking }) {
       ...current,
       {
         role: 'assistant',
-        text: 'Trip details applied to the booking form. Review the zones, landmarks and vehicle before submitting your request.',
+        text: 'Trip details applied to the booking form. Review the pickup, destination and available vehicle before submitting your request.',
       },
     ])
     setPendingBooking(null)
@@ -141,7 +180,7 @@ export default function AtonaFloatingAssistant({ onApplyBooking }) {
               id="atona-message-input"
               value={input}
               onChange={(event) => setInput(event.target.value)}
-              placeholder="Where are you travelling from and to?"
+              placeholder="Ask about a place, directions, or describe your trip..."
               rows={2}
               maxLength={1000}
               disabled={busy}
