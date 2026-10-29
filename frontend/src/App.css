@@ -1210,3 +1210,457 @@
 
 
 
+
+/* =========================================
+   EKIMOVE AUTHENTICATION PAGE
+========================================= */
+
+.auth-page {
+  min-height: 100vh;
+  background: #F7F8F1;
+  color: #11190C;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+}
+
+.auth-layout {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+/* Left branding section */
+
+.auth-brand-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 48px;
+  overflow: hidden;
+  background: #11190C;
+  color: #fff;
+}
+
+.auth-brand-panel h1 {
+  max-width: 550px;
+  margin: 40px 0 20px;
+  font-size: clamp(38px, 4.5vw, 64px);
+  line-height: 1.1;
+  letter-spacing: -2px;
+}
+
+.auth-brand-panel p {
+  max-width: 420px;
+  color: #c5cbbd;
+  font-size: 15px;
+  line-height: 1.8;
+}
+
+.auth-brand-eyebrow {
+  color: #E1FF00;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+/* Right form section */
+
+.auth-content-panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 48px;
+  background: #F7F8F1;
+}
+
+.auth-content-inner {
+  width: 100%;
+  max-width: 440px;
+}
+
+.auth-content-inner h2 {
+  margin: 0 0 12px;
+  color: #11190C;
+  font-size: 32px;
+  font-weight: 800;
+  letter-spacing: -1px;
+}
+
+.auth-content-inner > p {
+  color: #777d70;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+/* Registration form */
+
+.register-form {
+  display: flex;
+  flex-direction: column;
+  gap: 17px;
+  width: 100%;
+}
+
+.register-form .auth-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.register-form .auth-field label {
+  color: #11190C;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.register-form .auth-field input {
+  width: 100%;
+  min-height: 52px;
+  padding: 0 16px;
+  border: 1px solid #e4e5dc;
+  border-radius: 12px;
+  background: #fff;
+  color: #11190C;
+  font-family: inherit;
+  font-size: 14px;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.register-form .auth-field input:focus {
+  border-color: #b4cf00;
+  box-shadow: 0 0 0 4px rgba(225, 255, 0, 0.2);
+}
+
+.register-form .auth-field input::placeholder {
+  color: #a0a397;
+}
+
+.auth-password-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+.auth-password-wrapper input {
+  padding-right: 70px !important;
+}
+
+.auth-password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 15px;
+  transform: translateY(-50%);
+  border: none;
+  background: transparent;
+  color: #334329;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.register-form .auth-hint {
+  color: #777d70;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.register-form .auth-success {
+  color: #27804a;
+}
+
+.register-form .auth-error-text {
+  color: #c0392b;
+}
+
+.register-form .auth-error {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid #f2ceca;
+  border-radius: 10px;
+  background: #fff3f1;
+  color: #b83227;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.register-form .auth-submit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 54px;
+  margin-top: 4px;
+  border: none;
+  border-radius: 12px;
+  background: #E1FF00;
+  color: #11190C;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.register-form .auth-submit:hover:not(:disabled) {
+  background: #d1ed00;
+  transform: translateY(-2px);
+}
+
+.register-form .auth-submit:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.register-form .auth-switch {
+  margin: 3px 0 0;
+  color: #656b5f;
+  font-size: 13px;
+  text-align: center;
+}
+
+.register-form .auth-switch a {
+  color: #263c1b;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.register-form .auth-switch a:hover {
+  text-decoration: underline;
+}
+
+.register-footer-note {
+  margin: 0;
+  color: #92968c;
+  font-size: 11px;
+  line-height: 1.6;
+  text-align: center;
+}
+
+/* Mobile responsiveness */
+
+@media (max-width: 768px) {
+  .auth-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-brand-panel {
+    min-height: 250px;
+    padding: 30px 24px;
+  }
+
+  .auth-brand-panel h1 {
+    margin: 25px 0 12px;
+    font-size: 38px;
+  }
+
+  .auth-content-panel {
+    padding: 40px 24px;
+  }
+
+  .auth-content-inner h2 {
+    font-size: 27px;
+  }
+}
+
+@media (max-width: 480px) {
+  .auth-brand-panel {
+    min-height: 220px;
+  }
+
+  .auth-brand-panel h1 {
+    font-size: 32px;
+  }
+
+  .auth-content-panel {
+    padding: 32px 20px;
+  }
+
+  .register-form {
+    gap: 14px;
+  }
+}
+
+
+/* =========================================
+   EKIMOVE AUTHENTICATION LAYOUT
+========================================= */
+
+.auth-page {
+  min-height: 100vh;
+  background: #F7F8F1;
+  color: #11190C;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+}
+
+/* Authentication navigation uses the homepage navbar */
+
+.auth-page .ek-header {
+  position: relative;
+  z-index: 20;
+}
+
+.auth-page .ek-nav-links {
+  align-items: center;
+}
+
+.auth-page .ek-nav-links a {
+  text-decoration: none;
+}
+
+.auth-page .ek-nav-links .ek-nav-cta {
+  text-decoration: none;
+}
+
+.auth-page .ek-nav-links button.ek-nav-cta {
+  border: none;
+}
+
+/* Main content */
+
+.auth-main {
+  min-height: calc(100vh - 160px);
+  padding: 85px 0 90px;
+}
+
+.auth-container {
+  max-width: 650px;
+  margin: 0 auto;
+}
+
+.auth-intro {
+  margin-bottom: 35px;
+  text-align: center;
+}
+
+.auth-intro .ek-eyebrow {
+  display: inline-block;
+  margin-bottom: 18px;
+}
+
+.auth-intro h1 {
+  margin: 0 0 16px;
+  color: #11190C;
+  font-size: clamp(34px, 5vw, 52px);
+  font-weight: 800;
+  letter-spacing: -2px;
+  line-height: 1.12;
+}
+
+.auth-intro > p {
+  max-width: 490px;
+  margin: 0 auto;
+  color: #777D70;
+  font-size: 15px;
+  line-height: 1.8;
+}
+
+/* Form card */
+
+.auth-card {
+  padding: 38px;
+  border: 1px solid #E9EAE2;
+  border-radius: 22px;
+  background: #fff;
+  box-shadow: 0 15px 45px rgba(17, 25, 12, 0.06);
+}
+
+.auth-card-heading {
+  margin-bottom: 30px;
+}
+
+.auth-card-accent {
+  display: block;
+  width: 42px;
+  height: 5px;
+  margin-bottom: 20px;
+  border-radius: 10px;
+  background: #E1FF00;
+}
+
+.auth-card-heading h2 {
+  margin: 0 0 10px;
+  color: #11190C;
+  font-size: 25px;
+  font-weight: 800;
+  letter-spacing: -0.8px;
+}
+
+.auth-card-heading p {
+  margin: 0;
+  color: #777D70;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+/* Payment note */
+
+.auth-payment-note {
+  margin-top: 25px;
+  color: #858A7D;
+  font-size: 12px;
+  text-align: center;
+}
+
+/* Footer */
+
+.auth-footer {
+  padding-top: 28px;
+  padding-bottom: 28px;
+}
+
+.auth-footer-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+}
+
+.auth-footer-content > span {
+  color: #B8BEB0;
+  font-size: 12px;
+}
+
+/* Mobile */
+
+@media (max-width: 768px) {
+  .auth-main {
+    padding: 55px 0 65px;
+  }
+
+  .auth-container {
+    width: calc(100% - 40px);
+  }
+
+  .auth-card {
+    padding: 28px 22px;
+    border-radius: 17px;
+  }
+
+  .auth-intro h1 {
+    font-size: 36px;
+  }
+
+  .auth-footer-content {
+    flex-direction: column;
+    text-align: center;
+  }
+}
+
+@media (max-width: 480px) {
+  .auth-main {
+    padding: 42px 0 50px;
+  }
+
+  .auth-intro h1 {
+    font-size: 31px;
+  }
+
+  .auth-card-heading h2 {
+    font-size: 22px;
+  }
+}
