@@ -2,10 +2,17 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
+  ArrowRight,
+  Menu,
+  X,
+} from 'lucide-react'
+
+import {
   getAccessToken,
   getStoredUser,
   logoutPassenger,
 } from '../services/authService.js'
+
 import '../App.css'
 
 export default function AppPage({
@@ -19,112 +26,192 @@ export default function AppPage({
   const [isAuthenticated, setIsAuthenticated] = useState(
     () => Boolean(getAccessToken()),
   )
+
   const [userRole, setUserRole] = useState(
     () => getStoredUser()?.role || '',
   )
 
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+
   const navigate = useNavigate()
+
+  function closeMobileMenu() {
+    setMobileMenuOpen(false)
+  }
 
   function handleLogout() {
     logoutPassenger()
     setIsAuthenticated(false)
     setUserRole('')
+    closeMobileMenu()
     navigate('/login')
   }
 
   return (
-    <div className="site-shell app-page">
-      <header className="app-page-header">
-        <Link
-          className="brand"
-          to="/"
-          aria-label="EkiMove home"
-        >
-          <span className="brand-mark">E</span>
-          <span>
-            <strong>EkiMove</strong>
-            <small>Move around Ekiti</small>
-          </span>
-        </Link>
+    <div className="ek-page auth-page">
 
-        <nav aria-label="Main navigation">
-          <Link to="/">Home</Link>
+      {/* Navigation */}
+      <header className="ek-header">
+        <div className="ek-container ek-nav">
 
-          {isAuthenticated ? (
-            <>
-              {userRole === 'driver' ? (
-                <Link to="/driver/status">
-                  Driver status
+          <Link
+            className="ek-brand"
+            to="/"
+            onClick={closeMobileMenu}
+            aria-label="EkiMove home"
+          >
+            <span className="ek-brand-mark">E</span>
+            <span>
+              EkiMove<span className="ek-brand-period">.</span>
+            </span>
+          </Link>
+
+          <button
+            type="button"
+            className="ek-mobile-menu-toggle"
+            aria-label={mobileMenuOpen ? 'Close menu' : 'Open menu'}
+            aria-expanded={mobileMenuOpen}
+            onClick={() => setMobileMenuOpen((open) => !open)}
+          >
+            {mobileMenuOpen ? <X size={23} /> : <Menu size={23} />}
+          </button>
+
+          <nav
+            className={`ek-nav-links ${mobileMenuOpen ? 'is-open' : ''}`}
+            aria-label="Main navigation"
+          >
+            <Link to="/" onClick={closeMobileMenu}>
+              Home
+            </Link>
+
+            {isAuthenticated ? (
+              <>
+                {userRole === 'driver' ? (
+                  <Link to="/driver/status" onClick={closeMobileMenu}>
+                    Driver status
+                  </Link>
+                ) : userRole === 'super_admin' ? (
+                  <>
+                    <Link to="/admin/dispatch" onClick={closeMobileMenu}>
+                      Admin dispatch
+                    </Link>
+
+                    <Link to="/admin/drivers" onClick={closeMobileMenu}>
+                      Driver verification
+                    </Link>
+
+                    <Link to="/admin/payments" onClick={closeMobileMenu}>
+                      Payment reconciliation
+                    </Link>
+
+                    <Link to="/admin/incidents" onClick={closeMobileMenu}>
+                      Incident management
+                    </Link>
+
+                    <Link to="/admin/locations" onClick={closeMobileMenu}>
+                      Locations &amp; pricing
+                    </Link>
+                  </>
+                ) : (
+                  <>
+                    <Link to="/dashboard" onClick={closeMobileMenu}>
+                      Dashboard
+                    </Link>
+
+                    <Link to="/book-ride" onClick={closeMobileMenu}>
+                      Book a Ride
+                    </Link>
+
+                    <Link to="/my-rides" onClick={closeMobileMenu}>
+                      My Rides
+                    </Link>
+
+                    <Link to="/payments" onClick={closeMobileMenu}>
+                      Payments
+                    </Link>
+                  </>
+                )}
+
+                <button
+                  type="button"
+                  className="ek-button ek-button-dark ek-nav-cta"
+                  onClick={handleLogout}
+                >
+                  Sign out <ArrowRight size={17} />
+                </button>
+              </>
+            ) : (
+              <>
+                <Link to="/login" onClick={closeMobileMenu}>
+                  Sign in
                 </Link>
-              ) : userRole === 'super_admin' ? (
-                <>
-                  <Link to="/admin/dispatch">
-                    Admin dispatch
-                  </Link>
-                  <Link to="/admin/drivers">
-                    Driver verification
-                  </Link>
-                  <Link to="/admin/payments">
-                    Payment reconciliation
-                  </Link>
-                  <Link to="/admin/incidents">
-                    Incident management
-                  </Link>
-                  <Link to="/admin/locations">Locations &amp; pricing</Link>
-                </>
-              ) : (
-                <>
-                  <Link to="/dashboard">Dashboard</Link>
-                  <Link to="/book-ride">Book a Ride</Link>
-                  <Link to="/my-rides">My Rides</Link>
-                  <Link to="/payments">Payments</Link>
-                </>
-              )}
 
-              <button
-                type="button"
-                onClick={handleLogout}
-              >
-                Sign out
-              </button>
-            </>
-          ) : (
-            <>
-              <Link to="/login">Sign in</Link>
-              <Link to="/register">Create account</Link>
-            </>
-          )}
-        </nav>
+                <Link
+                  to="/register"
+                  className="ek-button ek-button-dark ek-nav-cta"
+                  onClick={closeMobileMenu}
+                >
+                  Create account <ArrowRight size={17} />
+                </Link>
+              </>
+            )}
+          </nav>
+        </div>
       </header>
 
-      <main className="app-page-content">
-        <div className="eyebrow">{eyebrow}</div>
-        <h1>{title}</h1>
-        <p>{description}</p>
+      {/* Authentication content */}
+      <main className="auth-main">
+        <div className="ek-container auth-container">
 
-        <section className="app-page-panel">
-          <h2>{sectionTitle}</h2>
-          <p>{sectionText}</p>
+          <section className="auth-intro">
+            <span className="ek-eyebrow">{eyebrow}</span>
 
-          {children || (
-            <div className="app-page-actions">
-              <Link to="/register">Create an account</Link>
-              <Link to="/login">Sign in</Link>
+            <h1>{title}</h1>
+
+            <p>{description}</p>
+          </section>
+
+          <section className="auth-card">
+            <div className="auth-card-heading">
+              <span className="auth-card-accent" />
+
+              <h2>{sectionTitle}</h2>
+
+              <p>{sectionText}</p>
             </div>
-          )}
-        </section>
 
-        <p className="app-page-note">
-          EkiMove uses bank transfer for ride payments.
-          Cash payment is not supported.
-        </p>
+            {children || (
+              <div className="app-page-actions">
+                <Link to="/register">Create an account</Link>
+                <Link to="/login">Sign in</Link>
+              </div>
+            )}
+          </section>
+
+          <p className="auth-payment-note">
+            EkiMove uses bank transfer for ride payments.
+            Cash payment is not supported.
+          </p>
+        </div>
       </main>
 
-      <footer className="app-page-footer">
-        Made for the way Ekiti moves. &copy;{' '}
-        {new Date().getFullYear()} EkiMove
+      {/* Footer */}
+      <footer className="ek-footer auth-footer">
+        <div className="ek-container auth-footer-content">
+          <Link className="ek-brand ek-brand-footer" to="/">
+            <span className="ek-brand-mark">E</span>
+            <span>
+              EkiMove<span className="ek-brand-period">.</span>
+            </span>
+          </Link>
+
+          <span>
+            Made for the way Ekiti moves. ©{' '}
+            {new Date().getFullYear()} EkiMove
+          </span>
+        </div>
       </footer>
+
     </div>
   )
 }
-
