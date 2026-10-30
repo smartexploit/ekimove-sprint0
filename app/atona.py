@@ -546,8 +546,27 @@ def answer_geography(
             )
             route_response.raise_for_status()
             route_data = route_response.json()
-        except (httpx.HTTPError, ValueError):
-            logger.exception("Atọ́nà Geoapify routing request failed")
+        except httpx.HTTPStatusError as exc:
+            logger.error(
+                "Geoapify routing failed with HTTP status %s",
+                exc.response.status_code,
+            )
+            return {
+                "kind": "directions",
+                "reply": (
+                    "I verified both locations, but couldn't retrieve a route "
+                    "right now. Please try again shortly."
+                ),
+                "places": [public_location(origin), public_location(destination)],
+                "route": None,
+                "context": {"destination": destination_query},
+                "needs_origin": False,
+            }
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning(
+                "Geoapify routing failed: %s",
+                type(exc).__name__,
+            )
             return {
                 "kind": "directions",
                 "reply": (

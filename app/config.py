@@ -1,3 +1,4 @@
+from pydantic import field_validator
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -25,6 +26,14 @@ class Settings(BaseSettings):
     atona_enabled: bool = False
     # Optional map and geocoding provider; disabled without a key.
     geoapify_api_key: str | None = None
+
+    @field_validator("geoapify_api_key", mode="before")
+    @classmethod
+    def clean_geoapify_api_key(cls, value):
+        if value is None:
+            return None
+        cleaned = str(value).strip()
+        return cleaned or None
 
     # Interswitch Web Checkout. TEST is the safe default.
     interswitch_merchant_code: str | None = None
