@@ -6,13 +6,12 @@ import SOSButton from '../../components/SOSButton.jsx'
 import './MyRidesPage.css'
 
 function formatFare(value) {
-  if (value === null || value === undefined) return 'Not available';
-
-  return `₦${Number(value).toLocaleString('en-NG')}`;
+  if (value === null || value === undefined) return 'Not available'
+  return `₦${Number(value).toLocaleString('en-NG')}`
 }
 
 function formatDate(value) {
-  if (!value) return 'Date unavailable';
+  if (!value) return 'Date unavailable'
 
   return new Date(value).toLocaleString('en-NG', {
     day: 'numeric',
@@ -20,331 +19,292 @@ function formatDate(value) {
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-  });
+  })
 }
 
 function readableStatus(status) {
-  if (!status) return 'Unknown';
+  if (!status) return 'Unknown'
 
   return status
     .replaceAll('_', ' ')
-    .replace(/\b\w/g, (char) => char.toUpperCase());
+    .replace(/\b\w/g, (char) => char.toUpperCase())
 }
 
 function getStatusClass(status) {
-  const normalized = (status || '').toLowerCase();
+  const normalized = (status || '').toLowerCase()
 
-  if (['completed', 'paid'].includes(normalized)) return 'completed';
-  if (['accepted', 'assigned', 'in_progress', 'ongoing'].includes(normalized)) {
-    return 'active';
+  if (['completed', 'paid'].includes(normalized)) return 'completed'
+
+  if (
+    ['accepted', 'assigned', 'in_progress', 'ongoing'].includes(normalized)
+  ) {
+    return 'active'
   }
+
   if (['cancelled', 'rejected', 'failed'].includes(normalized)) {
-    return 'cancelled';
+    return 'cancelled'
   }
 
-  return 'pending';
+  return 'pending'
 }
 
 function getRideId(ride) {
-  return ride.id || ride.ride_request_id || ride.request_id || 'N/A';
+  return ride.id || ride.ride_request_id || ride.request_id || 'N/A'
 }
 
 export default function MyRidesPage() {
-  const [rides, setRides] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [refreshKey, setRefreshKey] = useState(0);
+  const [rides, setRides] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
-    let active = true;
+    let active = true
 
     async function fetchRides() {
       try {
-        const data = await apiRequest('/api/v1/ride-requests/my-rides');
+        const data = await apiRequest('/api/v1/ride-requests/my-rides')
 
         if (active) {
-          setRides(Array.isArray(data) ? data : []);
-          setError('');
+          setRides(Array.isArray(data) ? data : [])
+          setError('')
         }
       } catch (err) {
         if (active) {
-          setError(err.message || 'Unable to load your rides.');
+          setError(err.message || 'Unable to load your rides.')
         }
       } finally {
-        if (active) setLoading(false);
+        if (active) setLoading(false)
       }
     }
 
-    fetchRides();
+    fetchRides()
 
-    const interval = setInterval(fetchRides, 10000);
+    const interval = setInterval(fetchRides, 10000)
 
     return () => {
-      active = false;
-      clearInterval(interval);
-    };
-  }, [refreshKey]);
+      active = false
+      clearInterval(interval)
+    }
+  }, [refreshKey])
 
   const activeRides = rides.filter((ride) =>
     ['requested', 'accepted', 'assigned', 'in_progress', 'ongoing'].includes(
       (ride.ride_status || ride.status || '').toLowerCase()
     )
-  );
+  )
 
-  const completedRides = rides.filter((ride) =>
-    (ride.ride_status || ride.status || '').toLowerCase() === 'completed'
-  );
+  const completedRides = rides.filter(
+    (ride) =>
+      (ride.ride_status || ride.status || '').toLowerCase() === 'completed'
+  )
+
+  const refreshRides = () => {
+    setLoading(true)
+    setRefreshKey((prev) => prev + 1)
+  }
 
   return (
-    <AppPage>
-      <div className="rides-dashboard">
+    <AppPage
+      eyebrow="YOUR JOURNEY"
+      title="My rides"
+      description="All your journeys, in one place. Keep track of your bookings and ride details."
+      sectionTitle="Ride history"
+      sectionText="View your requested, ongoing and completed rides."
+    >
+      <div className="my-rides-page">
 
-        {/* Sidebar */}
-        <aside className="rides-sidebar">
-          <Link to="/" className="rides-logo">
-            <span className="rides-logo-icon">E</span>
-            <span>EkiMove</span>
-          </Link>
-
-          <div className="sidebar-section">
-            <p className="sidebar-label">MENU</p>
-
-            <Link to="/dashboard" className="sidebar-link">
-              <span>▦</span> Overview
-            </Link>
-
-            <Link to="/my-rides" className="sidebar-link active">
-              <span>↗</span> My Rides
-            </Link>
-
-            <Link to="/payments" className="sidebar-link">
-              <span>₦</span> Payments
-            </Link>
-
-            <Link to="/profile" className="sidebar-link">
-              <span>◉</span> My Profile
-            </Link>
+        <div className="my-rides-toolbar">
+          <div>
+            <span className="my-rides-overline">YOUR ACTIVITY</span>
+            <h2>Your journeys</h2>
+            <p>Here's what's happening with your rides.</p>
           </div>
 
-          <div className="sidebar-bottom">
-            <p className="sidebar-label">SUPPORT</p>
-            <Link to="/support" className="sidebar-link">
-              <span>?</span> Help & Support
-            </Link>
+          <button
+            type="button"
+            className="my-rides-refresh"
+            onClick={refreshRides}
+            disabled={loading}
+          >
+            <span className="refresh-icon">↻</span>
+            {loading ? 'Refreshing...' : 'Refresh'}
+          </button>
+        </div>
 
-            <div className="sidebar-help">
-              <div className="help-icon">✦</div>
-              <strong>Need assistance?</strong>
-              <p>Our support team is ready to help.</p>
-              <Link to="/support">Contact support →</Link>
+        <div className="my-rides-summary">
+          <div className="my-rides-summary-card">
+            <div className="summary-symbol total-symbol">↗</div>
+            <div>
+              <p>Total rides</p>
+              <h3>{rides.length}</h3>
             </div>
           </div>
-        </aside>
 
-        {/* Main content */}
-        <main className="rides-main">
+          <div className="my-rides-summary-card">
+            <div className="summary-symbol active-symbol">◷</div>
+            <div>
+              <p>Active rides</p>
+              <h3>{activeRides.length}</h3>
+            </div>
+          </div>
 
-          <header className="rides-topbar">
-            <div className="breadcrumb">
-              Dashboard <span>/</span> <strong>My Rides</strong>
+          <div className="my-rides-summary-card">
+            <div className="summary-symbol completed-symbol">✓</div>
+            <div>
+              <p>Completed rides</p>
+              <h3>{completedRides.length}</h3>
+            </div>
+          </div>
+        </div>
+
+        {error && rides.length > 0 && (
+          <p className="my-rides-error" role="alert">
+            {error}
+          </p>
+        )}
+
+        <section className="my-rides-history">
+          <div className="my-rides-history-heading">
+            <div>
+              <h2>All rides</h2>
+              <p>Your booking history and current ride requests.</p>
             </div>
 
-            <div className="topbar-user">
-              <div className="user-avatar">P</div>
-              <span>Passenger</span>
+            <span className="my-rides-count">
+              {rides.length} {rides.length === 1 ? 'ride' : 'rides'}
+            </span>
+          </div>
+
+          {loading && rides.length === 0 ? (
+            <div className="my-rides-state">
+              <div className="my-rides-spinner" />
+              <h3>Getting your rides</h3>
+              <p>Please wait while we load your journey history.</p>
             </div>
-          </header>
-
-          <section className="rides-content">
-
-            <div className="rides-heading">
-              <div>
-                <p className="dashboard-eyebrow">YOUR JOURNEY</p>
-                <h1>My Rides</h1>
-                <p className="heading-description">
-                  View and manage all your ride requests in one place.
-                </p>
-              </div>
-
+          ) : error && rides.length === 0 ? (
+            <div className="my-rides-state">
+              <div className="my-rides-empty-icon">!</div>
+              <h3>We couldn't load your rides</h3>
+              <p>{error}</p>
               <button
-                className="refresh-button"
-                onClick={() => {
-                  setLoading(true);
-                  setRefreshKey((prev) => prev + 1);
-                }}
+                type="button"
+                className="my-rides-primary-button"
+                onClick={refreshRides}
               >
-                ↻ Refresh
+                Try again
               </button>
             </div>
-
-            {/* Summary cards */}
-            <div className="ride-summary-grid">
-              <div className="ride-summary-card">
-                <div className="summary-icon total-icon">↗</div>
-                <div>
-                  <p>Total Rides</p>
-                  <h2>{rides.length}</h2>
-                </div>
-              </div>
-
-              <div className="ride-summary-card">
-                <div className="summary-icon active-icon">◷</div>
-                <div>
-                  <p>Active Rides</p>
-                  <h2>{activeRides.length}</h2>
-                </div>
-              </div>
-
-              <div className="ride-summary-card">
-                <div className="summary-icon completed-icon">✓</div>
-                <div>
-                  <p>Completed Rides</p>
-                  <h2>{completedRides.length}</h2>
-                </div>
-              </div>
+          ) : rides.length === 0 ? (
+            <div className="my-rides-state">
+              <div className="my-rides-empty-icon">↗</div>
+              <h3>Your next journey starts here</h3>
+              <p>
+                You haven't booked a ride yet. When you book your first ride,
+                your journey details will appear here.
+              </p>
+              <Link to="/book-ride" className="my-rides-primary-button">
+                Book a ride <span>→</span>
+              </Link>
             </div>
+          ) : (
+            <div className="my-rides-list">
+              {rides.map((ride, index) => {
+                const status = ride.ride_status || ride.status
+                const statusClass = getStatusClass(status)
 
-            {/* Rides list */}
-            <section className="rides-list-section">
-              <div className="rides-list-heading">
-                <div>
-                  <h2>Ride History</h2>
-                  <p>All your previous and ongoing trips.</p>
-                </div>
-
-                <span className="ride-count">{rides.length} rides</span>
-              </div>
-
-              {loading && rides.length === 0 ? (
-                <div className="rides-state">
-                  <div className="loading-spinner" />
-                  <p>Loading your rides...</p>
-                </div>
-              ) : error && rides.length === 0 ? (
-                <div className="rides-state error-state">
-                  <h3>Unable to load rides</h3>
-                  <p>{error}</p>
-                  <button
-                    onClick={() => {
-                      setLoading(true);
-                      setRefreshKey((prev) => prev + 1);
-                    }}
+                return (
+                  <article
+                    className="my-ride-card"
+                    key={
+                      getRideId(ride) !== 'N/A'
+                        ? getRideId(ride)
+                        : index
+                    }
                   >
-                    Try again
-                  </button>
-                </div>
-              ) : rides.length === 0 ? (
-                <div className="rides-state">
-                  <div className="empty-ride-icon">↗</div>
-                  <h3>No rides yet</h3>
-                  <p>Your ride requests will appear here once you book a ride.</p>
-                  <Link to="/book-ride" className="book-ride-button">
-                    Book a Ride
-                  </Link>
-                </div>
-              ) : (
-                <div className="rides-card-list">
-                  {rides.map((ride, index) => {
-                    const status = ride.ride_status || ride.status;
-                    const statusClass = getStatusClass(status);
-
-                    return (
-                      <article
-                        className="ride-card"
-                        key={getRideId(ride) !== 'N/A'
-                          ? getRideId(ride)
-                          : index}
-                      >
-                        <div className="ride-card-top">
-                          <div className="ride-reference">
-                            <span className="ride-car-icon">🚘</span>
-                            <div>
-                              <span className="ride-reference-label">
-                                RIDE REFERENCE
-                              </span>
-                              <strong>#{getRideId(ride)}</strong>
-                            </div>
-                          </div>
-
-                          <span className={`ride-status ${statusClass}`}>
-                            <span className="status-dot" />
-                            {readableStatus(status)}
-                          </span>
+                    <div className="my-ride-card-header">
+                      <div className="my-ride-reference">
+                        <span className="my-ride-car-icon">🚘</span>
+                        <div>
+                          <small>RIDE REFERENCE</small>
+                          <strong>#{getRideId(ride)}</strong>
                         </div>
+                      </div>
 
-                        <div className="ride-route">
-                          <div className="route-point">
-                            <span className="route-dot pickup-dot" />
-                            <div>
-                              <small>PICKUP LOCATION</small>
-                              <strong>{ride.origin || 'Not provided'}</strong>
-                            </div>
-                          </div>
+                      <span className={`my-ride-status ${statusClass}`}>
+                        <span />
+                        {readableStatus(status)}
+                      </span>
+                    </div>
 
-                          <div className="route-line" />
-
-                          <div className="route-point">
-                            <span className="route-dot destination-dot" />
-                            <div>
-                              <small>DESTINATION</small>
-                              <strong>{ride.destination || 'Not provided'}</strong>
-                            </div>
-                          </div>
+                    <div className="my-ride-route">
+                      <div className="my-ride-location">
+                        <span className="pickup-marker" />
+                        <div>
+                          <small>FROM</small>
+                          <strong>{ride.origin || 'Not provided'}</strong>
                         </div>
+                      </div>
 
-                        <div className="ride-details">
-                          <div>
-                            <small>VEHICLE</small>
-                            <strong>{ride.vehicle_type || 'Not specified'}</strong>
-                          </div>
+                      <div className="my-ride-route-line" />
 
-                          <div>
-                            <small>PASSENGERS</small>
-                            <strong>{ride.passengers ?? 'N/A'}</strong>
-                          </div>
-
-                          <div>
-                            <small>QUOTED FARE</small>
-                            <strong className="ride-fare">
-                              {formatFare(ride.quoted_fare)}
-                            </strong>
-                          </div>
-
-                          <div>
-                            <small>DATE REQUESTED</small>
-                            <strong>{formatDate(ride.created_at)}</strong>
-                          </div>
+                      <div className="my-ride-location">
+                        <span className="destination-marker" />
+                        <div>
+                          <small>TO</small>
+                          <strong>
+                            {ride.destination || 'Not provided'}
+                          </strong>
                         </div>
+                      </div>
+                    </div>
 
-                        <div className="ride-card-actions">
-                          {ride.assigned_ride_id && (
-                            <div className="ride-sos-action">
-                              <SOSButton
-                                rideId={ride.assigned_ride_id}
-                                rideStatus={ride.ride_status}
-                              />
-                            </div>
-                          )}
+                    <div className="my-ride-information">
+                      <div>
+                        <small>VEHICLE</small>
+                        <strong>{ride.vehicle_type || 'Not specified'}</strong>
+                      </div>
 
-                          {ride.assigned_ride_id && (
-                            <Link
-                              to={`/payments/${ride.assigned_ride_id}`}
-                              className="payment-link"
-                            >
-                              View Payment →
-                            </Link>
-                          )}
-                        </div>
-                      </article>
-                    );
-                  })}
-                </div>
-              )}
-            </section>
+                      <div>
+                        <small>PASSENGERS</small>
+                        <strong>{ride.passengers ?? 'N/A'}</strong>
+                      </div>
 
-          </section>
-        </main>
+                      <div>
+                        <small>FARE</small>
+                        <strong className="my-ride-fare">
+                          {formatFare(ride.quoted_fare)}
+                        </strong>
+                      </div>
+
+                      <div>
+                        <small>DATE REQUESTED</small>
+                        <strong>{formatDate(ride.created_at)}</strong>
+                      </div>
+                    </div>
+
+                    {ride.assigned_ride_id && (
+                      <div className="my-ride-actions">
+                        <SOSButton
+                          rideId={ride.assigned_ride_id}
+                          rideStatus={ride.ride_status}
+                        />
+
+                        <Link
+                          to={`/payments/${ride.assigned_ride_id}`}
+                          className="my-ride-payment-link"
+                        >
+                          View payment details <span>→</span>
+                        </Link>
+                      </div>
+                    )}
+                  </article>
+                )
+              })}
+            </div>
+          )}
+        </section>
       </div>
     </AppPage>
-  );
+  )
 }

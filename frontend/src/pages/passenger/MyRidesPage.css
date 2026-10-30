@@ -1,688 +1,559 @@
+/* =====================================
+   MY RIDES - EKIMOVE
+===================================== */
 
-/* MY RIDES DASHBOARD */
-
-.rides-dashboard {
-  display: flex;
-  min-height: 100vh;
-  background: #f5f6fa;
-  color: #172033;
-  font-family: Inter, Arial, sans-serif;
+.my-rides-page {
+  width: 100%;
+  color: #252525;
 }
 
-/* SIDEBAR */
+/* TOOLBAR */
 
-.rides-sidebar {
-  width: 250px;
-  flex-shrink: 0;
-  background: #111c35;
-  color: #fff;
-  padding: 30px 20px;
-  display: flex;
-  flex-direction: column;
-}
-
-.rides-logo {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  color: #fff;
-  font-size: 21px;
-  font-weight: 800;
-  text-decoration: none;
-  margin-bottom: 55px;
-}
-
-.rides-logo-icon {
-  width: 36px;
-  height: 36px;
-  display: grid;
-  place-items: center;
-  border-radius: 10px;
-  background: #e9a23b;
-  color: #111c35;
-  font-weight: 900;
-}
-
-.sidebar-section,
-.sidebar-bottom {
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-}
-
-.sidebar-label {
-  color: #8390a9;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 1.5px;
-  margin: 0 0 12px 10px;
-}
-
-.sidebar-link {
-  display: flex;
-  align-items: center;
-  gap: 13px;
-  padding: 13px 12px;
-  border-radius: 8px;
-  color: #b8c2d4;
-  text-decoration: none;
-  font-size: 13px;
-  font-weight: 500;
-  transition: 0.2s ease;
-}
-
-.sidebar-link span {
-  width: 20px;
-  font-size: 18px;
-  text-align: center;
-}
-
-.sidebar-link:hover,
-.sidebar-link.active {
-  background: #263552;
-  color: #fff;
-}
-
-.sidebar-link.active {
-  border-left: 3px solid #e9a23b;
-}
-
-.sidebar-bottom {
-  margin-top: auto;
-}
-
-.sidebar-help {
-  background: #1d2b47;
-  border-radius: 12px;
-  padding: 18px;
-  margin-top: 25px;
-}
-
-.help-icon {
-  color: #e9a23b;
-  font-size: 23px;
-  margin-bottom: 12px;
-}
-
-.sidebar-help strong {
-  display: block;
-  font-size: 13px;
-}
-
-.sidebar-help p {
-  color: #aab5c8;
-  font-size: 11px;
-  line-height: 1.6;
-}
-
-.sidebar-help a {
-  color: #f0b75d;
-  font-size: 11px;
-  text-decoration: none;
-}
-
-/* MAIN AREA */
-
-.rides-main {
-  flex: 1;
-  min-width: 0;
-}
-
-.rides-topbar {
-  height: 75px;
-  padding: 0 5%;
-  background: #fff;
-  border-bottom: 1px solid #e9ebf0;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.breadcrumb {
-  color: #9299a8;
-  font-size: 12px;
-}
-
-.breadcrumb span {
-  margin: 0 10px;
-}
-
-.breadcrumb strong {
-  color: #172033;
-}
-
-.topbar-user {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.user-avatar {
-  width: 34px;
-  height: 34px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  background: #e9a23b;
-  color: #172033;
-  font-weight: 800;
-}
-
-.rides-content {
-  max-width: 1200px;
-  padding: 40px 5%;
-  margin: auto;
-}
-
-/* PAGE HEADING */
-
-.rides-heading {
+.my-rides-toolbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 20px;
-  margin-bottom: 30px;
+  margin: 28px 0 24px;
 }
 
-.dashboard-eyebrow {
-  color: #b47b29;
+.my-rides-overline {
+  display: block;
+  margin-bottom: 8px;
+  color: #d88920;
   font-size: 10px;
   font-weight: 800;
-  letter-spacing: 2px;
-  margin-bottom: 9px;
+  letter-spacing: 1.3px;
 }
 
-.rides-heading h1 {
-  color: #172033;
-  font-size: 30px;
+.my-rides-toolbar h2 {
+  margin: 0 0 6px;
+  font-size: 21px;
+  font-weight: 750;
+  letter-spacing: -0.5px;
+}
+
+.my-rides-toolbar p {
   margin: 0;
-  font-weight: 800;
-}
-
-.heading-description {
-  color: #8991a1;
+  color: #858585;
   font-size: 13px;
-  margin-top: 9px;
+  line-height: 1.6;
 }
 
-.refresh-button {
-  border: 1px solid #dce1e9;
-  background: #fff;
-  color: #263552;
-  padding: 11px 18px;
+.my-rides-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 11px 17px;
+  border: 1px solid #e9dfd0;
   border-radius: 7px;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.refresh-button:hover {
-  background: #f0f2f6;
-}
-
-/* SUMMARY CARDS */
-
-.ride-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 18px;
-  margin-bottom: 40px;
-}
-
-.ride-summary-card {
   background: #fff;
-  border: 1px solid #e9ebf0;
-  border-radius: 11px;
-  padding: 22px;
+  color: #383838;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.my-rides-refresh:hover:not(:disabled) {
+  border-color: #e99b32;
+  background: #fff9f0;
+  color: #c47a17;
+}
+
+.my-rides-refresh:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.refresh-icon {
+  font-size: 17px;
+}
+
+/* SUMMARY */
+
+.my-rides-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 38px;
+}
+
+.my-rides-summary-card {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 15px;
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid #eee9e1;
+  border-radius: 9px;
+  background: #fff;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
-.summary-icon {
-  width: 45px;
-  height: 45px;
+.my-rides-summary-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 7px 20px rgba(40, 30, 15, 0.04);
+}
+
+.summary-symbol {
   display: grid;
   place-items: center;
-  border-radius: 10px;
-  font-size: 22px;
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 9px;
+  font-size: 21px;
   font-weight: 700;
 }
 
-.total-icon {
-  background: #edf1fb;
-  color: #425b9c;
+.total-symbol {
+  background: #fff3df;
+  color: #d88920;
 }
 
-.active-icon {
-  background: #fff4df;
-  color: #b77b1e;
+.active-symbol {
+  background: #edf2ff;
+  color: #496bb0;
 }
 
-.completed-icon {
-  background: #e6f6ed;
-  color: #27965c;
+.completed-symbol {
+  background: #eaf7ef;
+  color: #298653;
 }
 
-.ride-summary-card p {
-  color: #9299a8;
+.my-rides-summary-card p {
+  margin: 0 0 5px;
+  color: #888;
   font-size: 12px;
-  margin: 0 0 7px;
 }
 
-.ride-summary-card h2 {
-  color: #172033;
+.my-rides-summary-card h3 {
+  margin: 0;
+  color: #252525;
   font-size: 25px;
-  margin: 0;
+  font-weight: 750;
 }
 
-/* RIDE HISTORY */
+/* ERROR */
 
-.rides-list-section {
-  background: #fff;
-  border: 1px solid #e9ebf0;
-  border-radius: 12px;
-  padding: 25px;
-}
-
-.rides-list-heading {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 25px;
-}
-
-.rides-list-heading h2 {
-  color: #172033;
-  font-size: 18px;
-  margin: 0 0 7px;
-}
-
-.rides-list-heading p {
-  color: #9299a8;
+.my-rides-error {
+  padding: 12px 15px;
+  margin-bottom: 20px;
+  border: 1px solid #f1d1d1;
+  border-radius: 7px;
+  background: #fff5f5;
+  color: #b64242;
   font-size: 12px;
-  margin: 0;
 }
 
-.ride-count {
-  background: #f0f2f6;
-  color: #596579;
-  padding: 7px 12px;
-  border-radius: 20px;
-  font-size: 11px;
+/* HISTORY */
+
+.my-rides-history {
+  margin-top: 10px;
 }
 
-/* RIDE CARDS */
-
-.rides-card-list {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-}
-
-.ride-card {
-  border: 1px solid #e8ebf1;
-  border-radius: 10px;
-  padding: 22px;
-  transition: 0.2s ease;
-}
-
-.ride-card:hover {
-  border-color: #cbd3e0;
-  box-shadow: 0 5px 20px rgba(23, 32, 51, 0.04);
-}
-
-.ride-card-top {
+.my-rides-history-heading {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 15px;
-  padding-bottom: 18px;
-  border-bottom: 1px solid #edf0f4;
+  margin-bottom: 20px;
 }
 
-.ride-reference {
+.my-rides-history-heading h2 {
+  margin: 0 0 6px;
+  color: #252525;
+  font-size: 18px;
+  font-weight: 750;
+}
+
+.my-rides-history-heading p {
+  margin: 0;
+  color: #858585;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.my-rides-count {
+  flex-shrink: 0;
+  padding: 7px 12px;
+  border: 1px solid #f0e4d2;
+  border-radius: 30px;
+  background: #fff8ee;
+  color: #b87920;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* RIDE LIST */
+
+.my-rides-list {
+  display: grid;
+  gap: 16px;
+}
+
+/* RIDE CARD */
+
+.my-ride-card {
+  padding: 22px 24px;
+  border: 1px solid #ece7df;
+  border-radius: 10px;
+  background: #fff;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.my-ride-card:hover {
+  border-color: #e8c58f;
+  box-shadow: 0 8px 24px rgba(45, 35, 20, 0.045);
+}
+
+.my-ride-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 15px;
+  padding-bottom: 17px;
+  border-bottom: 1px solid #f0ede8;
+}
+
+.my-ride-reference {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
 }
 
-.ride-car-icon {
-  width: 42px;
-  height: 42px;
+.my-ride-car-icon {
   display: grid;
   place-items: center;
+  flex-shrink: 0;
+  width: 43px;
+  height: 43px;
   border-radius: 9px;
-  background: #f1f3f8;
+  background: #fff4e4;
   font-size: 20px;
 }
 
-.ride-reference-label,
-.ride-details small,
-.route-point small {
+.my-ride-reference small,
+.my-ride-location small,
+.my-ride-information small {
   display: block;
-  color: #a0a6b2;
+  margin-bottom: 6px;
+  color: #999;
   font-size: 9px;
-  letter-spacing: 0.8px;
-  font-weight: 700;
-  margin-bottom: 5px;
+  font-weight: 750;
+  letter-spacing: 0.9px;
 }
 
-.ride-reference strong {
+.my-ride-reference strong {
+  color: #292929;
   font-size: 13px;
-  color: #172033;
+  overflow-wrap: anywhere;
 }
 
-.ride-status {
+/* STATUS */
+
+.my-ride-status {
   display: inline-flex;
   align-items: center;
   gap: 7px;
+  flex-shrink: 0;
   padding: 7px 11px;
-  border-radius: 20px;
+  border-radius: 30px;
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 750;
   white-space: nowrap;
 }
 
-.status-dot {
+.my-ride-status > span {
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: currentColor;
 }
 
-.ride-status.pending {
-  background: #fff5df;
-  color: #b77b1e;
+.my-ride-status.pending {
+  background: #fff5e5;
+  color: #bd842e;
 }
 
-.ride-status.active {
-  background: #eaf1ff;
-  color: #4269b5;
+.my-ride-status.active {
+  background: #edf2ff;
+  color: #496bb0;
 }
 
-.ride-status.completed {
-  background: #e8f7ee;
-  color: #278b56;
+.my-ride-status.completed {
+  background: #eaf7ef;
+  color: #298653;
 }
 
-.ride-status.cancelled {
+.my-ride-status.cancelled {
   background: #fff0f0;
-  color: #cf5555;
+  color: #c64d4d;
 }
 
 /* ROUTE */
 
-.ride-route {
-  padding: 23px 0;
+.my-ride-route {
+  position: relative;
+  padding: 22px 0;
 }
 
-.route-point {
+.my-ride-location {
   display: flex;
   align-items: flex-start;
   gap: 13px;
 }
 
-.route-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  margin-top: 3px;
-}
-
-.pickup-dot {
-  background: #299b67;
-}
-
-.destination-dot {
-  background: #e69d35;
-}
-
-.route-point strong {
+.my-ride-location strong {
   display: block;
-  color: #263247;
+  color: #333;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 650;
+  line-height: 1.6;
   overflow-wrap: anywhere;
 }
 
-.route-line {
-  height: 23px;
-  border-left: 1px dashed #cbd1dc;
-  margin: 4px 0 4px 4px;
+.pickup-marker,
+.destination-marker {
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
+  width: 11px;
+  height: 11px;
+  margin-top: 3px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px currentColor;
 }
 
-/* RIDE DETAILS */
+.pickup-marker {
+  background: #299b67;
+  color: #299b67;
+}
 
-.ride-details {
+.destination-marker {
+  background: #e99b32;
+  color: #e99b32;
+}
+
+.my-ride-route-line {
+  height: 23px;
+  margin: 2px 0 2px 5px;
+  border-left: 1px dashed #d8d1c7;
+}
+
+/* RIDE INFORMATION */
+
+.my-ride-information {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 15px;
   padding: 18px 0;
-  border-top: 1px solid #edf0f4;
-  border-bottom: 1px solid #edf0f4;
+  border-top: 1px solid #f0ede8;
+  border-bottom: 1px solid #f0ede8;
 }
 
-.ride-details strong {
-  color: #344055;
+.my-ride-information > div {
+  min-width: 0;
+}
+
+.my-ride-information strong {
+  display: block;
+  color: #363636;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 650;
+  line-height: 1.6;
   overflow-wrap: anywhere;
 }
 
-.ride-details .ride-fare {
-  color: #238957;
-  font-size: 13px;
+.my-ride-information .my-ride-fare {
+  color: #d88920;
+  font-size: 14px;
   font-weight: 800;
 }
 
 /* ACTIONS */
 
-.ride-card-actions {
+.my-ride-actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
-  align-items: center;
   gap: 12px;
-  margin-top: 18px;
   flex-wrap: wrap;
+  margin-top: 18px;
 }
 
-.payment-link {
-  display: inline-block;
-  padding: 10px 15px;
-  border-radius: 6px;
-  background: #172b4d;
-  color: #fff;
-  text-decoration: none;
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.payment-link:hover {
-  background: #263e67;
-}
-
-.ride-sos-action {
-  display: flex;
+.my-ride-payment-link {
+  display: inline-flex;
   align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 11px 16px;
+  border: 1px solid #e99b32;
+  border-radius: 6px;
+  background: #e99b32;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  text-decoration: none;
+  transition: background 0.2s ease;
 }
 
-/* EMPTY AND LOADING STATES */
+.my-ride-payment-link:hover {
+  background: #d88920;
+  border-color: #d88920;
+}
 
-.rides-state {
+/* EMPTY / LOADING STATES */
+
+.my-rides-state {
+  padding: 55px 20px;
+  border: 1px dashed #e5ded3;
+  border-radius: 10px;
+  background: #fffdf9;
   text-align: center;
-  padding: 65px 20px;
-  color: #9299a8;
 }
 
-.rides-state h3 {
-  color: #263247;
-  font-size: 17px;
+.my-rides-state h3 {
   margin: 12px 0 8px;
+  color: #292929;
+  font-size: 17px;
 }
 
-.rides-state p {
+.my-rides-state p {
+  max-width: 380px;
+  margin: 0 auto 18px;
+  color: #777;
   font-size: 12px;
   line-height: 1.7;
 }
 
-.empty-ride-icon {
-  width: 55px;
-  height: 55px;
-  margin: auto;
+.my-rides-empty-icon {
   display: grid;
   place-items: center;
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 15px;
   border-radius: 50%;
-  background: #f0f2f6;
-  color: #66748a;
-  font-size: 24px;
+  background: #fff1da;
+  color: #d88920;
+  font-size: 23px;
+  font-weight: 700;
 }
 
-.book-ride-button {
-  display: inline-block;
-  margin-top: 12px;
+.my-rides-primary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
   padding: 12px 20px;
-  border-radius: 7px;
-  background: #172b4d;
+  border: none;
+  border-radius: 6px;
+  background: #e99b32;
   color: #fff;
-  text-decoration: none;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.2s ease;
 }
 
-.loading-spinner {
+.my-rides-primary-button:hover {
+  background: #d88920;
+}
+
+.my-rides-spinner {
   width: 28px;
   height: 28px;
-  margin: auto;
-  border: 3px solid #e9edf3;
-  border-top-color: #172b4d;
+  margin: 0 auto 15px;
+  border: 3px solid #f1e6d5;
+  border-top-color: #e99b32;
   border-radius: 50%;
-  animation: rides-spin 0.8s linear infinite;
+  animation: my-rides-spin 0.8s linear infinite;
 }
 
-@keyframes rides-spin {
+@keyframes my-rides-spin {
   to {
     transform: rotate(360deg);
   }
 }
 
-.error-state button {
-  margin-top: 10px;
-  padding: 10px 18px;
-  border: none;
-  border-radius: 6px;
-  background: #172b4d;
-  color: #fff;
-  cursor: pointer;
-}
-
 /* RESPONSIVE */
 
-@media (max-width: 900px) {
-  .rides-sidebar {
-    width: 210px;
-  }
-
-  .ride-details {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-@media (max-width: 650px) {
-  .rides-dashboard {
-    display: block;
-  }
-
-  .rides-sidebar {
-    width: 100%;
-    padding: 15px 18px;
-  }
-
-  .rides-logo {
-    margin-bottom: 15px;
-  }
-
-  .sidebar-section {
-    flex-direction: row;
-    flex-wrap: wrap;
-    gap: 5px;
-  }
-
-  .sidebar-label,
-  .sidebar-bottom {
-    display: none;
-  }
-
-  .sidebar-link {
-    padding: 9px;
-    font-size: 11px;
-  }
-
-  .rides-topbar {
-    height: 60px;
-    padding: 0 18px;
-  }
-
-  .rides-content {
-    padding: 28px 16px;
-  }
-
-  .rides-heading {
-    align-items: flex-start;
-  }
-
-  .rides-heading h1 {
-    font-size: 25px;
-  }
-
-  .heading-description {
-    line-height: 1.6;
-  }
-
-  .ride-summary-grid {
-    grid-template-columns: 1fr;
+@media (max-width: 760px) {
+  .my-rides-summary {
     gap: 10px;
   }
 
-  .ride-summary-card {
+  .my-rides-summary-card {
     padding: 15px;
+    gap: 10px;
   }
 
-  .rides-list-section {
-    padding: 16px;
+  .summary-symbol {
+    width: 38px;
+    height: 38px;
   }
 
-  .ride-card {
-    padding: 15px;
+  .my-ride-information {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: 18px;
   }
+}
 
-  .ride-card-top {
+@media (max-width: 520px) {
+  .my-rides-toolbar {
     align-items: flex-start;
   }
 
-  .ride-details {
-    grid-template-columns: repeat(2, 1fr);
+  .my-rides-summary {
+    grid-template-columns: 1fr;
   }
 
-  .ride-card-actions {
-    justify-content: flex-start;
+  .my-rides-summary-card {
+    padding: 14px 16px;
+  }
+
+  .my-rides-summary-card h3 {
+    font-size: 22px;
+  }
+
+  .my-rides-history-heading {
+    align-items: flex-start;
+  }
+
+  .my-ride-card {
+    padding: 16px;
+  }
+
+  .my-ride-card-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .my-ride-information {
+    gap: 16px 10px;
+  }
+
+  .my-ride-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .my-ride-payment-link {
+    width: 100%;
   }
 }
 
 @media (max-width: 380px) {
-  .rides-heading {
+  .my-rides-toolbar {
     flex-direction: column;
   }
 
-  .ride-card-top {
-    flex-direction: column;
-  }
-
-  .rides-list-heading {
-    align-items: flex-start;
-    gap: 10px;
+  .my-rides-refresh {
+    width: 100%;
   }
 }
