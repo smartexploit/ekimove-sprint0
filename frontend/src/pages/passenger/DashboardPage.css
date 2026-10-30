@@ -1,0 +1,363 @@
+
+.passenger-dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  width: 100%;
+  margin-top: 12px;
+}
+
+/* Account overview */
+.dashboard-account {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 26px;
+  background: #ffffff;
+  border: 1px solid #e8eee9;
+  border-radius: 20px;
+}
+
+.dashboard-account-info {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.dashboard-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #e7f1eb;
+  color: #174d3d;
+  font-size: 25px;
+  font-weight: 700;
+}
+
+.dashboard-label {
+  display: block;
+  margin-bottom: 9px;
+  color: #789087;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.3px;
+}
+
+.dashboard-user-details h3 {
+  margin: 0 0 5px;
+  color: #183e33;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.dashboard-user-details p {
+  margin: 0 0 10px;
+  color: #77847e;
+  font-size: 13px;
+}
+
+.dashboard-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.dashboard-status.is-active {
+  color: #24834f;
+}
+
+.dashboard-status.is-inactive {
+  color: #b45b43;
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.dashboard-account-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  border-radius: 30px;
+  background: #f0f5f1;
+  color: #285c49;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.dashboard-badge-icon {
+  color: #d5a928;
+}
+
+/* Booking banner */
+.dashboard-booking {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 250px;
+  overflow: hidden;
+  padding: 38px;
+  border-radius: 22px;
+  background: #174b3b;
+  color: #ffffff;
+}
+
+.dashboard-booking-content {
+  position: relative;
+  z-index: 1;
+  max-width: 520px;
+}
+
+.dashboard-booking .dashboard-label {
+  color: #c5d9cc;
+}
+
+.dashboard-booking h2 {
+  max-width: 450px;
+  margin: 0 0 12px;
+  font-size: clamp(25px, 4vw, 36px);
+  line-height: 1.2;
+  font-weight: 700;
+}
+
+.dashboard-booking p {
+  max-width: 400px;
+  margin: 0 0 24px;
+  color: #d1dfd6;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.dashboard-book-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 22px;
+  padding: 14px 20px;
+  border-radius: 9px;
+  background: #e9c84d;
+  color: #173d30;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 700;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.dashboard-book-button:hover {
+  background: #f4d96c;
+  transform: translateY(-2px);
+}
+
+.dashboard-booking-decoration {
+  position: absolute;
+  right: 55px;
+  top: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 170px;
+  height: 170px;
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 50%;
+  transform: translateY(-50%);
+  background: rgba(255,255,255,0.05);
+}
+
+.dashboard-booking-decoration::before {
+  position: absolute;
+  content: '';
+  width: 115px;
+  height: 115px;
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 50%;
+}
+
+.dashboard-booking-decoration span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 65px;
+  height: 65px;
+  border-radius: 50%;
+  background: #e9c84d;
+  color: #174b3b;
+  font-size: 30px;
+}
+
+/* Services */
+.dashboard-section-heading h2 {
+  margin: 0;
+  color: #183e33;
+  font-size: 21px;
+  font-weight: 700;
+}
+
+.dashboard-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 18px;
+}
+
+.dashboard-action-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+  padding: 23px;
+  border: 1px solid #e8eee9;
+  border-radius: 17px;
+  background: #ffffff;
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.dashboard-action-card:hover {
+  border-color: #174b3b;
+  transform: translateY(-3px);
+}
+
+.dashboard-action-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  border-radius: 13px;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.rides-icon {
+  background: #e9f2ec;
+  color: #174b3b;
+}
+
+.payments-icon {
+  background: #fbf4dc;
+  color: #987719;
+}
+
+.dashboard-action-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.dashboard-action-text h3 {
+  margin: 0 0 6px;
+  color: #183e33;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.dashboard-action-text p {
+  margin: 0;
+  color: #78857e;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.dashboard-action-arrow {
+  color: #174b3b;
+  font-size: 19px;
+}
+
+/* Footer */
+.dashboard-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  padding-top: 22px;
+  border-top: 1px solid #e8eee9;
+}
+
+.dashboard-footer p {
+  margin: 0;
+  color: #78857e;
+  font-size: 12px;
+}
+
+.dashboard-footer strong {
+  color: #174b3b;
+}
+
+.dashboard-signout {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 15px;
+  border: 1px solid #e8eee9;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #a34e40;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.dashboard-signout:hover {
+  background: #fff4f1;
+}
+
+/* Responsive */
+@media (max-width: 650px) {
+  .passenger-dashboard {
+    gap: 20px;
+  }
+
+  .dashboard-account {
+    padding: 19px;
+  }
+
+  .dashboard-avatar {
+    width: 52px;
+    height: 52px;
+    font-size: 21px;
+  }
+
+  .dashboard-account-badge {
+    display: none;
+  }
+
+  .dashboard-booking {
+    min-height: 270px;
+    padding: 26px 22px;
+  }
+
+  .dashboard-booking-decoration {
+    right: -65px;
+    opacity: 0.5;
+  }
+
+  .dashboard-booking-content {
+    max-width: 100%;
+  }
+
+  .dashboard-actions {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .dashboard-action-card {
+    padding: 18px;
+  }
+
+  .dashboard-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

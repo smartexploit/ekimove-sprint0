@@ -1,4 +1,5 @@
-﻿import { useState } from 'react'
+﻿import './PaymentsPage.css'
+import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import AppPage from '../../layouts/AppPage.jsx'
 import {
@@ -8,6 +9,7 @@ import {
   initiateInterswitchPayment,
   verifyInterswitchPayment,
 } from '../../services/paymentService.js'
+import './PaymentsPage.css'
 
 function loadInterswitchScript(mode) {
   const normalizedMode = String(mode).toUpperCase()
@@ -74,7 +76,6 @@ function loadInterswitchScript(mode) {
     script.async = true
     script.dataset.ekimoveInterswitch = 'true'
 
-
     script.addEventListener('load', onLoad, { once: true })
     script.addEventListener('error', onError, { once: true })
 
@@ -90,6 +91,7 @@ function loadInterswitchScript(mode) {
     }
   })
 }
+
 export default function PaymentsPage() {
   const [searchParams] = useSearchParams()
   const [rideId, setRideId] = useState(() => {
@@ -250,117 +252,284 @@ export default function PaymentsPage() {
       sectionTitle="Your ride payment"
       sectionText="Choose bank transfer or Interswitch checkout. Cash is not accepted. Bank-transfer references remain unconfirmed until an authorized administrator independently verifies receipt. Interswitch payments are confirmed only after server-side provider verification."
     >
-      {error && <p className="portal-alert portal-alert-error" role="alert">{error}</p>}
-      {message && <p role="status">{message}</p>}
+      <div className="payments-page">
 
-      <div className="payment-policy-card">
-        <label htmlFor="payment-ride-id">Ride ID from My Rides</label>
-        <input
-          id="payment-ride-id"
-          type="number"
-          min="1"
-          step="1"
-          value={rideId}
-          onChange={(event) => setRideId(event.target.value)}
-          placeholder="Enter your assigned ride ID"
-          required
-        />
-
-        <label htmlFor="payment-method">Payment method</label>
-        <select
-          id="payment-method"
-          value={method}
-          onChange={(event) => setMethod(event.target.value)}
-          disabled={busy}
-        >
-          <option value="bank_transfer">Bank transfer</option>
-          <option value="interswitch">Interswitch checkout</option>
-        </select>
-
-        {method === 'bank_transfer' ? (
-          <div className="payment-actions">
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => runAction(initiateRidePayment)}
-            >
-              {busy ? 'Please wait...' : 'Initiate bank transfer'}
-            </button>
-            <button type="button" disabled={busy} onClick={checkStatus}>
-              Check status
-            </button>
-          </div>
-        ) : (
-          <>
-            <label htmlFor="checkout-email">Email for checkout</label>
-            <input
-              id="checkout-email"
-              type="email"
-              autoComplete="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="you@example.com"
-              required
-            />
-            <p className="field-hint">
-              This email is used for this checkout session and is not saved to your EkiMove profile.
+        <div className="payments-intro">
+          <div>
+            <span className="payments-eyebrow">SECURE CHECKOUT</span>
+            <h2>Complete your ride payment</h2>
+            <p>
+              Choose your preferred payment method and follow the instructions
+              to complete your payment securely.
             </p>
-            <div className="payment-actions">
-              <button type="button" disabled={busy} onClick={startInterswitch}>
-                {busy ? 'Please wait...' : 'Pay with Interswitch'}
-              </button>
-              <button type="button" disabled={busy} onClick={checkStatus}>
-                Verify payment status
-              </button>
+          </div>
+          <div className="payment-shield">✓</div>
+        </div>
+
+        {error && (
+          <p className="payment-notice payment-error" role="alert">
+            <span>!</span> {error}
+          </p>
+        )}
+
+        {message && (
+          <p className="payment-notice payment-success" role="status">
+            <span>✓</span> {message}
+          </p>
+        )}
+
+        <div className="payments-layout">
+
+          <section className="payment-form-card">
+            <div className="payment-card-heading">
+              <div>
+                <span className="payment-step">STEP 01</span>
+                <h3>Payment information</h3>
+                <p>Enter your ride details to continue.</p>
+              </div>
             </div>
-          </>
+
+            <div className="payment-field">
+              <label htmlFor="payment-ride-id">Assigned Ride ID</label>
+              <input
+                id="payment-ride-id"
+                type="number"
+                min="1"
+                step="1"
+                value={rideId}
+                onChange={(event) => setRideId(event.target.value)}
+                placeholder="Enter your assigned ride ID"
+                required
+              />
+              <small>Find your assigned Ride ID in your My Rides page.</small>
+            </div>
+
+            <div className="payment-field">
+              <label htmlFor="payment-method">Choose payment method</label>
+              <select
+                id="payment-method"
+                value={method}
+                onChange={(event) => setMethod(event.target.value)}
+                disabled={busy}
+              >
+                <option value="bank_transfer">Bank transfer</option>
+                <option value="interswitch">Interswitch checkout</option>
+              </select>
+            </div>
+
+            {method === 'bank_transfer' ? (
+              <div className="payment-method-panel">
+                <div className="method-heading">
+                  <span className="method-icon">₦</span>
+                  <div>
+                    <h4>Bank transfer</h4>
+                    <p>Initiate a transfer and submit your reference.</p>
+                  </div>
+                </div>
+
+                <div className="payment-actions">
+                  <button
+                    className="payment-primary-button"
+                    type="button"
+                    disabled={busy}
+                    onClick={() => runAction(initiateRidePayment)}
+                  >
+                    {busy ? 'Please wait...' : 'Initiate bank transfer'}
+                  </button>
+
+                  <button
+                    className="payment-secondary-button"
+                    type="button"
+                    disabled={busy}
+                    onClick={checkStatus}
+                  >
+                    Check status
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="payment-method-panel">
+                <div className="method-heading">
+                  <span className="method-icon">↗</span>
+                  <div>
+                    <h4>Interswitch checkout</h4>
+                    <p>Pay securely using the Interswitch checkout window.</p>
+                  </div>
+                </div>
+
+                <div className="payment-field">
+                  <label htmlFor="checkout-email">Email for checkout</label>
+                  <input
+                    id="checkout-email"
+                    type="email"
+                    autoComplete="email"
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    placeholder="you@example.com"
+                    required
+                  />
+                  <small>
+                    This email is used for this checkout session and is not
+                    saved to your EkiMove profile.
+                  </small>
+                </div>
+
+                <div className="payment-actions">
+                  <button
+                    className="payment-primary-button"
+                    type="button"
+                    disabled={busy}
+                    onClick={startInterswitch}
+                  >
+                    {busy ? 'Please wait...' : 'Pay with Interswitch'}
+                  </button>
+
+                  <button
+                    className="payment-secondary-button"
+                    type="button"
+                    disabled={busy}
+                    onClick={checkStatus}
+                  >
+                    Verify payment status
+                  </button>
+                </div>
+              </div>
+            )}
+          </section>
+
+          <aside className="payment-info-card">
+            <span className="payment-info-eyebrow">PAYMENT GUIDE</span>
+            <h3>Simple. Secure. Reliable.</h3>
+            <p>
+              Complete your payment using one of our supported payment
+              methods.
+            </p>
+
+            <div className="payment-guide-item">
+              <span>01</span>
+              <div>
+                <strong>Enter your Ride ID</strong>
+                <p>Use the ID assigned to your ride.</p>
+              </div>
+            </div>
+
+            <div className="payment-guide-item">
+              <span>02</span>
+              <div>
+                <strong>Choose a payment method</strong>
+                <p>Select bank transfer or Interswitch.</p>
+              </div>
+            </div>
+
+            <div className="payment-guide-item">
+              <span>03</span>
+              <div>
+                <strong>Confirm your payment</strong>
+                <p>Check your payment status after completing checkout.</p>
+              </div>
+            </div>
+
+            <div className="payment-security-note">
+              <span>✓</span>
+              <p>
+                Your payment is only marked as confirmed after the required
+                verification process.
+              </p>
+            </div>
+          </aside>
+        </div>
+
+        {payment && (
+          <section className="payment-details-card" aria-live="polite">
+            <div className="payment-details-heading">
+              <div>
+                <span className="payment-step">PAYMENT SUMMARY</span>
+                <h3>Payment details</h3>
+              </div>
+              <span className={`payment-status-tag ${payment.status}`}>
+                {String(payment.status).replaceAll('_', ' ')}
+              </span>
+            </div>
+
+            <div className="payment-details-grid">
+              <div>
+                <small>RIDE ID</small>
+                <strong>{payment.ride_id}</strong>
+              </div>
+
+              <div>
+                <small>AMOUNT</small>
+                <strong className="payment-amount">
+                  ₦{Number(payment.amount).toLocaleString('en-NG', {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </strong>
+              </div>
+
+              <div>
+                <small>PAYMENT METHOD</small>
+                <strong>
+                  {payment.method === 'interswitch'
+                    ? 'Interswitch'
+                    : 'Bank transfer'}
+                </strong>
+              </div>
+
+              <div>
+                <small>PAYMENT STATUS</small>
+                <strong>{String(payment.status).replaceAll('_', ' ')}</strong>
+              </div>
+            </div>
+
+            {payment.method !== 'interswitch' &&
+              payment.status !== 'confirmed' &&
+              payment.status !== 'refunded' && (
+                <form
+                  className="transfer-reference-form"
+                  onSubmit={handleSubmitReference}
+                >
+                  <h4>Submit bank transfer reference</h4>
+
+                  <div className="payment-field">
+                    <label htmlFor="transfer-reference">
+                      Bank transfer reference
+                    </label>
+                    <input
+                      id="transfer-reference"
+                      type="text"
+                      minLength="3"
+                      maxLength="120"
+                      value={reference}
+                      onChange={(event) => setReference(event.target.value)}
+                      placeholder="Enter your transfer reference"
+                      required
+                    />
+                  </div>
+
+                  <button
+                    className="payment-primary-button"
+                    type="submit"
+                    disabled={busy}
+                  >
+                    {busy
+                      ? 'Submitting...'
+                      : 'Submit reference for verification'}
+                  </button>
+                </form>
+              )}
+
+            <div className="payment-verification-note">
+              <span>ⓘ</span>
+              <p>
+                {payment.method === 'interswitch'
+                  ? 'A checkout completion message is not proof of payment. EkiMove confirms payment only after server-side provider verification.'
+                  : 'Submitting a reference does not confirm payment. An authorized administrator must independently verify the transfer.'}
+              </p>
+            </div>
+          </section>
         )}
       </div>
-
-      {payment && (
-        <div className="payment-policy-card" aria-live="polite">
-          <span className="payment-policy-mark" aria-hidden="true">â‚¦</span>
-          <h3>Payment details</h3>
-          <p>Ride ID: <strong>{payment.ride_id}</strong></p>
-          <p>Amount: <strong>â‚¦{Number(payment.amount).toLocaleString('en-NG', {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-          })}</strong></p>
-          <p>Method: <strong>{
-            payment.method === 'interswitch' ? 'Interswitch' : 'Bank transfer'
-          }</strong></p>
-          <p>Status: <strong>{String(payment.status).replaceAll('_', ' ')}</strong></p>
-
-          {payment.method !== 'interswitch' &&
-            payment.status !== 'confirmed' &&
-            payment.status !== 'refunded' && (
-              <form onSubmit={handleSubmitReference}>
-                <label htmlFor="transfer-reference">Bank transfer reference</label>
-                <input
-                  id="transfer-reference"
-                  type="text"
-                  minLength="3"
-                  maxLength="120"
-                  value={reference}
-                  onChange={(event) => setReference(event.target.value)}
-                  placeholder="Enter your transfer reference"
-                  required
-                />
-                <button type="submit" disabled={busy}>
-                  {busy ? 'Submitting...' : 'Submit reference for verification'}
-                </button>
-              </form>
-            )}
-
-          <p className="field-hint">
-            {payment.method === 'interswitch'
-              ? 'A checkout completion message is not proof of payment. EkiMove confirms payment only after server-side provider verification.'
-              : 'Submitting a reference does not confirm payment. An authorized administrator must independently verify the transfer.'}
-          </p>
-        </div>
-      )}
     </AppPage>
   )
 }
-
-
