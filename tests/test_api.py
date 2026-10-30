@@ -2137,6 +2137,76 @@ def test_atona_requires_authentication(client):
     assert response.status_code == 401
 
 
+def test_atona_chat_requires_authentication(client):
+    response = client.post(
+        "/api/v1/atona/chat",
+        json={"message": "I want to travel to Fajuyi Park"},
+    )
+    assert response.status_code == 401
+
+
+def test_atona_chat_returns_mocked_reply(client, monkeypatch):
+    from types import SimpleNamespace
+    import app.atona as atona_module
+
+    monkeypatch.setattr(settings, "atona_enabled", True)
+    monkeypatch.setattr(settings, "groq_api_key", "test-key")
+    monkeypatch.setattr(settings, "groq_model", "test-model")
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            assert kwargs["model"] == "test-model"
+            assert kwargs["messages"][0]["role"] == "system"
+            assert kwargs["messages"][-3] == {
+                "role": "user",
+                "content": "I want to travel from Oke Ila to Fajuyi Park",
+            }
+            assert kwargs["messages"][-2] == {
+                "role": "assistant",
+                "content": "Are you travelling by motorcycle or car?",
+            }
+            assert kwargs["messages"][-1] == {
+                "role": "user",
+                "content": "I prefer a motorcycle",
+            }
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content="Understood. You prefer a motorcycle."
+                        )
+                    )
+                ]
+            )
+
+    fake_client = SimpleNamespace(
+        chat=SimpleNamespace(completions=FakeCompletions())
+    )
+    monkeypatch.setattr(
+        atona_module, "Groq", lambda **kwargs: fake_client
+    )
+
+    token = login_as_passenger(client)
+    response = client.post(
+        "/api/v1/atona/chat",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "message": "I prefer a motorcycle",
+            "conversation_history": [
+                "user: I want to travel from Oke Ila to Fajuyi Park",
+                "assistant: Are you travelling by motorcycle or car?",
+            ],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["reply"] == (
+        "Understood. You prefer a motorcycle."
+    )
+    assert response.json()["mode"] == "conversational_demo"
+    assert response.json()["provider"] == "Groq"
+
+
 def test_atona_geography_requires_authentication(client):
     response = client.post(
         "/api/v1/atona/geography",

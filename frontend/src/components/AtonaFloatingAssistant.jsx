@@ -8,16 +8,22 @@ export default function AtonaFloatingAssistant({ onApplyBooking }) {
   const [messages, setMessages] = useState([
     {
       role: 'assistant',
-      text: 'Hello! I’m Atọ́nà, your EkiMove trip assistant. Describe where you want to travel, including nearby landmarks, and I’ll help prepare your booking.',
+      text: "Hello! I'm Atona, your EkiMove travel assistant. Ask me about places and journeys around Ekiti in English or Nigerian Pidgin.",
     },
   ])
   const [pendingBooking, setPendingBooking] = useState(null)
   const [pendingDestination, setPendingDestination] = useState('')
+  const [bookingInProgress, setBookingInProgress] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
-  function chooseEndpoint(message) {
+  function chooseEndpoint(message, isBookingInProgress) {
     const text = message.toLowerCase()
+
+    // Once a booking starts, all follow-up answers belong to that booking.
+    if (isBookingInProgress) {
+      return '/api/v1/atona/interpret'
+    }
 
     if (pendingDestination) {
       return '/api/v1/atona/geography'
@@ -54,12 +60,17 @@ export default function AtonaFloatingAssistant({ onApplyBooking }) {
     event.preventDefault()
     const message = input.trim()
 
-    if (message.length < 3 || busy) return
+    if (message.length < 2 || busy) return
+
+    const history = messages
+      .slice(-12)
+      .map((item) => `${item.role}: ${item.text}`)
 
     setMessages((current) => [...current, { role: 'user', text: message }])
     setInput('')
     setError('')
     setPendingBooking(null)
+    setBookingInProgress(false)
     setBusy(true)
 
     if (!getAccessToken()) {
@@ -67,7 +78,7 @@ export default function AtonaFloatingAssistant({ onApplyBooking }) {
         ...current,
         {
           role: 'assistant',
-          text: 'Please sign in as a passenger at /login before I prepare your trip details.',
+          text: 'Please sign in before chatting with Atona.',
         },
       ])
       setBusy(false)
@@ -75,50 +86,23 @@ export default function AtonaFloatingAssistant({ onApplyBooking }) {
     }
 
     try {
-      const endpoint = chooseEndpoint(message)
-      const requestBody = { message }
-      if (endpoint === '/api/v1/atona/geography' && pendingDestination) {
-        requestBody.destination_hint = pendingDestination
-      }
-      const result = await apiRequest(endpoint, {
+      const result = await apiRequest('/api/v1/atona/chat', {
         method: 'POST',
-        body: JSON.stringify(requestBody),
+        body: JSON.stringify({
+          message,
+          conversation_history: history,
+        }),
       })
-
-      if (endpoint === '/api/v1/atona/geography') {
-        if (result.needs_origin && result.context?.destination) {
-          setPendingDestination(
-            typeof result.context.destination === 'string'
-              ? result.context.destination
-              : result.context.destination.name || result.context.destination.formatted || ''
-          )
-        } else {
-          setPendingDestination('')
-        }
-      }
-
-      let assistantText = result.reply || 'I could not prepare a reliable answer. Please try again.'
-
-      if (Array.isArray(result.route?.steps) && result.route.steps.length > 0) {
-        assistantText += '\n\nSuggested driving directions:\n'
-        assistantText += result.route.steps
-          .map((step, index) => `${index + 1}. ${step}`)
-          .join('\n')
-      }
 
       setMessages((current) => [
         ...current,
         {
           role: 'assistant',
-          text: assistantText,
+          text: result.reply || 'I could not prepare a response. Please try again.',
         },
       ])
-
-      if (result.booking) {
-        setPendingBooking(result.booking)
-      }
     } catch (err) {
-      setError(err.message || 'Atọ́nà is temporarily unavailable.')
+      setError(err.message || 'Atona is temporarily unavailable.')
     } finally {
       setBusy(false)
     }
@@ -135,6 +119,7 @@ export default function AtonaFloatingAssistant({ onApplyBooking }) {
       },
     ])
     setPendingBooking(null)
+    setBookingInProgress(false)
     setOpen(false)
   }
 

@@ -24,6 +24,107 @@ class AtonaMessage(BaseModel):
     message: str = Field(min_length=3, max_length=1000)
     origin_hint: str | None = Field(default=None, max_length=255)
     destination_hint: str | None = Field(default=None, max_length=255)
+    conversation_history: list[str] = Field(default_factory=list, max_length=8)
+
+
+
+class AtonaChatMessage(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    message: str = Field(min_length=2, max_length=1000)
+    conversation_history: list[str] = Field(default_factory=list, max_length=12)
+
+
+@router.post("/chat")
+def atona_chat(
+    payload: AtonaChatMessage,
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Conversational demo assistant for Ekiti routes and landmarks."""
+    if not settings.atona_enabled or not settings.groq_api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="Atona AI is not configured yet.",
+        )
+
+    history = [
+        item.strip()[:1000]
+        for item in payload.conversation_history[-12:]
+        if isinstance(item, str) and item.strip()
+    ]
+
+    system_prompt = (
+        "You are Atona, the conversational travel assistant for EkiMove in Ekiti State, Nigeria. "
+        "Communicate naturally in standard English or Nigerian Pidgin. "
+        "Match the passenger's language and tone. "
+        "Remember the origin, destination, transport preference, and other details "
+        "provided earlier in the conversation. Do not ask for information already provided. "
+        "Ask one short question when essential trip information is missing. "
+        "You do not have live GPS, live traffic, verified road conditions, or live map access. "
+        "Never invent or guess road names, junctions, landmarks, hospitals, markets, "
+        "transport stops, directions, distances, travel times, fares, or opening hours. "
+        "Never present an unverified route as fact or give guessed turn-by-turn instructions. "
+        "If a passenger asks for directions and verified route information is unavailable, "
+        "clearly say that you cannot verify the exact route. "
+        "You may suggest that the passenger tell the driver the confirmed starting point "
+        "and destination, then ask the driver to confirm the route before departure. "
+        "Do not repeat earlier unverified directions as if they were correct. "
+        "For motorcycle trips, advise passengers to confirm the destination and route "
+        "with the rider before setting out. "
+        "Never claim to have booked a ride, contacted a driver, or processed payment. "
+        "Keep responses concise, helpful, natural, and easy to understand."
+    )
+
+    messages = [{"role": "system", "content": system_prompt}]
+    for item in history:
+        if item.startswith("assistant:"):
+            role = "assistant"
+            content = item[len("assistant:"):].strip()
+        elif item.startswith("user:"):
+            role = "user"
+            content = item[len("user:"):].strip()
+        else:
+            role = "user"
+            content = item
+
+        if content:
+            messages.append({"role": role, "content": content})
+    messages.append({"role": "user", "content": payload.message})
+
+    try:
+        client = Groq(
+            api_key=settings.groq_api_key,
+            timeout=25.0,
+            max_retries=1,
+        )
+        response = client.chat.completions.create(
+            model=settings.groq_model,
+            temperature=0.4,
+            max_completion_tokens=650,
+            messages=messages,
+        )
+        reply = response.choices[0].message.content
+
+        if not reply or not reply.strip():
+            raise ValueError("Groq returned an empty response.")
+
+        return {
+            "reply": reply.strip(),
+            "mode": "conversational_demo",
+            "provider": "Groq",
+        }
+
+    except (APIConnectionError, APIStatusError):
+        logger.exception("Atona Groq conversational request failed")
+        raise HTTPException(
+            status_code=502,
+            detail="Atona could not reach its AI service. Please try again.",
+        ) from None
+    except Exception:
+        logger.exception("Atona conversational response failed")
+        raise HTTPException(
+            status_code=502,
+            detail="Atona could not prepare a response. Please try again.",
+        ) from None
 
 
 def normalize_name(value: str) -> str:
@@ -87,10 +188,18 @@ def interpret_booking(
         "Do not claim a ride was booked."
     )
 
+    history = [
+        item.strip()[:1000]
+        for item in payload.conversation_history[-8:]
+        if isinstance(item, str) and item.strip()
+    ]
+
     user_content = (
         "Active zone names (use exact names only): "
         + json.dumps(zone_names, ensure_ascii=False)
-        + "\nPassenger message: "
+        + "\nEarlier passenger messages (oldest first): "
+        + json.dumps(history, ensure_ascii=False)
+        + "\nLatest passenger message: "
         + payload.message
     )
 
