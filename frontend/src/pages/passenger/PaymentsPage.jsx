@@ -1,4 +1,4 @@
-﻿import { useState } from 'react'
+import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import AppPage from '../../layouts/AppPage.jsx'
 import {
@@ -9,87 +9,6 @@ import {
   verifyInterswitchPayment,
 } from '../../services/paymentService.js'
 
-function loadInterswitchScript(mode) {
-  const normalizedMode = String(mode).toUpperCase()
-  if (normalizedMode !== 'TEST' && normalizedMode !== 'LIVE') {
-    throw new Error('Invalid Interswitch checkout mode.')
-  }
-
-  const src = normalizedMode === 'LIVE'
-    ? 'https://newwebpay.interswitchng.com/inline-checkout.js'
-    : 'https://newwebpay-sandbox.interswitchng.com/inline-checkout.js'
-
-  let script = document.querySelector('script[data-ekimove-interswitch]')
-
-  if (script && script.src !== src) {
-    throw new Error(
-      'A different Interswitch mode is already loaded. Reload the page before switching modes.'
-    )
-  }
-
-  if (typeof window.webpayCheckout === 'function') {
-    return Promise.resolve()
-  }
-
-  if (script?.dataset.ekimoveLoaded === 'true') {
-    return Promise.reject(
-      new Error('Interswitch checkout did not initialize. Please reload and retry.')
-    )
-  }
-
-  return new Promise((resolve, reject) => {
-    let timeoutId
-
-    const cleanup = () => {
-      window.clearTimeout(timeoutId)
-      script.removeEventListener('load', onLoad)
-      script.removeEventListener('error', onError)
-    }
-
-    const onLoad = () => {
-      cleanup()
-      script.dataset.ekimoveLoaded = 'true'
-
-      if (typeof window.webpayCheckout === 'function') {
-        resolve()
-      } else {
-        reject(new Error('Interswitch checkout did not initialize. Please retry.'))
-      }
-    }
-
-    const onError = () => {
-      cleanup()
-      reject(new Error('Unable to load Interswitch checkout.'))
-    }
-
-    if (script) {
-      reject(new Error(
-        'An Interswitch script is already present but not initialized. Reload the page and retry.'
-      ))
-      return
-    }
-
-    script = document.createElement('script')
-    script.src = src
-    script.async = true
-    script.dataset.ekimoveInterswitch = 'true'
-
-
-    script.addEventListener('load', onLoad, { once: true })
-    script.addEventListener('error', onError, { once: true })
-
-    timeoutId = window.setTimeout(() => {
-      cleanup()
-      reject(new Error(
-        'Timed out loading Interswitch checkout. Check your connection and retry.'
-      ))
-    }, 15000)
-
-    if (!script.isConnected) {
-      document.body.appendChild(script)
-    }
-  })
-}
 export default function PaymentsPage() {
   const [searchParams] = useSearchParams()
   const [rideId, setRideId] = useState(() => {
@@ -163,46 +82,57 @@ export default function PaymentsPage() {
         return
       }
 
-      await loadInterswitchScript(result.checkout.mode)
+      const checkout = result.checkout
+      const redirect = new URL(checkout.redirect_url)
 
-      if (typeof window.webpayCheckout !== 'function') {
-        throw new Error('Interswitch checkout did not initialize. Please retry.')
+      const allowedHosts = [
+        'newwebpay-sandbox.interswitchng.com',
+        'newwebpay.interswitchng.com',
+      ]
+
+      if (
+        redirect.protocol !== 'https:' ||
+        !allowedHosts.includes(redirect.hostname) ||
+        redirect.pathname !== '/collections/w/pay'
+      ) {
+        throw new Error('Invalid Interswitch redirect address.')
       }
 
-      setMessage('Complete checkout in the Interswitch window. EkiMove will verify the result with the provider.')
+      const returnUrl = new URL('/payments', window.location.origin)
+      returnUrl.searchParams.set('rideId', String(id))
 
-      window.webpayCheckout({
-        merchant_code: result.checkout.merchant_code,
-        pay_item_id: result.checkout.pay_item_id,
-        txn_ref: result.checkout.txn_ref,
-        amount: result.checkout.amount,
-        currency: 566,
-        cust_email: result.checkout.customer_email,
+      const fields = {
+        merchant_code: checkout.merchant_code,
+        pay_item_id: checkout.pay_item_id,
+        site_redirect_url: returnUrl.toString(),
+        txn_ref: checkout.txn_ref,
+        amount: String(checkout.amount),
+        currency: checkout.currency || '566',
+        cust_email: checkout.customer_email,
         cust_name: result.payment.passenger_name || '',
         cust_id: String(result.payment.ride_id),
         pay_item_name: 'EkiMove ride payment',
-        mode: result.checkout.mode,
-        onComplete: async () => {
-          // Browser callback is not proof of payment; ask our backend to requery.
-          setBusy(true)
-          try {
-            const verified = await verifyInterswitchPayment(id)
-            setPayment(verified)
-            setMessage(
-              verified.status === 'confirmed'
-                ? 'Payment confirmed by Interswitch.'
-                : 'Payment is not confirmed yet. Check status again shortly.'
-            )
-          } catch (err) {
-            setError(err.message || 'Could not verify payment. Check status and retry.')
-          } finally {
-            setBusy(false)
-          }
-        },
+        payment_response_type: 'GET',
+      }
+
+      const form = document.createElement('form')
+      form.method = 'POST'
+      form.action = redirect.toString()
+      form.style.display = 'none'
+
+      Object.entries(fields).forEach(([name, value]) => {
+        const input = document.createElement('input')
+        input.type = 'hidden'
+        input.name = name
+        input.value = String(value ?? '')
+        form.appendChild(input)
       })
+
+      document.body.appendChild(form)
+      setMessage('Redirecting to Interswitch secure checkout...')
+      form.submit()
     } catch (err) {
       setError(err.message || 'Unable to start Interswitch checkout.')
-    } finally {
       setBusy(false)
     }
   }
@@ -362,5 +292,3 @@ export default function PaymentsPage() {
     </AppPage>
   )
 }
-
-

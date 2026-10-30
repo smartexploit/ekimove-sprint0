@@ -1,4 +1,4 @@
-﻿from datetime import datetime, timezone
+from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 import re
 from pydantic import BaseModel, Field, field_validator
@@ -134,6 +134,11 @@ def initiate_interswitch(
             "currency": "566",
             "mode": mode,
             "customer_email": payload.customer_email,
+            "redirect_url": (
+                "https://newwebpay.interswitchng.com/collections/w/pay"
+                if mode == "LIVE"
+                else "https://newwebpay-sandbox.interswitchng.com/collections/w/pay"
+            ),
         },
     }
 
@@ -168,9 +173,19 @@ def verify_interswitch(
         )
     )
 
+    mode = settings.interswitch_mode.strip().upper()
+    if mode not in ("TEST", "LIVE"):
+        raise HTTPException(status_code=503, detail="Invalid Interswitch mode.")
+
+    requery_url = (
+        settings.interswitch_live_requery_base_url
+        if mode == "LIVE"
+        else settings.interswitch_requery_base_url
+    )
+
     try:
         response = requests.get(
-            settings.interswitch_requery_base_url,
+            requery_url,
             params={
                 "merchantcode": settings.interswitch_merchant_code,
                 "transactionreference": payment.provider_transaction_ref,
@@ -250,4 +265,3 @@ def verify_interswitch(
         )
 
     return _result(confirmed_payment)
-

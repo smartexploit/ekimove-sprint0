@@ -2259,3 +2259,73 @@ def test_atona_interprets_booking_without_submitting_ride(
     assert "No ride has been submitted." in body["reply"] or (
         "No ride has been submitted." not in body["reply"]
     )
+@pytest.mark.parametrize(
+    ("mode", "expected_url"),
+    [
+        (
+            "TEST",
+            "https://sandbox.interswitchng.com/collections/api/v1/gettransaction.json",
+        ),
+        (
+            "LIVE",
+            "https://webpay.interswitchng.com/collections/api/v1/gettransaction.json",
+        ),
+    ],
+)
+def test_interswitch_verification_selects_mode_specific_requery_url(
+    client, monkeypatch, mode, expected_url
+):
+    import app.interswitch_payments as interswitch_module
+
+    monkeypatch.setattr(settings, "interswitch_merchant_code", "TEST-MERCHANT")
+    monkeypatch.setattr(settings, "interswitch_pay_item_id", "TEST-PAYITEM")
+    monkeypatch.setattr(settings, "interswitch_mode", mode)
+
+    passenger_headers, _, request_id = create_assigned_ride(client)
+    ride_id = get_ride_id_from_request(
+        client, request_id, passenger_headers
+    )
+
+    initiated = client.post(
+        f"/api/v1/payments/rides/{ride_id}/interswitch/initiate",
+        headers=passenger_headers,
+        json={"customer_email": "passenger@example.com"},
+    )
+    assert initiated.status_code == 200, initiated.text
+
+    checkout = initiated.json()["checkout"]
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {
+                "ResponseCode": "00",
+                "Amount": str(checkout["amount"]),
+                "MerchantReference": checkout["txn_ref"],
+            }
+
+    def fake_provider_get(url, **kwargs):
+        captured["url"] = url
+        captured["params"] = kwargs["params"]
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        interswitch_module.requests,
+        "get",
+        fake_provider_get,
+    )
+
+    verified = client.post(
+        f"/api/v1/payments/rides/{ride_id}/interswitch/verify",
+        headers=passenger_headers,
+    )
+
+    assert verified.status_code == 200, verified.text
+    assert verified.json()["status"] == "confirmed"
+    assert captured["url"] == expected_url
+    assert captured["params"]["merchantcode"] == "TEST-MERCHANT"
+    assert captured["params"]["transactionreference"] == checkout["txn_ref"]
+    assert captured["params"]["amount"] == checkout["amount"]

@@ -1,4 +1,4 @@
-﻿
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     interswitch_pay_item_id: str | None = None
     interswitch_mode: str = "TEST"
     interswitch_requery_base_url: str = "https://sandbox.interswitchng.com/collections/api/v1/gettransaction.json"
+    interswitch_live_requery_base_url: str = "https://webpay.interswitchng.com/collections/api/v1/gettransaction.json"
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -40,4 +41,3 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-
