@@ -1,4 +1,4 @@
-﻿import { useState } from 'react'
+import { useState } from 'react'
 import { apiRequest, getAccessToken } from '../services/authService.js'
 import './AtonaFloatingAssistant.css'
 
@@ -12,11 +12,16 @@ export default function AtonaFloatingAssistant({ onApplyBooking }) {
     },
   ])
   const [pendingBooking, setPendingBooking] = useState(null)
+  const [pendingDestination, setPendingDestination] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
   function chooseEndpoint(message) {
     const text = message.toLowerCase()
+
+    if (pendingDestination) {
+      return '/api/v1/atona/geography'
+    }
 
     const bookingTerms = [
       'book a ride', 'book me', 'request a ride', 'request a trip',
@@ -31,7 +36,8 @@ export default function AtonaFloatingAssistant({ onApplyBooking }) {
     const geographyTerms = [
       'direction', 'where is', 'where are', 'describe',
       'geographic', 'landmark', 'how far', 'distance between',
-      'route to', 'route from', 'navigate', 'navigation',
+      'route to', 'route from', 'guide me to', 'take me to',
+      'navigate', 'navigation',
       'how do i get', 'how can i get', 'way to', 'location of',
       'tell me about', 'which area', 'what is near', 'what is around',
       'how do i reach', 'how can i reach', 'driving to', 'drive to',
@@ -70,10 +76,26 @@ export default function AtonaFloatingAssistant({ onApplyBooking }) {
 
     try {
       const endpoint = chooseEndpoint(message)
+      const requestBody = { message }
+      if (endpoint === '/api/v1/atona/geography' && pendingDestination) {
+        requestBody.destination_hint = pendingDestination
+      }
       const result = await apiRequest(endpoint, {
         method: 'POST',
-        body: JSON.stringify({ message }),
+        body: JSON.stringify(requestBody),
       })
+
+      if (endpoint === '/api/v1/atona/geography') {
+        if (result.needs_origin && result.context?.destination) {
+          setPendingDestination(
+            typeof result.context.destination === 'string'
+              ? result.context.destination
+              : result.context.destination.name || result.context.destination.formatted || ''
+          )
+        } else {
+          setPendingDestination('')
+        }
+      }
 
       let assistantText = result.reply || 'I could not prepare a reliable answer. Please try again.'
 

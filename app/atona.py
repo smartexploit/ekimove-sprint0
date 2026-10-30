@@ -1,6 +1,7 @@
-﻿import json
+import json
 import httpx
 import logging
+import re
 import unicodedata
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -21,6 +22,8 @@ router = APIRouter(prefix="/api/v1/atona", tags=["Atá»ÌnÃ  AI"])
 class AtonaMessage(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
     message: str = Field(min_length=3, max_length=1000)
+    origin_hint: str | None = Field(default=None, max_length=255)
+    destination_hint: str | None = Field(default=None, max_length=255)
 
 
 def normalize_name(value: str) -> str:
@@ -300,169 +303,232 @@ def answer_geography(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    """Answer location questions and provide routed directions when verified."""
+    """Resolve Ekiti locations and calculate routes using Geoapify."""
     if current_user.role != "passenger":
         raise HTTPException(
             status_code=403,
-            detail="At??n? geographic assistance is available to passenger accounts only.",
+            detail="Atọ́nà geographic assistance is available to passenger accounts only.",
         )
 
-    if not settings.atona_enabled or not settings.groq_api_key:
+    if not settings.atona_enabled:
         raise HTTPException(
             status_code=503,
-            detail="At??n? is not configured yet.",
+            detail="Atọ́nà is not configured yet.",
         )
 
-    rows = db.execute(
-        select(Place, ServiceArea, Zone)
-        .join(ServiceArea, Place.service_area_id == ServiceArea.id)
-        .join(Zone, Place.zone_id == Zone.id)
-        .where(
-            Place.status == "active",
-            ServiceArea.status == "active",
-            Zone.is_active.is_(True),
+    if not settings.geoapify_api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="Atọ́nà's geographic search service is not configured yet.",
         )
-        .order_by(ServiceArea.name, Place.name)
-    ).all()
-
-    places = []
-    for place, area, zone in rows:
-        places.append({
-            "id": place.id,
-            "name": place.name,
-            "type": place.place_type,
-            "service_area": area.name,
-            "area_description": area.description,
-            "zone": zone.name,
-            "address": place.address_text,
-            "aliases": place.aliases,
-            "notes": place.notes,
-            "latitude": place.latitude,
-            "longitude": place.longitude,
-        })
-
-    if not places:
-        return {
-            "kind": "geography",
-            "reply": (
-                "I don't have any active registered places to reference yet. "
-                "Please ask the EkiMove administrator to configure places and service areas."
-            ),
-            "places": [],
-            "route": None,
-        }
 
     message = payload.message.strip()
-    normalized_message = normalize_name(message)
+    normalized = normalize_name(message)
+
+    # EkiMove database records remain authoritative for configured service areas.
+    areas = db.execute(
+        select(ServiceArea.name, ServiceArea.description)
+        .where(ServiceArea.status == "active")
+        .order_by(ServiceArea.name)
+    ).all()
+    zones = db.scalars(
+        select(Zone).where(Zone.is_active.is_(True)).order_by(Zone.name)
+    ).all()
 
     direction_terms = (
         "direction", "directions", "route", "navigate", "navigation",
         "how do i get", "how can i get", "way to", "how far",
         "distance between", "drive from", "go from", "travel from",
-        "get from", "directions from",
+        "get from", "guide me to", "take me to", "get me to",
+        "how do i reach", "how can i reach", "driving to",
     )
-    wants_directions = any(term in normalized_message for term in direction_terms)
+    wants_directions = bool(payload.destination_hint) or any(
+        term in normalized for term in direction_terms
+    )
 
-    # Match only registered names and explicitly configured aliases.
-    matched = []
-    for item in places:
-        terms = [item["name"]]
-        if item["aliases"]:
-            terms.extend(
-                alias.strip()
-                for alias in item["aliases"].replace("|", ";").replace(",", ";").split(";")
-                if alias.strip()
+    origin_query = (payload.origin_hint or "").strip()
+    destination_query = (payload.destination_hint or "").strip()
+
+    # Explicit origin/destination hints are used for follow-up turns.
+    # Otherwise extract simple "from X to Y" phrases where possible.
+    if wants_directions and not origin_query and not destination_query:
+        match = re.search(
+            r"\bfrom\s+(.+?)\s+to\s+(.+?)(?:[?.!,]|$)",
+            message,
+            flags=re.IGNORECASE,
+        )
+        if match:
+            origin_query = match.group(1).strip()
+            destination_query = match.group(2).strip()
+        else:
+            destination_match = re.search(
+                r"\b(?:guide me to|take me to|get me to|route to|directions to|how do i get to|how can i get to|how do i reach|how can i reach)\s+(.+?)(?:[?.!,]|$)",
+                message,
+                flags=re.IGNORECASE,
             )
-        if item["address"]:
-            terms.append(item["address"])
+            if destination_match:
+                destination_query = destination_match.group(1).strip()
 
-        matching_terms = []
-        for term in terms:
-            normalized_term = normalize_name(term)
-            if len(normalized_term) >= 3 and normalized_term in normalized_message:
-                matching_terms.append(normalized_term)
+    # A follow-up such as "I'm at EKSU Main Gate" supplies the pickup.
+    if payload.destination_hint and not origin_query:
+        origin_query = message
 
-        if matching_terms:
-            best_term = max(matching_terms, key=len)
-            matched.append({
-                **item,
-                "_match": best_term,
-                "_position": normalized_message.find(best_term),
+    def resolve_location(query: str) -> dict | None:
+        if not query or len(query.strip()) < 3:
+            return None
+
+        search_text = f"{query}, Ekiti State, Nigeria"
+        try:
+            response = httpx.get(
+                "https://api.geoapify.com/v1/geocode/search",
+                params={
+                    "text": search_text,
+                    "format": "json",
+                    "limit": 5,
+                    "filter": "countrycode:ng",
+                    "bias": "proximity:5.2227,7.6232",
+                    "apiKey": settings.geoapify_api_key,
+                },
+                timeout=15.0,
+            )
+            response.raise_for_status()
+            data = response.json()
+        except (httpx.HTTPError, ValueError):
+            logger.exception("Atọ́nà Geoapify geocoding request failed")
+            return None
+
+        results = data.get("results", [])
+        if not isinstance(results, list):
+            return None
+
+        query_norm = normalize_name(query)
+        query_is_city = any(
+            token in query_norm
+            for token in ("ado ekiti", "ado-ekiti")
+        )
+
+        candidates = []
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+
+            state = normalize_name(str(item.get("state") or ""))
+            country = normalize_name(str(item.get("country") or ""))
+            if state not in ("ekiti", "ekiti state") or country != "nigeria":
+                continue
+
+            name = str(item.get("name") or "").strip()
+            formatted = str(item.get("formatted") or "").strip()
+            result_type = normalize_name(str(item.get("result_type") or ""))
+
+            if not name or item.get("lat") is None or item.get("lon") is None:
+                continue
+
+            # Do not mistake the Ado-Ekiti city result for a requested landmark.
+            if not query_is_city:
+                searchable = normalize_name(f"{name} {formatted}")
+                name_match = query_norm == normalize_name(name)
+                meaningful_overlap = (
+                    len(query_norm) >= 5
+                    and query_norm in searchable
+                )
+                if not name_match and not meaningful_overlap:
+                    continue
+                if result_type in (
+                    "city", "state", "country", "county",
+                    "municipality", "administrative",
+                ):
+                    continue
+
+            candidates.append({
+                "name": name,
+                "formatted": formatted,
+                "latitude": float(item["lat"]),
+                "longitude": float(item["lon"]),
+                "result_type": result_type,
+                "state": item.get("state"),
+                "country": item.get("country"),
             })
 
-    # Keep one match per registered place, in the order mentioned.
-    unique_matches = {}
-    for item in sorted(
-        matched,
-        key=lambda item: (item["_position"], -len(item["_match"])),
-    ):
-        unique_matches.setdefault(item["id"], item)
-    matched_places = list(unique_matches.values())
+        if not candidates:
+            return None
+
+        # Prefer exact name matches over broader formatted-address matches.
+        candidates.sort(
+            key=lambda item: (
+                normalize_name(item["name"]) != query_norm,
+                len(item["formatted"]),
+            )
+        )
+        return candidates[0]
+
+    def public_location(item: dict) -> dict:
+        return {
+            "name": item["name"],
+            "address": item["formatted"],
+            "state": item["state"],
+            "country": item["country"],
+            "latitude": item["latitude"],
+            "longitude": item["longitude"],
+            "provider": "Geoapify",
+        }
 
     if wants_directions:
-        if len(matched_places) < 2:
+        if not destination_query:
             return {
                 "kind": "directions",
                 "reply": (
-                    "I need two registered locations to plan directions. "
-                    "Please mention both your starting point and destination "
-                    "using their EkiMove place names or configured aliases."
-                ),
-                "places": [
-                    {"id": item["id"], "name": item["name"]}
-                    for item in matched_places
-                ],
-                "route": None,
-            }
-
-        origin = matched_places[0]
-        destination = matched_places[1]
-
-        if origin["id"] == destination["id"]:
-            return {
-                "kind": "directions",
-                "reply": "Your starting point and destination must be different places.",
-                "places": [],
-                "route": None,
-            }
-
-        if origin["latitude"] is None or origin["longitude"] is None:
-            return {
-                "kind": "directions",
-                "reply": (
-                    f"{origin['name']} does not have registered coordinates yet. "
-                    "The administrator must add its latitude and longitude before "
-                    "I can calculate a route."
+                    "Where would you like to go? Tell me your destination. "
+                    "If you also provide your pickup location, I can check the route."
                 ),
                 "places": [],
                 "route": None,
+                "context": {"destination": None},
+                "needs_origin": False,
             }
 
-        if destination["latitude"] is None or destination["longitude"] is None:
+        destination = resolve_location(destination_query)
+        if destination is None:
             return {
                 "kind": "directions",
                 "reply": (
-                    f"{destination['name']} does not have registered coordinates yet. "
-                    "The administrator must add its latitude and longitude before "
-                    "I can calculate a route."
+                    f"I couldn't verify '{destination_query}' as a specific location "
+                    "in Ekiti State. Please provide a more precise landmark, business "
+                    "name, or address. I won't substitute a nearby city or an unrelated result."
                 ),
                 "places": [],
                 "route": None,
+                "context": {"destination": None},
+                "needs_origin": False,
             }
 
-        if not settings.geoapify_api_key:
+        if not origin_query:
             return {
                 "kind": "directions",
                 "reply": (
-                    "I found both registered places, but route calculation is not "
-                    "configured yet. EkiMove needs a Geoapify API key to calculate "
-                    "driving directions. I won't guess the route or travel time."
+                    f"I found {destination['name']} in Ekiti State. "
+                    "Where are you starting from? For example, give me your "
+                    "current landmark or a nearby address."
                 ),
-                "places": [
-                    {"id": origin["id"], "name": origin["name"]},
-                    {"id": destination["id"], "name": destination["name"]},
-                ],
+                "places": [public_location(destination)],
                 "route": None,
+                "context": {"destination": destination_query},
+                "needs_origin": True,
+            }
+
+        origin = resolve_location(origin_query)
+        if origin is None:
+            return {
+                "kind": "directions",
+                "reply": (
+                    f"I couldn't verify '{origin_query}' as a specific location "
+                    "in Ekiti State. Please give me a more precise pickup landmark "
+                    "or address."
+                ),
+                "places": [public_location(destination)],
+                "route": None,
+                "context": {"destination": destination_query},
+                "needs_origin": True,
             }
 
         try:
@@ -481,50 +547,51 @@ def answer_geography(
             route_response.raise_for_status()
             route_data = route_response.json()
         except (httpx.HTTPError, ValueError):
-            logger.exception("At??n? route provider request failed")
+            logger.exception("Atọ́nà Geoapify routing request failed")
             return {
                 "kind": "directions",
                 "reply": (
-                    "I couldn't retrieve a reliable route right now. "
-                    "Please try again later; I won't invent directions."
+                    "I verified both locations, but couldn't retrieve a route "
+                    "right now. Please try again shortly."
                 ),
-                "places": [],
+                "places": [public_location(origin), public_location(destination)],
                 "route": None,
+                "context": {"destination": destination_query},
+                "needs_origin": False,
             }
 
         features = route_data.get("features", [])
         if not features:
             return {
                 "kind": "directions",
-                "reply": "The routing service did not return a route for those places.",
-                "places": [],
+                "reply": "Geoapify did not return a route for these locations.",
+                "places": [public_location(origin), public_location(destination)],
                 "route": None,
+                "context": {"destination": destination_query},
+                "needs_origin": False,
             }
 
         properties = features[0].get("properties", {})
-        legs = properties.get("legs", [])
+        distance_meters = properties.get("distance")
+        duration_seconds = properties.get("time")
+        if distance_meters is None or duration_seconds is None:
+            return {
+                "kind": "directions",
+                "reply": "The routing service returned incomplete route information.",
+                "places": [public_location(origin), public_location(destination)],
+                "route": None,
+                "context": {"destination": destination_query},
+                "needs_origin": False,
+            }
+
         steps = []
-        for leg in legs:
+        for leg in properties.get("legs", []):
             for step in leg.get("steps", []):
                 instruction = step.get("instruction", {})
                 if isinstance(instruction, dict):
                     instruction = instruction.get("text")
                 if isinstance(instruction, str) and instruction.strip():
                     steps.append(instruction.strip())
-
-        distance_meters = properties.get("distance")
-        duration_seconds = properties.get("time")
-
-        if distance_meters is None or duration_seconds is None:
-            return {
-                "kind": "directions",
-                "reply": (
-                    "The routing service returned incomplete distance or travel-time "
-                    "information, so I can't provide a reliable route summary yet."
-                ),
-                "places": [],
-                "route": None,
-            }
 
         route = {
             "mode": "drive",
@@ -535,66 +602,71 @@ def answer_geography(
             "steps": steps,
             "provider": "Geoapify",
         }
-        distance_km = float(distance_meters) / 1000
-        duration_minutes = float(duration_seconds) / 60
         reply = (
-            f"The routing service estimates about {distance_km:.1f} km "
-            f"and {duration_minutes:.0f} minutes by car from {origin['name']} "
-            f"to {destination['name']}. This is a route estimate, not a live "
-            "traffic or road-closure guarantee."
+            f"Geoapify estimates about {float(distance_meters) / 1000:.1f} km "
+            f"and {float(duration_seconds) / 60:.0f} minutes by car from "
+            f"{origin['name']} to {destination['name']}. This is an estimate, "
+            "not a live traffic or road-closure guarantee."
         )
         if not steps:
-            reply += " Turn-by-turn instructions were not returned for this route."
+            reply += " Turn-by-turn instructions were not returned."
 
         return {
             "kind": "directions",
             "reply": reply,
-            "places": [
-                {"id": origin["id"], "name": origin["name"]},
-                {"id": destination["id"], "name": destination["name"]},
-            ],
+            "places": [public_location(origin), public_location(destination)],
             "route": route,
+            "context": {"destination": None},
+            "needs_origin": False,
         }
 
-    # For descriptions and geographic questions, ground the AI in active records.
-    public_places = [
-        {
-            "name": item["name"],
-            "type": item["type"],
-            "service_area": item["service_area"],
-            "area_description": item["area_description"],
-            "zone": item["zone"],
-            "address": item["address"],
-            "aliases": item["aliases"],
-            "notes": item["notes"],
-            "has_coordinates": (
-                item["latitude"] is not None
-                and item["longitude"] is not None
+    # For a place question, search Geoapify rather than requiring a Place row.
+    # Remove common question prefixes to isolate the requested place.
+    query = message
+    for prefix in (
+        "tell me about ", "where is ", "where are ",
+        "describe ", "location of ", "what is ",
+    ):
+        if normalized.startswith(prefix):
+            query = message[len(prefix):].strip(" ?.! ")
+            break
+
+    if not query:
+        query = message
+
+    location = resolve_location(query)
+    if location is None:
+        return {
+            "kind": "geography",
+            "reply": (
+                f"I couldn't verify '{query}' as a specific place in Ekiti State. "
+                "Try the full landmark or business name, or include a nearby street "
+                "or neighbourhood. I won't invent details."
             ),
+            "places": [],
+            "route": None,
         }
-        for item in places
-    ]
 
-    system_prompt = (
-        "You are At??n?, EkiMove's geographic information assistant for Ado-Ekiti, Nigeria. "
-        "Answer questions about places, landmarks, addresses, service areas and geography. "
-        "Use the supplied active EkiMove place catalogue as the source of truth for "
-        "EkiMove-specific records. You may answer general geographic questions using "
-        "your general knowledge, but distinguish general knowledge from verified EkiMove "
-        "records. Never invent an address, coordinate, nearby business, road, route, "
-        "distance, travel time, opening hour or live traffic condition. Do not provide "
-        "turn-by-turn directions unless a routing result is supplied. If the catalogue "
-        "does not establish a fact, say that you cannot verify it and ask a useful "
-        "clarifying question. Be concise and helpful. Understand English and Nigerian "
-        "Pidgin. Do not claim to book a ride or confirm a fare."
-    )
+    if not settings.groq_api_key:
+        return {
+            "kind": "geography",
+            "reply": (
+                f"I verified {location['name']} at {location['formatted']}. "
+                "I can confirm its returned location, but the AI explanation service "
+                "is not configured right now."
+            ),
+            "places": [public_location(location)],
+            "route": None,
+        }
 
-    user_content = (
-        "Active registered place catalogue:\n"
-        + json.dumps(public_places, ensure_ascii=False)
-        + "\nPassenger question:\n"
-        + message
-    )
+    knowledge = {
+        "verified_geoapify_result": public_location(location),
+        "active_ekimove_service_areas": [
+            {"name": row.name, "description": row.description}
+            for row in areas
+        ],
+        "active_ekimove_zones": [zone.name for zone in zones],
+    }
 
     try:
         client = Groq(
@@ -605,37 +677,46 @@ def answer_geography(
         response = client.chat.completions.create(
             model=settings.groq_model,
             temperature=0,
-            max_completion_tokens=500,
+            max_completion_tokens=450,
             messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content},
+                {
+                    "role": "system",
+                    "content": (
+                        "You are Atọ́nà, EkiMove's geographic assistant for Ekiti State, Nigeria. "
+                        "Explain the verified place using only the supplied Geoapify result "
+                        "and EkiMove service-area records. Do not invent history, nearby "
+                        "businesses, opening hours, phone numbers, coordinates, fares, "
+                        "availability, routes or travel times. Clearly distinguish a "
+                        "verified geographic result from EkiMove service coverage. If "
+                        "the records do not establish a fact, say it cannot be verified. "
+                        "Be concise and helpful. Understand English and Nigerian Pidgin. "
+                        "Never claim to book a ride or confirm payment."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        "Verified context:\n"
+                        + json.dumps(knowledge, ensure_ascii=False)
+                        + "\nPassenger question:\n"
+                        + message
+                    ),
+                },
             ],
         )
         reply = response.choices[0].message.content
         if not reply or not reply.strip():
             raise ValueError("Empty geographic answer")
     except (APIConnectionError, APIStatusError, ValueError):
-        logger.exception("At??n? geographic answer failed")
-        return {
-            "kind": "geography",
-            "reply": (
-                "I couldn't prepare a reliable geographic answer right now. "
-                "Please try again shortly or ask about a specific registered EkiMove place."
-            ),
-            "places": [
-                {"id": item["id"], "name": item["name"]}
-                for item in matched_places[:5]
-            ],
-            "route": None,
-        }
+        logger.exception("Atọ́nà geographic explanation failed")
+        reply = (
+            f"I verified {location['name']} at {location['formatted']}, "
+            "but couldn't prepare a fuller explanation right now."
+        )
 
     return {
         "kind": "geography",
         "reply": reply.strip(),
-        "places": [
-            {"id": item["id"], "name": item["name"]}
-            for item in matched_places[:5]
-        ],
+        "places": [public_location(location)],
         "route": None,
     }
-
