@@ -549,7 +549,7 @@
 }
 
 @media (max-width: 380px) {
-  .my-rides-toolbar {
+  .my-rides-toolbar { 
     flex-direction: column;
   }
 
