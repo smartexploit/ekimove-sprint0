@@ -1,10 +1,9 @@
-﻿
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import AppPage from '../../components/layout/AppPage';
-import { apiRequest } from '../../services/authService';
-import SOSButton from '../../components/SOSButton';
-import './MyRidesPage.css';
+﻿import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
+import AppPage from '../../layouts/AppPage.jsx'
+import { apiRequest } from '../../services/authService.js'
+import SOSButton from '../../components/SOSButton.jsx'
+import './MyRidesPage.css'
 
 function formatFare(value) {
   if (value === null || value === undefined) return 'Not available';
