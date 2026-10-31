@@ -12,8 +12,6 @@ import {
   Menu,
   Navigation,
   ShieldCheck,
-  Smartphone,
-  Users,
   X,
 } from "lucide-react";
 

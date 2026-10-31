@@ -6,11 +6,12 @@ import AtonaFloatingAssistant from '../../components/AtonaFloatingAssistant.jsx'
 
 export default function BookRidePage() {
   const [areas, setAreas] = useState([])
-  const [places, setPlaces] = useState([])
-  const [fareOptions, setFareOptions] = useState([])
+  // Fetched places and fares are stored with the selection they were loaded
+  // for, so stale results and loading state are derived during render instead
+  // of being reset synchronously inside effects.
+  const [placesResult, setPlacesResult] = useState({ key: '', items: [] })
+  const [fareResult, setFareResult] = useState({ key: '', items: [] })
   const [loadingAreas, setLoadingAreas] = useState(true)
-  const [loadingPlaces, setLoadingPlaces] = useState(false)
-  const [loadingFareOptions, setLoadingFareOptions] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [ride, setRide] = useState(null)
@@ -43,77 +44,63 @@ export default function BookRidePage() {
     return () => { active = false }
   }, [])
 
+  const placesKey = form.service_area_id
+  const places = placesKey && placesResult.key === placesKey
+    ? placesResult.items
+    : []
+  const loadingPlaces = Boolean(placesKey) && placesResult.key !== placesKey
+
+  const routeSelected = Boolean(
+    form.origin_place_id &&
+    form.destination_place_id &&
+    form.origin_place_id !== form.destination_place_id,
+  )
+  const fareKey = routeSelected
+    ? `${form.origin_place_id}|${form.destination_place_id}|${form.passenger_count}`
+    : ''
+  const fareOptions = fareKey && fareResult.key === fareKey
+    ? fareResult.items
+    : []
+  const loadingFareOptions = Boolean(fareKey) && fareResult.key !== fareKey
+
   useEffect(() => {
+    if (!placesKey) return undefined
     let active = true
 
-    setPlaces([])
-    setFareOptions([])
-    setForm((current) => ({
-      ...current,
-      origin_place_id: '',
-      destination_place_id: '',
-      origin_text: '',
-      destination_text: '',
-      vehicle_type: '',
-    }))
-
-    if (!form.service_area_id) {
-      setLoadingPlaces(false)
-      return () => { active = false }
-    }
-
-    setLoadingPlaces(true)
     apiRequest(
-      `/api/v1/locations/places?service_area_id=${encodeURIComponent(form.service_area_id)}`,
+      `/api/v1/locations/places?service_area_id=${encodeURIComponent(placesKey)}`,
     )
       .then((data) => {
-        if (active) setPlaces(data)
+        if (active) setPlacesResult({ key: placesKey, items: data })
       })
       .catch((err) => {
-        if (active) setError(err.message)
-      })
-      .finally(() => {
-        if (active) setLoadingPlaces(false)
+        if (!active) return
+        setPlacesResult({ key: placesKey, items: [] })
+        setError(err.message)
       })
 
     return () => { active = false }
-  }, [form.service_area_id])
+  }, [placesKey])
 
   useEffect(() => {
+    if (!fareKey) return undefined
     let active = true
+    const [originPlaceId, destinationPlaceId, passengerCount] = fareKey.split('|')
 
-    setFareOptions([])
-    setForm((current) => ({ ...current, vehicle_type: '' }))
-
-    if (
-      !form.origin_place_id ||
-      !form.destination_place_id ||
-      form.origin_place_id === form.destination_place_id
-    ) {
-      setLoadingFareOptions(false)
-      return () => { active = false }
-    }
-
-    setLoadingFareOptions(true)
     apiRequest(
-      `/api/v1/place-fare-options?origin_place_id=${encodeURIComponent(form.origin_place_id)}&destination_place_id=${encodeURIComponent(form.destination_place_id)}&passenger_count=${encodeURIComponent(form.passenger_count)}`,
+      `/api/v1/place-fare-options?origin_place_id=${encodeURIComponent(originPlaceId)}&destination_place_id=${encodeURIComponent(destinationPlaceId)}&passenger_count=${encodeURIComponent(passengerCount)}`,
     )
       .then((options) => {
-        if (active) setFareOptions(options)
+        if (active) setFareResult({ key: fareKey, items: options })
       })
       .catch((err) => {
-        if (active) setError(err.message)
-      })
-      .finally(() => {
-        if (active) setLoadingFareOptions(false)
+        if (!active) return
+        setFareResult({ key: fareKey, items: [] })
+        setError(err.message)
       })
 
     return () => { active = false }
-  }, [
-    form.origin_place_id,
-    form.destination_place_id,
-    form.passenger_count,
-  ])
+  }, [fareKey])
 
   function applyAtonaBooking(booking) {
     setForm((current) => ({
@@ -125,7 +112,6 @@ export default function BookRidePage() {
       destination_place_id: '',
       vehicle_type: '',
     }))
-    setFareOptions([])
     setError('')
     setMessage(
       'Atọ́nà added your trip details. Select the service area, pickup place and destination place to continue.',
@@ -172,13 +158,6 @@ export default function BookRidePage() {
 
       return next
     })
-
-    if (
-      ['service_area_id', 'origin_place_id', 'destination_place_id', 'passenger_count']
-        .includes(name)
-    ) {
-      setFareOptions([])
-    }
 
     setError('')
     setMessage('')

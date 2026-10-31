@@ -12,49 +12,8 @@ export default function AtonaFloatingAssistant({ onApplyBooking }) {
     },
   ])
   const [pendingBooking, setPendingBooking] = useState(null)
-  const [pendingDestination, setPendingDestination] = useState('')
-  const [bookingInProgress, setBookingInProgress] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-
-  function chooseEndpoint(message, isBookingInProgress) {
-    const text = message.toLowerCase()
-
-    // Once a booking starts, all follow-up answers belong to that booking.
-    if (isBookingInProgress) {
-      return '/api/v1/atona/interpret'
-    }
-
-    if (pendingDestination) {
-      return '/api/v1/atona/geography'
-    }
-
-    const bookingTerms = [
-      'book a ride', 'book me', 'request a ride', 'request a trip',
-      'i need a ride', 'need a ride', 'pick me up', 'i want to book',
-      'order a ride', 'get me a driver', 'i need transport',
-    ]
-
-    if (bookingTerms.some((term) => text.includes(term))) {
-      return '/api/v1/atona/interpret'
-    }
-
-    const geographyTerms = [
-      'direction', 'where is', 'where are', 'describe',
-      'geographic', 'landmark', 'how far', 'distance between',
-      'route to', 'route from', 'guide me to', 'take me to',
-      'navigate', 'navigation',
-      'how do i get', 'how can i get', 'way to', 'location of',
-      'tell me about', 'which area', 'what is near', 'what is around',
-      'how do i reach', 'how can i reach', 'driving to', 'drive to',
-    ]
-
-    if (geographyTerms.some((term) => text.includes(term))) {
-      return '/api/v1/atona/geography'
-    }
-
-    return '/api/v1/atona/interpret'
-  }
 
   async function sendMessage(event) {
     event.preventDefault()
@@ -70,7 +29,6 @@ export default function AtonaFloatingAssistant({ onApplyBooking }) {
     setInput('')
     setError('')
     setPendingBooking(null)
-    setBookingInProgress(false)
     setBusy(true)
 
     if (!getAccessToken()) {
@@ -119,7 +77,6 @@ export default function AtonaFloatingAssistant({ onApplyBooking }) {
       },
     ])
     setPendingBooking(null)
-    setBookingInProgress(false)
     setOpen(false)
   }
 
