@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import Logo from '../components/brand/Logo.jsx'
 import AtonaFloatingAssistant from '../components/AtonaFloatingAssistant.jsx'
+import AtonaHeaderButton from '../components/atona/AtonaHeaderButton.jsx'
 import { logoutPassenger } from '../services/authService.js'
 import { firstName, initials } from '../utils/format.js'
 import { homePathForRole } from '../utils/roles.js'
@@ -73,6 +74,7 @@ export default function AppShell({
           </nav>
 
           <div className="app-user">
+            <AtonaHeaderButton className="tabbar-only" />
             <span className="avatar" aria-hidden="true">
               {initials(user?.full_name)}
             </span>
@@ -111,7 +113,7 @@ export default function AppShell({
         </div>
       </main>
 
-      <AtonaFloatingAssistant onApplyBooking={onApplyBooking} />
+      <AtonaFloatingAssistant onApplyBooking={onApplyBooking} headerLaunch />
 
       <nav className="tabbar" aria-label="App">
         {items.map(([to, label, Icon]) => (

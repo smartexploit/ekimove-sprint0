@@ -455,3 +455,9 @@
     transition: none;
   }
 }
+
+/* The panel takes focus on phones only so screen readers start in the chat. */
+.atona-panel:focus {
+  outline: none;
+  box-shadow: 0 24px 60px rgba(4, 30, 22, 0.3), 0 0 0 1px rgba(16, 32, 26, 0.06);
+}

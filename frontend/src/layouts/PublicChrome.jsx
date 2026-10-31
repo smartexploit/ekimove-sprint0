@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { Menu, X } from 'lucide-react'
 import Logo from '../components/brand/Logo.jsx'
 import SupportContacts from '../components/SupportContacts.jsx'
+import AtonaHeaderButton from '../components/atona/AtonaHeaderButton.jsx'
 import { getAccessToken, getStoredUser } from '../services/authService.js'
 import { homePathForRole } from '../utils/roles.js'
 
@@ -24,16 +25,19 @@ export function PublicHeader({ dark = false }) {
       <div className="container site-nav">
         <Logo reversed={dark} onClick={close} />
 
-        <button
-          type="button"
-          className="icon-btn menu-toggle"
-          aria-label={open ? 'Close menu' : 'Open menu'}
-          aria-expanded={open}
-          aria-controls="site-links"
-          onClick={() => setOpen((value) => !value)}
-        >
-          {open ? <X size={22} /> : <Menu size={22} />}
-        </button>
+        <div className="site-nav-phone">
+          <AtonaHeaderButton className="tabbar-only" />
+          <button
+            type="button"
+            className="icon-btn menu-toggle"
+            aria-label={open ? 'Close menu' : 'Open menu'}
+            aria-expanded={open}
+            aria-controls="site-links"
+            onClick={() => setOpen((value) => !value)}
+          >
+            {open ? <X size={22} /> : <Menu size={22} />}
+          </button>
+        </div>
 
         <nav
           id="site-links"

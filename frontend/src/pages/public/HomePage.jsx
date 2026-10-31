@@ -211,8 +211,8 @@ export default function HomePage() {
         Skip to trip planner
       </a>
 
+      <PublicHeader dark />
       <section className="hero">
-        <PublicHeader dark />
         <div className="container hero-inner">
           <div className="hero-copy">
             <p className="eyebrow hero-eyebrow">Now piloting in Ado-Ekiti</p>
@@ -406,7 +406,7 @@ export default function HomePage() {
       </main>
 
       <PublicFooter />
-      <AtonaFloatingAssistant />
+      <AtonaFloatingAssistant headerLaunch />
     </div>
   )
 }
