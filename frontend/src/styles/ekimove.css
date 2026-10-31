@@ -886,22 +886,36 @@ button:disabled {
 }
 
 /* ---------- Route and progress ---------- */
+/*
+ * Pickup/destination block with a dot-line-square rail on the left.
+ * The rail is positioned against the block (top/bottom insets) instead of
+ * stretching to "100%" of grid rows: iPhone Safari (WebKit) sized those
+ * rows from the rail and pushed the Destination field out of its card.
+ */
 .route {
-  display: grid;
-  grid-template-columns: 14px 1fr;
-  column-gap: 14px;
-  row-gap: 14px;
-  align-items: start;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-left: 28px;
+  min-width: 0;
+}
+
+.route > :not(.route-rail) {
+  min-width: 0;
 }
 
 .route-rail {
-  grid-row: 1 / span 2;
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: 0;
+  width: 14px;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 3px;
-  padding-top: 6px;
-  height: 100%;
+  pointer-events: none;
 }
 
 .route-dot {
@@ -914,8 +928,8 @@ button:disabled {
 
 .route-line {
   width: 2px;
-  flex-grow: 1;
-  min-height: 24px;
+  flex: 1 1 auto;
+  min-height: 0;
   background: var(--line-strong);
 }
 
@@ -1332,7 +1346,7 @@ button:disabled {
 }
 
 .planner .route {
-  row-gap: 14px;
+  gap: 14px;
 }
 
 .section {
@@ -3298,4 +3312,15 @@ button:disabled {
   gap: 6px;
   margin-top: 6px;
   max-width: 220px;
+}
+
+/* A card that is itself the route block: keep the rail inside its padding. */
+.card.route {
+  padding-left: 48px;
+}
+
+.card.route > .route-rail {
+  top: 26px;
+  bottom: 26px;
+  left: 20px;
 }
