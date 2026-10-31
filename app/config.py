@@ -154,6 +154,10 @@ class Settings(BaseSettings):
     vapid_private_key: str | None = None
     vapid_subject: str | None = None
 
+    # Public address of the app, used in links sent by text (e.g. a
+    # delivery's tracking link). Change it when the custom domain is live.
+    frontend_url: str = "https://ekimove.onrender.com"
+
     # Optional error monitoring with Sentry.
     sentry_dsn: str | None = None
 

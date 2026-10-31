@@ -23,6 +23,12 @@ export const POLICIES = [
         'Loads (big cars, vans and dyna trucks) are priced by a quote agreed with EkiMove support. A quote is only binding once you accept it in the app.',
         'EkiMove offers your request to available drivers but cannot guarantee that a driver will be found or how long it will take.',
       ]],
+      ['Package deliveries', [
+        'You can send a package within our service areas. You must describe it honestly, pack it securely, mark it fragile where needed, and give a recipient who can receive it.',
+        'Packages must not contain cash, weapons, drugs, stolen goods, dangerous or banned items, or anything illegal. Riders may refuse a package that looks unsafe or doesn’t match its description, and we may report illegal items to the police.',
+        'The rider hands the package over only when the recipient gives the 4-digit delivery code. Keep the code private until the package is in the recipient’s hands.',
+        'Report a lost or damaged package through Support within 24 hours of the delivery time. Any compensation is limited and assessed case by case.',
+      ]],
       ['Booking ahead, promo and invite codes', [
         'You can book a ride up to 7 days ahead. EkiMove starts looking for a driver shortly before your pickup time but cannot guarantee one will be available.',
         'Promo and invite codes give money off the fare shown in the app. They have no cash value, can’t be swapped or sold, and may have limits and end dates. A code used on a booking that is cancelled before payment can be used again.',
@@ -110,7 +116,7 @@ export const POLICIES = [
         'All trips and payments go through the app. Cash, off-app trips and side deals are not allowed, because they remove the safety protections for both sides.',
       ]],
       ['What you can’t carry', [
-        'No weapons, illegal drugs, stolen goods, dangerous or banned items. Loads must match what was described when booking.',
+        'No weapons, illegal drugs, stolen goods, dangerous or banned items, in a vehicle, a load or a package. Packages must not contain cash. Loads and packages must match what was described when booking.',
       ]],
       ['Reporting and action', [
         'Report problems through Support, SOS or “Report a problem” on your receipt. We review every report.',

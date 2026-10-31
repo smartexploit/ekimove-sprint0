@@ -17,6 +17,8 @@ from app.promos import router as promos_router
 from app.scheduling import router as scheduling_router
 from app.trip_chat import router as trip_chat_router
 from app.data_rights import router as data_rights_router
+from app import deliveries as deliveries_module
+from app.deliveries import check_delivery_code, recipient_text, router as deliveries_router
 from app.support import router as support_router
 from app.haulage import router as haulage_router
 from app.verification import client_fingerprint, ensure_passenger_may_book, record_policy_acceptance, router as verification_router
@@ -96,6 +98,7 @@ app.include_router(promos_router)
 app.include_router(scheduling_router)
 app.include_router(trip_chat_router)
 app.include_router(data_rights_router)
+app.include_router(deliveries_router)
 
 class LoginRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
@@ -177,6 +180,8 @@ class RideStatusUpdate(BaseModel):
     status: Literal["driver_arriving", "in_progress", "completed"]
     # Required to start a trip: the 4-digit PIN shown in the passenger's app.
     pickup_pin: str | None = Field(default=None, max_length=8)
+    # Required to finish a delivery: the code the recipient was given.
+    delivery_code: str | None = Field(default=None, max_length=8)
 
 
 class SOSReport(BaseModel):
@@ -1035,6 +1040,8 @@ def list_my_ride_requests(
                     else None
                 ),
                 "chat_unread": chat_unread(db, ride, current_user),
+                "delivery_code": ride.delivery_code if ride.status in ("assigned", "driver_arriving", "in_progress") else None,
+                "share_path": f"/t/{ride.share_token}" if ride.share_token else None,
                 "id": ride_id,
                 "status": ride_status,
                 "driver_name": _short_display_name(driver_full_name),
@@ -1062,6 +1069,10 @@ def list_my_ride_requests(
             "origin_place_id": ride_request.origin_place_id,
             "destination_place_id": ride_request.destination_place_id,
             "service_area_id": place_areas.get(ride_request.origin_place_id),
+            **({"delivery": {"size": ride_request.delivery_size, "recipient_name": ride_request.recipient_name,
+                             "recipient_phone": ride_request.recipient_phone, "fragile": ride_request.fragile,
+                             "notes": ride_request.delivery_notes}}
+               if ride_request.service_type == "delivery" else {}),
             "assigned_ride_id": (
                 assigned_rides[ride_request.id]["id"]
                 if ride_request.id in assigned_rides
@@ -1094,6 +1105,8 @@ def list_my_ride_requests(
                     "share_active",
                     "driver_rating",
                     "chat_unread",
+                    "delivery_code",
+                    "share_path",
                 )
             },
         }
@@ -1506,6 +1519,10 @@ def list_driver_rides(
             "load_description": request.load_description,
             "scheduled_for": iso_utc(request.scheduled_for),
             "chat_unread": chat_unread(db, ride, current_user),
+            **({"delivery": {"size": request.delivery_size, "recipient_name": request.recipient_name,
+                             "recipient_phone": request.recipient_phone, "fragile": request.fragile,
+                             "notes": request.delivery_notes, "code_required": bool(ride.delivery_code)}}
+               if request.service_type == "delivery" else {}),
         }
         for ride, request in rows
     ]
@@ -1574,6 +1591,11 @@ def update_driver_ride_status(
     if payload.status == "in_progress":
         check_pickup_pin(db, ride, payload.pickup_pin, current_user.id)
 
+    status_request = db.get(RideRequest, ride.request_id)
+    is_delivery = status_request is not None and status_request.service_type == "delivery"
+    if is_delivery and payload.status == "completed":
+        check_delivery_code(db, ride, payload.delivery_code, current_user.id)
+
     previous_status = ride.status
     now = datetime.now(timezone.utc)
 
@@ -1587,7 +1609,9 @@ def update_driver_ride_status(
         ride.completed_at = now
         # Credit the driver: fare minus EkiMove's commission.
         record_trip_earning(db, ride)
-    status_request = db.get(RideRequest, ride.request_id)
+    recipient_sms = None
+    if is_delivery and payload.status == "in_progress":
+        recipient_sms = recipient_text(db, ride, status_request)
     if status_request is not None:
         notifications.ride_status(db, ride, status_request)
         if payload.status == "completed":
@@ -1610,6 +1634,8 @@ def update_driver_ride_status(
 
     db.commit()
     db.refresh(ride)
+    if recipient_sms:
+        deliveries_module.send_text(*recipient_sms)
 
     return {
         "ride_id": ride.id,

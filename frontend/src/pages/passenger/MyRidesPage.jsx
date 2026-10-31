@@ -10,6 +10,7 @@ import CancelRide from '../../components/CancelRide.jsx'
 import TripTracker from '../../components/trips/TripTracker.jsx'
 import RateTrip from '../../components/trips/RateTrip.jsx'
 import TripChat from '../../components/trips/TripChat.jsx'
+import DeliveryCode from '../../components/trips/DeliveryCode.jsx'
 import { formatPickupTime } from '../../utils/schedule.js'
 import { getProfile } from '../../services/accountService.js'
 import { apiRequest } from '../../services/authService.js'
@@ -39,8 +40,9 @@ function LiveRide({ ride, onChanged, emergencyContact }) {
           {ride.origin_text} → {ride.destination_text}
         </h2>
         <p className="small" style={{ marginTop: 4, color: 'var(--green-200)' }}>
-          {vehicleLabel(ride.vehicle_type)} · {ride.passenger_count}{' '}
-          {ride.passenger_count === 1 ? 'passenger' : 'passengers'} ·{' '}
+          {ride.delivery
+            ? `${ride.delivery.size ? `${ride.delivery.size[0].toUpperCase()}${ride.delivery.size.slice(1)} package` : 'Package'} by ${vehicleLabel(ride.vehicle_type).toLowerCase()}`
+            : `${vehicleLabel(ride.vehicle_type)} · ${ride.passenger_count} ${ride.passenger_count === 1 ? 'passenger' : 'passengers'}`} ·{' '}
           {ride.status === 'quote_requested' ? 'Price to be agreed' : formatNaira(ride.amount_to_pay ?? ride.quoted_fare)}
           {Number(ride.discount_amount) > 0 && ` (${formatNaira(ride.discount_amount, { decimals: 0 })} promo off)`}
         </p>
@@ -50,6 +52,13 @@ function LiveRide({ ride, onChanged, emergencyContact }) {
           </p>
         )}
       </div>
+
+      {ride.delivery && (
+        <p className="small" style={{ color: 'var(--green-200)' }}>
+          Package to {ride.delivery.recipient_name}: {ride.load_description}{ride.delivery.fragile ? ' (fragile)' : ''}
+        </p>
+      )}
+      {ride.delivery && <DeliveryCode ride={ride} />}
 
       {ride.service_type === 'haulage' && (
         <p className="small" style={{ color: 'var(--green-200)' }}>

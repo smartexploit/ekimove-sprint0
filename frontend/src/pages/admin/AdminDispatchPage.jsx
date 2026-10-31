@@ -205,14 +205,19 @@ export default function AdminDispatchPage() {
                         </td>
                         <td style={{ fontWeight: 700 }}>
                           {request.origin_text} → {request.destination_text}
-                          {request.service_type === 'haulage' && (
-                            <p className="muted small" style={{ fontWeight: 500 }}>Load: {request.load_description}</p>
+                          {['haulage', 'delivery'].includes(request.service_type) && (
+                            <p className="muted small" style={{ fontWeight: 500 }}>
+                              {request.service_type === 'delivery' ? 'Package' : 'Load'}: {request.load_description}
+                            </p>
                           )}
                         </td>
                         <td>
                           {vehicleLabel(request.vehicle_type)}
                           {request.service_type === 'haulage' && (
                             <> <span className="badge badge-gold">Load</span></>
+                          )}
+                          {request.service_type === 'delivery' && (
+                            <> <span className="badge badge-gold">Delivery</span></>
                           )}
                         </td>
                         <td>{request.passenger_count}</td>

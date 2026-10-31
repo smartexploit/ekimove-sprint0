@@ -146,7 +146,8 @@ def assign_driver(db: Session, ride_request: RideRequest, driver: Driver, actor_
 
     ride = Ride(request_id=ride_request.id, driver_id=driver.id, status="assigned",
                 agreed_fare=Decimal(ride_request.quoted_fare), assigned_at=_now(),
-                vehicle_id=vehicle.id, pickup_pin=new_pickup_pin())
+                vehicle_id=vehicle.id, pickup_pin=new_pickup_pin(),
+                delivery_code=new_pickup_pin() if ride_request.service_type == "delivery" else None)
     ride_request.status = "assigned"
     ride_request.dispatch_status = None
     db.add(ride)
@@ -338,6 +339,8 @@ def offer_result(db: Session, offer: RideOffer) -> dict:
         "passenger_count": ride_request.passenger_count,
         "service_type": ride_request.service_type,
         "load_description": ride_request.load_description,
+        "delivery_size": ride_request.delivery_size,
+        "fragile": ride_request.fragile,
         "fare": str(gross),
         "commission": str(commission),
         "earning": str(net),

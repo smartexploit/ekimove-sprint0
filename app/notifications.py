@@ -32,7 +32,7 @@ def _driver_user_id(db: Session, driver_id: int) -> int | None:
 
 
 def trip_offered(db: Session, request: RideRequest, driver: Driver, seconds: int) -> None:
-    kind = "Load" if request.service_type == "haulage" else "Trip"
+    kind = {"haulage": "Load", "delivery": "Delivery"}.get(request.service_type, "Trip")
     notify(db, driver.user_id, f"New {kind.lower()} offer · {_naira(request.quoted_fare)}",
            f"{_route(request)}. Accept within {seconds} seconds.", url="/driver/trips", tag=f"offer-{request.id}",
            urgent=True, ttl=max(seconds, 30))
@@ -57,6 +57,12 @@ def ride_status(db: Session, ride: Ride, request: RideRequest) -> None:
         "in_progress": ("Trip started", "Have a safe trip. You can share your live trip from My rides."),
         "completed": ("Trip completed", "Thanks for riding with EkiMove. Tap to rate your driver."),
     }
+    if request.service_type == "delivery":
+        texts = {
+            "driver_arriving": ("Your rider is here for the package", "Check the plate, then give your pickup PIN."),
+            "in_progress": ("Package picked up", "It's on the way. The recipient gives the rider the delivery code."),
+            "completed": ("Package delivered", "Your package was handed over. Tap to rate your rider."),
+        }
     if ride.status in texts:
         title, body = texts[ride.status]
         notify(db, request.passenger_user_id, title, body, url="/my-rides", tag=f"ride-{request.id}",

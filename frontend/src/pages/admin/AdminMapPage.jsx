@@ -6,6 +6,7 @@ import Alert from '../../components/ui/Alert.jsx'
 import StatusBadge from '../../components/ui/StatusBadge.jsx'
 import LazyMap from '../../components/map/LazyMap.jsx'
 import { getLiveMap } from '../../services/tripService.js'
+import { markDelivered } from '../../services/deliveryService.js'
 import { formatDateTime } from '../../utils/format.js'
 
 const REFRESH_MS = 10000
@@ -55,6 +56,17 @@ export default function AdminMapPage() {
   }, [data])
 
   const located = data?.drivers.filter((d) => d.latitude != null).length || 0
+
+  async function finish(trip) {
+    const reason = window.prompt(`Why is trip #${trip.ride_id} being marked delivered? (kept in the log)`)
+    if (!reason || reason.trim().length < 3) return
+    try {
+      await markDelivered(trip.ride_id, reason.trim())
+      load()
+    } catch (err) {
+      setError(err.message || 'Could not mark it delivered.')
+    }
+  }
 
   return (
     <AdminShell
@@ -121,8 +133,19 @@ export default function AdminMapPage() {
                   {data.trips.map((t) => (
                     <li className="list-item" key={t.ride_id}>
                       <div className="list-item-main">
-                        <p className="list-item-title">#{t.ride_id} · {t.route}</p>
-                        <p className="list-item-meta">Passenger {t.passenger} ({t.passenger_phone}) · Driver {t.driver}</p>
+                        <p className="list-item-title">
+                          #{t.ride_id} · {t.route}
+                          {t.service_type === 'delivery' && <> <span className="badge badge-gold">Delivery</span></>}
+                        </p>
+                        <p className="list-item-meta">
+                          {t.service_type === 'delivery' ? 'Sender' : 'Passenger'} {t.passenger} ({t.passenger_phone}) · Driver {t.driver}
+                          {t.recipient ? ` · To ${t.recipient}` : ''}
+                        </p>
+                        {t.service_type === 'delivery' && t.status === 'in_progress' && (
+                          <button type="button" className="link-button link-tap small" onClick={() => finish(t)}>
+                            Mark delivered (after calling the recipient)
+                          </button>
+                        )}
                       </div>
                       <StatusBadge status={t.status} />
                     </li>

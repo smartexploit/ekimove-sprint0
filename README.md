@@ -162,6 +162,13 @@ Passengers and drivers can chat with the EkiMove team under *Support*; the team 
 - **Invites:** every passenger has an invite code and link (*Invite friends*). A friend who signs up with it gets ₦300 off their first ride; when they finish it, the inviter gets ₦300 off their next one (amounts and on/off under *Promos & invites*; at most 20 rewards per inviter a month).
 - **Trip chat:** the passenger and driver can message each other in the app from assignment until the trip ends (with quick replies like “I’ve arrived”), so they never need to share numbers. Messages notify the other person’s phone and are kept in the trip record for safety reviews.
 
+## Package deliveries
+Customers choose *Send a package*: pickup and drop-off places, size, what's inside, the recipient's name and phone, optional directions and "fragile", now or later, and a promo code. They must confirm the package holds no banned items.
+- **Price:** small and medium go by motorcycle (by car where the route has no motorcycle fare), large by car. Price = that route fare + an extra for medium and large (default ₦200 and ₦300; *Places & fares → Booking rules*, where deliveries can also be switched off).
+- **Hand-over safety:** the rider collects with the sender's pickup PIN and can finish only with the recipient's 4-digit delivery code (5 wrong tries lock it). The sender sees the code in *My rides* and can forward it; when text messages are set up, the recipient is texted the code and a tracking link (`/t/…`, no sign-in) the moment the package is picked up. The rider never sees the code.
+- **Payment, dispatch, earnings, chat, receipts and reports** work as for rides. If the recipient got the package but can't give the code, staff can mark it delivered from *Live map* after calling them (kept in the log).
+- `FRONTEND_URL` (default `https://ekimove.onrender.com`) is used in the recipient's text; change it when the custom domain is live.
+
 ## Data rights
 From *Profile → Your data*, anyone can download a copy of their data (JSON) or ask for their account to be deleted (password needed, can be cancelled). Requests open a support chat and appear under *People → Deletion requested*; staff settle refunds or driver balances, then use **Remove account**, which erases the name, contacts, sign-in, saved places and devices and keeps trips and payments anonymised.
 

@@ -2966,7 +2966,7 @@ button:disabled {
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   margin-top: 6px;
 }
@@ -3859,4 +3859,30 @@ a.chip {
   display: inline-flex;
   align-items: center;
   min-height: 44px;
+}
+
+/* Phase 7: deliveries */
+.delivery-box {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--gold-100);
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.delivery-code {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border-radius: 16px;
+  background: var(--gold-100);
+  color: var(--ink);
+}
+
+.delivery-code strong.code {
+  font-size: 30px;
+  letter-spacing: 0.2em;
+  font-variant-numeric: tabular-nums;
 }

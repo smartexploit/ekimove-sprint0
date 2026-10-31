@@ -3,27 +3,28 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import HomePage from './pages/public/HomePage.jsx'
 import LoginPage from './pages/auth/LoginPage.jsx'
 import RegisterPage from './pages/auth/RegisterPage.jsx'
-import ForgotPasswordPage from './pages/auth/ForgotPasswordPage.jsx'
 import DashboardPage from './pages/passenger/DashboardPage.jsx'
 import BookRidePage from './pages/passenger/BookRidePage.jsx'
 import MyRidesPage from './pages/passenger/MyRidesPage.jsx'
 import PaymentsPage from './pages/passenger/PaymentsPage.jsx'
-import DriverApplicationPage from './pages/driver/DriverApplicationPage.jsx'
-import DriverStatusPage from './pages/driver/DriverStatusPage.jsx'
-import DriverTripsPage from './pages/driver/DriverTripsPage.jsx'
-import DriverEarningsPage from './pages/driver/DriverEarningsPage.jsx'
 import ProtectedRoute from './routes/ProtectedRoute.jsx'
 import OfflineBanner from './components/pwa/OfflineBanner.jsx'
-import HaulagePage from './pages/passenger/HaulagePage.jsx'
-import InvitePage from './pages/passenger/InvitePage.jsx'
 import ProfilePage from './pages/account/ProfilePage.jsx'
 import SupportPage from './pages/account/SupportPage.jsx'
-import ReceiptPage from './pages/account/ReceiptPage.jsx'
-import TrackSharePage from './pages/public/TrackSharePage.jsx'
-import PoliciesPage from './pages/public/PoliciesPage.jsx'
 
 
-// Admin screens load only for super-admins, keeping the passenger app small.
+// Less-used screens (admin, driver, policies…) load when opened, keeping the first download small.
+const DriverApplicationPage = lazy(() => import('./pages/driver/DriverApplicationPage.jsx'))
+const DriverStatusPage = lazy(() => import('./pages/driver/DriverStatusPage.jsx'))
+const DriverTripsPage = lazy(() => import('./pages/driver/DriverTripsPage.jsx'))
+const DriverEarningsPage = lazy(() => import('./pages/driver/DriverEarningsPage.jsx'))
+const HaulagePage = lazy(() => import('./pages/passenger/HaulagePage.jsx'))
+const InvitePage = lazy(() => import('./pages/passenger/InvitePage.jsx'))
+const SendPackagePage = lazy(() => import('./pages/passenger/SendPackagePage.jsx'))
+const ReceiptPage = lazy(() => import('./pages/account/ReceiptPage.jsx'))
+const PoliciesPage = lazy(() => import('./pages/public/PoliciesPage.jsx'))
+const ForgotPasswordPage = lazy(() => import('./pages/auth/ForgotPasswordPage.jsx'))
+const TrackSharePage = lazy(() => import('./pages/public/TrackSharePage.jsx'))
 const AdminDispatchPage = lazy(() => import('./pages/admin/AdminDispatchPage.jsx'))
 const AdminDriverVerificationPage = lazy(() => import('./pages/admin/AdminDriverVerificationPage.jsx'))
 const AdminPaymentsPage = lazy(() => import('./pages/admin/AdminPaymentsPage.jsx'))
@@ -66,6 +67,7 @@ export default function App() {
           <Route path="/payments" element={<PaymentsPage />} />
           <Route path="/move-a-load" element={<HaulagePage />} />
           <Route path="/invite" element={<InvitePage />} />
+          <Route path="/send-package" element={<SendPackagePage />} />
         </Route>
 
         <Route element={<ProtectedRoute requiredRole="super_admin" />}>

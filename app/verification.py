@@ -336,6 +336,7 @@ def admin_live_map(db: Session = Depends(get_db), _admin: User = Depends(require
         driver_user = db.get(User, driver.user_id) if driver else None
         trips.append({
             "ride_id": ride.id, "status": ride.status, "route": f"{request.origin_text} → {request.destination_text}",
+            "service_type": request.service_type, "recipient": request.recipient_name,
             "passenger": passenger.full_name if passenger else None, "passenger_phone": (passenger.phone or passenger.email) if passenger else None,
             "driver": driver_user.full_name if driver_user else None,
             "pickup": _coords(db.get(Place, request.origin_place_id) if request.origin_place_id else None),

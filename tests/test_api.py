@@ -4915,3 +4915,157 @@ def test_account_deletion_request(client):
         assert user.full_name == "Removed account" and user.email is None
     assert client.post("/api/v1/me/deletion-request", json={"password": "x"},
                        headers=admin).status_code == 409
+
+
+# ---------------------------------------------------------------------------
+# Phase 7: package deliveries
+# ---------------------------------------------------------------------------
+
+import app.deliveries as deliveries_module
+
+
+def delivery_route(client, motorcycle=False):
+    ids = _seed_place_route(client)
+    if motorcycle:
+        with session_for(client) as db:
+            db.add(PlaceFare(origin_place_id=ids["origin_id"], destination_place_id=ids["destination_id"],
+                             vehicle_type="motorcycle", base_amount=Decimal("900.00"),
+                             vehicle_multiplier=Decimal("1.000"), extra_passenger_amount=Decimal("0"), is_active=True))
+            db.commit()
+    return ids
+
+
+def delivery_body(ids, **overrides):
+    return {"origin_place_id": ids["origin_id"], "destination_place_id": ids["destination_id"], "size": "small",
+            "description": "Brown envelope with documents", "recipient_name": "Kemi Ade",
+            "recipient_phone": "0803 555 1234", "no_prohibited_items": True, **overrides}
+
+
+def test_delivery_options_price_by_size(client):
+    ids = delivery_route(client)
+    options = client.get("/api/v1/delivery-options", params={"origin_place_id": ids["origin_id"],
+                                                             "destination_place_id": ids["destination_id"]}).json()
+    assert options["enabled"] is True
+    prices = {o["size"]: (o["vehicle_type"], o["price"]) for o in options["options"]}
+    # No motorcycle fare on this route, so every size goes by car.
+    assert prices == {"small": ("standard", "2100.00"), "medium": ("standard", "2300.00"),
+                      "large": ("standard", "2400.00")}
+    with session_for(client) as db:
+        db.add(PlaceFare(origin_place_id=ids["origin_id"], destination_place_id=ids["destination_id"],
+                         vehicle_type="motorcycle", base_amount=Decimal("900.00"), vehicle_multiplier=Decimal("1.000"),
+                         extra_passenger_amount=Decimal("0"), is_active=True))
+        db.commit()
+    options = client.get("/api/v1/delivery-options", params={"origin_place_id": ids["origin_id"],
+                                                             "destination_place_id": ids["destination_id"]}).json()
+    prices = {o["size"]: (o["vehicle_type"], o["price"]) for o in options["options"]}
+    assert prices["small"] == ("motorcycle", "900.00") and prices["medium"] == ("motorcycle", "1100.00")
+    assert prices["large"] == ("standard", "2400.00")
+    same = client.get("/api/v1/delivery-options", params={"origin_place_id": ids["origin_id"],
+                                                          "destination_place_id": ids["origin_id"]}).json()
+    assert same["options"] == []
+
+
+def test_delivery_booking_rules(client):
+    ids = delivery_route(client)
+    passenger = login(client, *PASSENGER_LOGIN)
+    assert client.post("/api/v1/deliveries", json=delivery_body(ids, no_prohibited_items=False),
+                       headers=passenger).status_code == 422
+    assert client.post("/api/v1/deliveries", json=delivery_body(ids, recipient_phone="12-ab"),
+                       headers=passenger).status_code == 422
+    driver = login(client, *DRIVER_LOGIN)
+    assert client.post("/api/v1/deliveries", json=delivery_body(ids), headers=driver).status_code == 403
+    admin = _login_as_super_admin(client)
+    client.put("/api/v1/admin/settings", json={"delivery_enabled": False}, headers=admin)
+    assert client.post("/api/v1/deliveries", json=delivery_body(ids), headers=passenger).status_code == 503
+    assert client.get("/api/v1/delivery-options", params={"origin_place_id": ids["origin_id"],
+                      "destination_place_id": ids["destination_id"]}).json() == {"enabled": False, "options": []}
+
+
+def test_delivery_end_to_end_with_code(client, outbox, monkeypatch, quiet_messaging_and_push):
+    texts = []
+    monkeypatch.setattr(deliveries_module, "send_text", lambda phone, body: texts.append((phone, body)))
+    admin = _login_as_super_admin(client)
+    client.put("/api/v1/admin/settings", json={"require_contact_verification": False}, headers=admin)
+    ids = delivery_route(client)
+    passenger = login(client, *PASSENGER_LOGIN)
+    driver = login(client, *DRIVER_LOGIN)
+    subscribe(client, driver, "https://fcm.googleapis.com/fcm/send/rider")
+    created = client.post("/api/v1/deliveries", json=delivery_body(ids, size="medium", fragile=True,
+                                                                    notes="Call at the gate"), headers=passenger)
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["service_type"] == "delivery" and body["amount_to_pay"] == "2300.00"
+    assert body["recipient_phone"] == "08035551234"
+
+    offer = current_offer(client, driver)
+    assert offer["service_type"] == "delivery" and offer["delivery_size"] == "medium" and offer["fragile"] is True
+    assert any(json.loads(p["payload"])["title"].startswith("New delivery offer")
+               for p in quiet_messaging_and_push)
+    assert client.post(f"/api/v1/driver/offers/{offer['id']}/accept", headers=driver).status_code == 200
+
+    ride_id = get_ride_id_from_request(client, body["id"], passenger)
+    mine = next(r for r in client.get("/api/v1/ride-requests/my-rides", headers=passenger).json()
+                if r["id"] == body["id"])
+    code = mine["delivery_code"]
+    assert code and len(code) == 4 and mine["delivery"]["recipient_name"] == "Kemi Ade"
+    trip = next(t for t in client.get("/api/v1/driver/rides", headers=driver).json() if t["id"] == ride_id)
+    assert trip["delivery"]["recipient_phone"] == "08035551234" and trip["delivery"]["code_required"] is True
+    assert code not in json.dumps(trip)
+
+    _confirm_payment(client, passenger, admin, ride_id)
+    client.patch(f"/api/v1/driver/rides/{ride_id}/status", json={"status": "driver_arriving"}, headers=driver)
+    started = client.patch(f"/api/v1/driver/rides/{ride_id}/status",
+                           json={"status": "in_progress", "pickup_pin": ride_pin(client, ride_id)}, headers=driver)
+    assert started.status_code == 200, started.text
+    # The recipient is texted a tracking link and the code.
+    assert len(texts) == 1 and texts[0][0] == "08035551234"
+    assert code in texts[0][1] and "https://ekimove.onrender.com/t/" in texts[0][1] and texts[0][1].isascii()
+    token = texts[0][1].split("/t/")[1].split()[0]
+    shared = client.get(f"/api/v1/share/{token}").json()
+    assert shared["service_type"] == "delivery" and code not in json.dumps(shared)
+
+    no_code = client.patch(f"/api/v1/driver/rides/{ride_id}/status", json={"status": "completed"}, headers=driver)
+    assert no_code.status_code == 409
+    done = client.patch(f"/api/v1/driver/rides/{ride_id}/status",
+                        json={"status": "completed", "delivery_code": code}, headers=driver)
+    assert done.status_code == 200 and done.json()["status"] == "completed"
+
+
+def test_delivery_code_locks_after_five_wrong_tries_and_staff_can_finish(client, monkeypatch):
+    monkeypatch.setattr(deliveries_module, "send_text", lambda phone, body: None)
+    ids = delivery_route(client)
+    passenger = login(client, *PASSENGER_LOGIN)
+    admin = _login_as_super_admin(client)
+    request_id = client.post("/api/v1/deliveries", json=delivery_body(ids), headers=passenger).json()["id"]
+    driver = login(client, *DRIVER_LOGIN)
+    offer = current_offer(client, driver)
+    client.post(f"/api/v1/driver/offers/{offer['id']}/accept", headers=driver)
+    ride_id = get_ride_id_from_request(client, request_id, passenger)
+    _confirm_payment(client, passenger, admin, ride_id)
+    client.patch(f"/api/v1/driver/rides/{ride_id}/status", json={"status": "driver_arriving"}, headers=driver)
+    client.patch(f"/api/v1/driver/rides/{ride_id}/status",
+                 json={"status": "in_progress", "pickup_pin": ride_pin(client, ride_id)}, headers=driver)
+    with session_for(client) as db:
+        code = db.get(Ride, ride_id).delivery_code
+    wrong = "0000" if code != "0000" else "1111"
+    for _ in range(5):
+        assert client.patch(f"/api/v1/driver/rides/{ride_id}/status",
+                            json={"status": "completed", "delivery_code": wrong}, headers=driver).status_code == 409
+    locked = client.patch(f"/api/v1/driver/rides/{ride_id}/status",
+                          json={"status": "completed", "delivery_code": code}, headers=driver)
+    assert locked.status_code == 429
+    assert client.post(f"/api/v1/admin/rides/{ride_id}/mark-delivered", json={"reason": "x"},
+                       headers=admin).status_code == 422
+    marked = client.post(f"/api/v1/admin/rides/{ride_id}/mark-delivered",
+                         json={"reason": "Called recipient, confirmed received"}, headers=admin)
+    assert marked.status_code == 200 and marked.json()["status"] == "completed"
+    assert client.post(f"/api/v1/admin/rides/{ride_id}/mark-delivered", json={"reason": "again"},
+                       headers=admin).status_code == 409
+    earnings = client.get("/api/v1/driver/earnings", headers=driver).json()
+    assert Decimal(earnings["balance"]) > 0
+
+
+def test_rides_are_not_affected_by_delivery_codes(client, no_paystack):
+    driver_headers, _, ride_id, _ = complete_paid_ride(client)
+    with session_for(client) as db:
+        assert db.get(Ride, ride_id).delivery_code is None

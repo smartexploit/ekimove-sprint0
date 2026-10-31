@@ -42,17 +42,26 @@ const STEPS = [
   ['in_progress', 'Complete trip'],
 ]
 
+const DELIVERY_STEPS = {
+  assigned: 'Confirm arrival at pickup',
+  driver_arriving: 'Collect the package',
+  in_progress: 'Hand over with the code',
+}
+
 const ACTIVE = new Set(['assigned', 'driver_arriving', 'in_progress', 'incident_review'])
 
 function CurrentTrip({ ride, busy, onAdvance }) {
   const stepIndex = STEPS.findIndex(([key]) => key === ride.status)
   const [pin, setPin] = useState('')
+  const [code, setCode] = useState('')
+  const delivery = ride.delivery
+  const needsCode = delivery?.code_required && ride.status === 'in_progress'
 
   return (
     <section className="card card-lg stack" aria-labelledby={`trip-${ride.id}`}>
       <div className="row row-between">
         <h2 id={`trip-${ride.id}`} className="card-title">
-          Trip #{ride.id}
+          {delivery ? 'Delivery' : 'Trip'} #{ride.id}
         </h2>
         <StatusBadge status={ride.status} kind="driverTrip" />
       </div>
@@ -84,14 +93,29 @@ function CurrentTrip({ ride, busy, onAdvance }) {
           )}
         </p>
       )}
-      {ride.load_description && <p className="small"><strong>Load:</strong> {ride.load_description}</p>}
+      {ride.load_description && (
+        <p className="small"><strong>{delivery ? 'Package' : 'Load'}:</strong> {ride.load_description}</p>
+      )}
+      {delivery && (
+        <div className="delivery-box small">
+          <p>
+            <strong>{delivery.size ? `${delivery.size[0].toUpperCase()}${delivery.size.slice(1)} package` : 'Package'}</strong>
+            {delivery.fragile && <span className="badge badge-gold" style={{ marginLeft: 8 }}>Fragile</span>}
+          </p>
+          <p>Recipient: <strong>{delivery.recipient_name}</strong> ·{' '}
+            <a className="text-link" href={`tel:${delivery.recipient_phone}`}>{delivery.recipient_phone}</a></p>
+          {delivery.notes && <p>Directions: {delivery.notes}</p>}
+          <p className="muted">Collect it with the sender’s pickup PIN. Hand it over only when the recipient gives you their
+            4-digit delivery code.</p>
+        </div>
+      )}
       {ride.scheduled_for && ['assigned', 'driver_arriving'].includes(ride.status) && (
         <p className="small"><strong>Booked pickup time:</strong> {formatPickupTime(ride.scheduled_for)}</p>
       )}
 
       <dl className="kv">
         <div><dt>Vehicle</dt><dd>{vehicleLabel(ride.vehicle_type)}</dd></div>
-        <div><dt>Passengers</dt><dd>{ride.passenger_count}</dd></div>
+        {!delivery && <div><dt>Passengers</dt><dd>{ride.passenger_count}</dd></div>}
         <div><dt>Agreed fare</dt><dd>{formatNaira(ride.agreed_fare, { decimals: 0 })}</dd></div>
         {ride.earning && (
           <div>
@@ -115,7 +139,7 @@ function CurrentTrip({ ride, busy, onAdvance }) {
               aria-current={index === stepIndex ? 'step' : undefined}
             >
               <span className="step-num" aria-hidden="true">{index + 1}</span>
-              {label}
+              {delivery ? DELIVERY_STEPS[key] : label}
             </li>
           ))}
         </ol>
@@ -133,16 +157,31 @@ function CurrentTrip({ ride, busy, onAdvance }) {
         </label>
       )}
 
+      {needsCode && (
+        <label className="field pin-entry">
+          <span className="field-label">Recipient's 4-digit delivery code</span>
+          <input className="input" inputMode="numeric" autoComplete="one-time-code" maxLength={4}
+            value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))}
+            placeholder="Ask the recipient" aria-describedby={`code-hint-${ride.id}`} />
+          <span className="field-hint" id={`code-hint-${ride.id}`}>
+            Recipient can’t find the code? Message Support before leaving the package.
+          </span>
+        </label>
+      )}
+
       <div className="row">
         {nextStatus[ride.status] && (
           <button
             type="button"
             className="btn btn-accent btn-lg"
             style={{ flexGrow: 1 }}
-            onClick={() => onAdvance(ride, pin)}
-            disabled={busy !== null || (ride.status === 'driver_arriving' && ride.pin_required && pin.length !== 4)}
+            onClick={() => onAdvance(ride, pin, code)}
+            disabled={busy !== null || (ride.status === 'driver_arriving' && ride.pin_required && pin.length !== 4)
+              || (needsCode && code.length !== 4)}
           >
-            {busy === ride.id ? 'Updating…' : actionLabels[ride.status]}
+            {busy === ride.id ? 'Updating…' : delivery
+              ? { assigned: 'Confirm arrival', driver_arriving: 'Collect package', in_progress: 'Hand over package' }[ride.status]
+              : actionLabels[ride.status]}
           </button>
         )}
         <SOSButton rideId={ride.id} rideStatus={ride.status} />
@@ -200,7 +239,7 @@ export default function DriverTripsPage() {
     setRefreshKey((value) => value + 1)
   }
 
-  async function advanceRide(ride, pin) {
+  async function advanceRide(ride, pin, code) {
     const status = nextStatus[ride.status]
     if (!status) return
 
@@ -212,7 +251,8 @@ export default function DriverTripsPage() {
       await apiRequest(`/api/v1/driver/rides/${ride.id}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(status === 'in_progress' ? { status, pickup_pin: pin } : { status }),
+        body: JSON.stringify(status === 'in_progress' ? { status, pickup_pin: pin }
+          : status === 'completed' && ride.delivery?.code_required ? { status, delivery_code: code } : { status }),
       })
       setNotice(`Trip #${ride.id} updated: ${statusLabels[status]}.`)
       refresh()

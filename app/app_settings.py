@@ -49,6 +49,11 @@ DEFAULTS = {
     # Rides booked for later start looking for a driver this many minutes
     # before pickup.
     "schedule_lead_minutes": "20",
+    # Package deliveries: on/off, and the extra (naira) on top of the route
+    # fare for medium and large packages.
+    "delivery_enabled": "true",
+    "delivery_medium_extra": "200",
+    "delivery_large_extra": "300",
 }
 
 
@@ -74,6 +79,7 @@ def booking_rules(db: Session) -> dict:
         "require_verified_passengers": _get(db, "require_verified_passengers") == "true",
         "haulage_vehicle_types": [{"value": k, "label": v} for k, v in HAULAGE_TYPES.items()],
         "schedule_lead_minutes": schedule_lead_minutes(db),
+        "delivery": delivery_rules(db),
     }
 
 
@@ -121,6 +127,20 @@ class SettingsUpdate(BaseModel):
     referral_new_user_amount: int | None = Field(default=None, ge=0, le=50_000)
     referral_reward_amount: int | None = Field(default=None, ge=0, le=50_000)
     schedule_lead_minutes: int | None = Field(default=None, ge=5, le=120)
+    delivery_enabled: bool | None = None
+    delivery_medium_extra: int | None = Field(default=None, ge=0, le=50_000)
+    delivery_large_extra: int | None = Field(default=None, ge=0, le=50_000)
+
+
+def delivery_rules(db: Session) -> dict:
+    def amount(key: str) -> int:
+        try:
+            return max(int(_get(db, key)), 0)
+        except ValueError:
+            return int(DEFAULTS[key])
+
+    return {"enabled": _get(db, "delivery_enabled") == "true", "medium_extra": amount("delivery_medium_extra"),
+            "large_extra": amount("delivery_large_extra")}
 
 
 def schedule_lead_minutes(db: Session) -> int:
@@ -169,9 +189,12 @@ def admin_update_settings(
         changes["require_verified_passengers"] = "true" if payload.require_verified_passengers else "false"
     if payload.require_contact_verification is not None:
         changes["require_contact_verification"] = "true" if payload.require_contact_verification else "false"
-    for key in ("referral_new_user_amount", "referral_reward_amount", "schedule_lead_minutes"):
+    for key in ("referral_new_user_amount", "referral_reward_amount", "schedule_lead_minutes",
+                "delivery_medium_extra", "delivery_large_extra"):
         if getattr(payload, key) is not None:
             changes[key] = str(getattr(payload, key))
+    if payload.delivery_enabled is not None:
+        changes["delivery_enabled"] = "true" if payload.delivery_enabled else "false"
     if payload.referral_enabled is not None:
         changes["referral_enabled"] = "true" if payload.referral_enabled else "false"
     if not changes:

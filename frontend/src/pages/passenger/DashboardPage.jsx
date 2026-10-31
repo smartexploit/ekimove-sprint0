@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useOutletContext } from 'react-router-dom'
-import { ArrowRight, Gift, LifeBuoy, MessageCircle, Route, Truck, UserRound, Wallet } from 'lucide-react'
+import { ArrowRight, Gift, LifeBuoy, Package, MessageCircle, Route, Truck, UserRound, Wallet } from 'lucide-react'
 import VehicleIcon from '../../components/ui/VehicleIcon.jsx'
 import useBookingRules from '../../hooks/useBookingRules.js'
 import useSupportUnread from '../../hooks/useSupportUnread.js'
@@ -62,6 +62,11 @@ export default function DashboardPage() {
               <span className="ride-pick-icon"><Truck size={24} aria-hidden="true" /></span>
               <span className="ride-pick-title">Move a load</span>
               <span className="ride-pick-sub">Van, big car or dyna</span>
+            </Link>
+            <Link className="ride-pick" to="/send-package">
+              <span className="ride-pick-icon"><Package size={24} aria-hidden="true" /></span>
+              <span className="ride-pick-title">Send a package</span>
+              <span className="ride-pick-sub">Across town, same day</span>
             </Link>
           </nav>
           <Hills base="#F2F5F1" />

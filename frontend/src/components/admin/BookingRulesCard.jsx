@@ -10,6 +10,7 @@ export default function BookingRulesCard() {
   const [requireId, setRequireId] = useState(false)
   const [requireContact, setRequireContact] = useState(true)
   const [lead, setLead] = useState('20')
+  const [delivery, setDelivery] = useState({ enabled: true, medium: '200', large: '300' })
   const [fee, setFee] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -25,6 +26,10 @@ export default function BookingRulesCard() {
         setRequireId(Boolean(data.require_verified_passengers))
         setRequireContact(data.require_contact_verification !== false)
         setLead(String(data.schedule_lead_minutes || 20))
+        if (data.delivery) {
+          setDelivery({ enabled: data.delivery.enabled, medium: String(data.delivery.medium_extra),
+            large: String(data.delivery.large_extra) })
+        }
         setFee(String(data.motorcycle_second_passenger_fee))
       })
       .catch((err) => active && setError(err.message || 'Could not load booking rules.'))
@@ -51,6 +56,9 @@ export default function BookingRulesCard() {
         require_verified_passengers: requireId,
         require_contact_verification: requireContact,
         schedule_lead_minutes: leadMinutes,
+        delivery_enabled: delivery.enabled,
+        delivery_medium_extra: Number(delivery.medium || 0),
+        delivery_large_extra: Number(delivery.large || 0),
       })
       setRules(data)
       setNotice('Saved. New bookings use these rules straight away.')
@@ -87,6 +95,26 @@ export default function BookingRulesCard() {
               above ₦0, which then applies instead.
             </span>
           </label>
+          <label className="check-row">
+            <input type="checkbox" checked={delivery.enabled}
+              onChange={(event) => setDelivery((d) => ({ ...d, enabled: event.target.checked }))} />
+            Package deliveries are on
+          </label>
+          <div className="date-row">
+            <label className="field">
+              <span className="field-label">Medium package extra (₦)</span>
+              <input className="input" inputMode="numeric" value={delivery.medium} disabled={!delivery.enabled}
+                onChange={(event) => setDelivery((d) => ({ ...d, medium: event.target.value.replace(/[^\d]/g, '').slice(0, 5) }))} />
+            </label>
+            <label className="field">
+              <span className="field-label">Large package extra (₦)</span>
+              <input className="input" inputMode="numeric" value={delivery.large} disabled={!delivery.enabled}
+                onChange={(event) => setDelivery((d) => ({ ...d, large: event.target.value.replace(/[^\d]/g, '').slice(0, 5) }))} />
+            </label>
+          </div>
+          <span className="field-hint" style={{ marginTop: -8 }}>
+            Added to the route’s motorcycle fare (small and medium) or car fare (large).
+          </span>
           <label className="field">
             <span className="field-label">Rides booked for later: start finding a driver (minutes before pickup)</span>
             <input className="input" inputMode="numeric" value={lead}

@@ -132,6 +132,12 @@ class RideRequest(Base):
     # driver still earns on the full fare; EkiMove covers the discount.
     discount_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"),
                                                      server_default="0", nullable=False)
+    # Package deliveries (service_type "delivery"): size, who receives it.
+    delivery_size: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    recipient_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    recipient_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    delivery_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    fragile: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
     dispatch_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
 
 
@@ -156,6 +162,8 @@ class Ride(Base):
     arrived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     share_token: Mapped[str | None] = mapped_column(String(48), nullable=True, unique=True, index=True)
     # When each side last read the trip chat.
+    # Deliveries: the recipient gives this code to the driver at drop-off.
+    delivery_code: Mapped[str | None] = mapped_column(String(4), nullable=True)
     passenger_chat_read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     driver_chat_read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
