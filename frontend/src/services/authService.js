@@ -149,3 +149,21 @@ export function logoutPassenger() {
   sessionStorage.removeItem(TOKEN_KEY)
   sessionStorage.removeItem(USER_KEY)
 }
+
+/** Replace the stored token (after a refresh or password change). */
+export function updateAccessToken(token) {
+  if (token) sessionStorage.setItem(TOKEN_KEY, token)
+}
+
+/** Seconds until the stored token expires, or 0 if missing/unreadable. */
+export function tokenSecondsLeft() {
+  const token = getAccessToken()
+  if (!token) return 0
+  try {
+    const part = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')
+    const { exp } = JSON.parse(atob(part.padEnd(part.length + ((4 - (part.length % 4)) % 4), '=')))
+    return Math.max(0, Math.floor(exp - Date.now() / 1000))
+  } catch {
+    return 0
+  }
+}

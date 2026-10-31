@@ -1,4 +1,4 @@
-﻿import { useState } from 'react'
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { CheckCircle2 } from 'lucide-react'
 import AuthLayout from '../../layouts/AuthLayout.jsx'
@@ -139,6 +139,9 @@ export default function DriverApplicationPage() {
                 <option value="tricycle">Tricycle</option>
                 <option value="car">Car</option>
                 <option value="minibus">Minibus</option>
+                <option value="big_car">Big car (SUV / Sienna) for loads</option>
+                <option value="van">Van or bus for loads</option>
+                <option value="dyna">Dyna truck for loads</option>
               </select>
             </label>
 
@@ -150,7 +153,9 @@ export default function DriverApplicationPage() {
             <label className="field" htmlFor="vehicle-capacity">
               <span className="field-label">Passenger seats</span>
               <input id="vehicle-capacity" className="input" name="capacity" type="number" min="1" max="8" defaultValue="1" aria-describedby="vehicle-capacity-hint" required />
-              <span className="field-hint" id="vehicle-capacity-hint">Not counting the driver.</span>
+              <span className="field-hint" id="vehicle-capacity-hint">
+                Passengers you can carry, not counting you. Motorcycle: 1 or 2. Car: up to 4.
+              </span>
             </label>
           </div>
         </fieldset>

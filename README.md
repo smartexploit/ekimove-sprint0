@@ -111,6 +111,22 @@ EkiMove keeps `COMMISSION_PERCENT` (10% by default) of every fare; the driver ke
 - **Daily schedule:** create a Render **Cron Job** (e.g. schedule `0 17 * * *`, 6 pm in Lagos) with command `curl -fsS -X POST -H "X-Cron-Token: $PAYOUT_CRON_TOKEN" https://ekimove-api.onrender.com/api/v1/internal/payouts/run`, and set the same `PAYOUT_CRON_TOKEN` on the API.
 - Before automatic transfers: turn off the transfer OTP in the Paystack dashboard, keep the Paystack balance funded, and confirm VAT on commission with an accountant. Trips completed before this release have no earnings entries.
 
+## Vehicles and passenger limits
+- A **car** carries up to 4 passengers.
+- A **motorcycle** carries 1 passenger. The super-admin can allow a **second passenger** at an extra charge under *Admin → Places & fares → Booking rules*. A route's own "extra passenger" amount for motorcycles, if above ₦0, overrides that default charge. The limits are enforced by the API, not just the app.
+- Passengers can pick **Car**, **Motorcycle** or **Move a load** straight from their dashboard; the choice is kept while they pick the route.
+
+## Load bookings (big cars, vans, dyna trucks)
+Passengers describe the load and route on *Move a load*. That opens a support chat. EkiMove support agrees the price and terms there, then sends the quote from *Admin → Loads*. The customer accepts (the job joins the normal dispatch queue) or declines. Once a driver with a matching vehicle is assigned, the customer pays through EkiMove like any ride, and the driver's earnings and commission work the same way. Drivers can register big cars, vans/buses and dyna trucks.
+
+## Support chat
+Passengers and drivers can chat with the EkiMove team under *Support*; the team answers from *Admin → Support* (unanswered chats first, with a count in the menu). Conversations can be marked resolved and reopen when the customer writes again.
+
+## Profiles, sessions and accounts
+- Everyone has a *Profile* (tap your initials): name, email, password change. Changing the password signs out other devices.
+- **Session timeout:** after 15 minutes without activity the app (including the installed PWA) warns for one minute, then signs out. While people are active, their session renews silently (`POST /api/v1/auth/refresh`).
+- **Super-admin:** *Overview* shows what needs attention, live trips, money and recent activity (refreshes every 20 seconds). *People* lists passengers and drivers with their profile, trips, vehicles, balance and activity, and can **suspend** (signed out at once, can't sign in or be assigned), **reactivate** or **remove** an account (name, phone and sign-in erased; trips, payments and earnings kept). Super-admin accounts can't be changed there, and people can't be removed mid-trip.
+
 ## Atọ́nà assistant
 Atọ́nà is EkiMove's chat guide, available to everyone on the homepage and on every passenger and driver screen. It chats naturally in English or Nigerian Pidgin, and answers EkiMove questions from live data through tools instead of guessing:
 

@@ -1,7 +1,10 @@
 import { isMotorcycle, titleCase } from './format.js'
 
+const LOAD_VEHICLES = { big_car: 'Big car', van: 'Van or bus', dyna: 'Dyna truck' }
+
 export function vehicleLabel(type) {
   if (isMotorcycle(type)) return 'Motorcycle'
+  if (LOAD_VEHICLES[type]) return LOAD_VEHICLES[type]
   return titleCase(type) || 'Vehicle'
 }
 

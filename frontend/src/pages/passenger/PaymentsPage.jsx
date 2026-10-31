@@ -17,6 +17,7 @@ import {
   verifyInterswitchPayment,
 } from '../../services/paymentService.js'
 import { formatNaira } from '../../utils/format.js'
+import Select from '../../components/ui/Select.jsx'
 
 function BankDetails({ amount }) {
   const { bank_transfer: bank, loaded } = useBusinessInfo()
@@ -310,9 +311,8 @@ export default function PaymentsPage() {
 
             <label className="field">
               <span className="field-label">Ride</span>
-              <select
+              <Select
                 id="payment-ride-id"
-                className="select"
                 value={effectiveRideId}
                 onChange={(event) => {
                   setRideId(event.target.value)
@@ -330,7 +330,7 @@ export default function PaymentsPage() {
                 {rideId && !selectedRide && (
                   <option value={rideId}>Ride #{rideId}</option>
                 )}
-              </select>
+              </Select>
             </label>
 
             <fieldset className="choice-list">

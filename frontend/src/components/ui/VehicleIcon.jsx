@@ -7,7 +7,7 @@ export default function VehicleIcon({ type, size = 26 }) {
     ? Motorbike
     : ['minibus', 'bus', 'van'].includes(value)
       ? Bus
-      : value === 'tricycle'
+      : value === 'tricycle' || value === 'dyna'
         ? Truck
         : Car
 

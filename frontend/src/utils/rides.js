@@ -1,4 +1,6 @@
 const ACTIVE = new Set([
+  'quote_requested',
+  'quoted',
   'requested',
   'assigned',
   'driver_arriving',

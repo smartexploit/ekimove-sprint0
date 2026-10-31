@@ -4,7 +4,7 @@ import Alert from './ui/Alert.jsx'
 import { cancelRide, previewCancellation } from '../services/paymentService.js'
 import { formatNaira } from '../utils/format.js'
 
-const CANCELLABLE = new Set(['requested', 'assigned', 'driver_arriving'])
+const CANCELLABLE = new Set(['quote_requested', 'quoted', 'requested', 'assigned', 'driver_arriving'])
 
 /**
  * "Cancel ride" button that first shows the passenger exactly what it

@@ -3,6 +3,7 @@ import AdminShell from '../../layouts/AdminShell.jsx'
 import Alert from '../../components/ui/Alert.jsx'
 import StatusBadge from '../../components/ui/StatusBadge.jsx'
 import { apiRequest } from '../../services/authService.js'
+import BookingRulesCard from '../../components/admin/BookingRulesCard.jsx'
 
 const emptyArea = { name: '', slug: '', description: '', status: 'draft' }
 const emptyPlace = {
@@ -331,6 +332,7 @@ export default function AdminLocationsPage() {
       description="Service areas, pickup and destination places, and the approved fare for each exact route."
     >
       <div className="stack">
+        <BookingRulesCard />
         <Alert tone="error">{error}</Alert>
         <Alert tone="success">{notice}</Alert>
 

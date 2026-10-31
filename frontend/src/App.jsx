@@ -15,6 +15,13 @@ import ProtectedRoute from './routes/ProtectedRoute.jsx'
 import OfflineBanner from './components/pwa/OfflineBanner.jsx'
 import AdminDriverVerificationPage from './pages/admin/AdminDriverVerificationPage.jsx'
 import AdminPaymentsPage from './pages/admin/AdminPaymentsPage.jsx'
+import AdminOverviewPage from './pages/admin/AdminOverviewPage.jsx'
+import AdminPeoplePage from './pages/admin/AdminPeoplePage.jsx'
+import AdminSupportPage from './pages/admin/AdminSupportPage.jsx'
+import AdminLoadsPage from './pages/admin/AdminLoadsPage.jsx'
+import HaulagePage from './pages/passenger/HaulagePage.jsx'
+import ProfilePage from './pages/account/ProfilePage.jsx'
+import SupportPage from './pages/account/SupportPage.jsx'
 import AdminEarningsPage from './pages/admin/AdminEarningsPage.jsx'
 import AdminIncidentsPage from './pages/admin/AdminIncidentsPage.jsx'
 
@@ -35,10 +42,15 @@ export default function App() {
           <Route path="/book-ride" element={<BookRidePage />} />
           <Route path="/my-rides" element={<MyRidesPage />} />
           <Route path="/payments" element={<PaymentsPage />} />
+          <Route path="/move-a-load" element={<HaulagePage />} />
         </Route>
 
         <Route element={<ProtectedRoute requiredRole="super_admin" />}>
           <Route path="/admin/dispatch" element={<AdminDispatchPage />} />
+          <Route path="/admin/overview" element={<AdminOverviewPage />} />
+          <Route path="/admin/people" element={<AdminPeoplePage />} />
+          <Route path="/admin/support" element={<AdminSupportPage />} />
+          <Route path="/admin/loads" element={<AdminLoadsPage />} />
           <Route path="/admin/payments" element={<AdminPaymentsPage />} />
           <Route path="/admin/earnings" element={<AdminEarningsPage />} />
           <Route path="/admin/incidents" element={<AdminIncidentsPage />} />
@@ -51,9 +63,12 @@ export default function App() {
           <Route path="/driver/trips" element={<DriverTripsPage />} />
           <Route path="/driver/earnings" element={<DriverEarningsPage />} />
         </Route>
-        <Route path="/profile" element={<Navigate to="/dashboard" replace />} />
+        <Route element={<ProtectedRoute requiredRole={['passenger', 'driver']} />}>
+          <Route path="/profile" element={<ProfilePage />} />
+          <Route path="/support" element={<SupportPage />} />
+        </Route>
         <Route path="/driver" element={<Navigate to="/driver/apply" replace />} />
-        <Route path="/admin" element={<Navigate to="/admin/dispatch" replace />} />
+        <Route path="/admin" element={<Navigate to="/admin/overview" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </>

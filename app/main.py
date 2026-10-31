@@ -6,6 +6,10 @@ from app.payments import router as payments_router
 from app.interswitch_payments import router as interswitch_payments_router
 from app.instant_payments import instant_transfers_enabled, router as instant_payments_router
 from app.cancellations import router as cancellations_router
+from app.accounts import router as accounts_router
+from app.support import router as support_router
+from app.haulage import router as haulage_router
+from app.app_settings import booking_rules, is_motorcycle, max_passengers, quote_amount, router as app_settings_router, seats_needed
 from app.earnings import record_trip_earning, ride_earning_preview, router as earnings_router
 from decimal import Decimal, ROUND_HALF_UP
 from fastapi import Depends, FastAPI, HTTPException, Request, status
@@ -52,6 +56,10 @@ app.include_router(interswitch_payments_router)
 app.include_router(instant_payments_router)
 app.include_router(cancellations_router)
 app.include_router(earnings_router)
+app.include_router(app_settings_router)
+app.include_router(accounts_router)
+app.include_router(support_router)
+app.include_router(haulage_router)
 
 class LoginRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
@@ -341,6 +349,8 @@ def admin_list_pending_ride_requests(
             "passenger_count": request.passenger_count,
             "quoted_fare": float(request.quoted_fare),
             "currency": "NGN",
+            "service_type": request.service_type,
+            "load_description": request.load_description,
             "status": request.status,
             "created_at": request.created_at.isoformat() if request.created_at else None,
         }
@@ -377,7 +387,7 @@ def admin_list_eligible_drivers(
             User.is_active.is_(True),
             Vehicle.is_approved.is_(True),
             Vehicle.vehicle_type == ride_request.vehicle_type,
-            Vehicle.capacity >= ride_request.passenger_count,
+            Vehicle.capacity >= seats_needed(ride_request.vehicle_type, ride_request.passenger_count),
         )
         .order_by(Driver.id.asc(), Vehicle.id.asc())
     ).all()
@@ -444,7 +454,7 @@ def assign_ride_request(
             Vehicle.driver_id == driver.id,
             Vehicle.is_approved.is_(True),
             Vehicle.vehicle_type == ride_request.vehicle_type,
-            Vehicle.capacity >= ride_request.passenger_count,
+            Vehicle.capacity >= seats_needed(ride_request.vehicle_type, ride_request.passenger_count),
         )
         .order_by(Vehicle.id)
     )
@@ -678,6 +688,18 @@ def login(
     user = db.scalar(select(User).where(User.phone == phone))
 
     if (
+        user is not None
+        and not user.is_active
+        and user.removed_at is None
+        and user.password_hash
+        and verify_password(payload.password, user.password_hash)
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="This account is suspended. Please contact EkiMove support.",
+        )
+
+    if (
         user is None
         or not user.is_active
         or not verify_password(payload.password, user.password_hash)
@@ -842,18 +864,13 @@ def list_active_place_fare_options(
         .order_by(PlaceFare.vehicle_type)
     ).all()
 
+    rules = booking_rules(db)
     options = []
     for fare in fares:
-        if (
-            fare.vehicle_type.strip().lower() in {"motorcycle", "motorbike"}
-            and passenger_count > 1
-        ):
+        if passenger_count > max_passengers(rules, fare.vehicle_type):
             continue
 
-        amount = (
-            Decimal(fare.base_amount) * Decimal(fare.vehicle_multiplier)
-            + Decimal(fare.extra_passenger_amount) * (passenger_count - 1)
-        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        amount = quote_amount(rules, fare, fare.vehicle_type, passenger_count)
 
         options.append(
             {
@@ -943,7 +960,7 @@ def list_my_ride_requests(
                     Vehicle.driver_id == driver_id,
                     Vehicle.is_approved.is_(True),
                     Vehicle.vehicle_type == ride_request.vehicle_type,
-                    Vehicle.capacity >= ride_request.passenger_count,
+                    Vehicle.capacity >= seats_needed(ride_request.vehicle_type, ride_request.passenger_count),
                 )
                 .order_by(Vehicle.id)
             )
@@ -979,6 +996,9 @@ def list_my_ride_requests(
             "currency": "NGN",
             "status": ride_request.status,
             "created_at": ride_request.created_at,
+            "service_type": ride_request.service_type,
+            "load_description": ride_request.load_description,
+            "quote_terms": ride_request.quote_terms,
             "assigned_ride_id": (
                 assigned_rides[ride_request.id]["id"]
                 if ride_request.id in assigned_rides
@@ -1149,19 +1169,20 @@ def create_ride_request(
             detail="No active fare is configured for this route and vehicle type",
         )
 
-    if (
-        payload.vehicle_type.strip().lower() in {"motorcycle", "motorbike"}
-        and payload.passenger_count > 1
-    ):
-        raise HTTPException(
-            status_code=422,
-            detail="Motorcycle bookings allow at most one passenger in addition to the rider",
-        )
+    rules = booking_rules(db)
+    limit = max_passengers(rules, payload.vehicle_type)
+    if payload.passenger_count > limit:
+        if is_motorcycle(payload.vehicle_type):
+            detail = (
+                "A motorcycle can carry 2 passengers at most."
+                if limit == 2
+                else "A motorcycle can carry only 1 passenger. Choose a car for more people."
+            )
+        else:
+            detail = f"A {payload.vehicle_type} can carry {limit} passengers at most."
+        raise HTTPException(status_code=422, detail=detail)
 
-    calculated = (
-        Decimal(fare.base_amount) * Decimal(fare.vehicle_multiplier)
-        + Decimal(fare.extra_passenger_amount) * (payload.passenger_count - 1)
-    ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    calculated = quote_amount(rules, fare, payload.vehicle_type, payload.passenger_count)
 
     request = RideRequest(
         passenger_user_id=current_user.id,

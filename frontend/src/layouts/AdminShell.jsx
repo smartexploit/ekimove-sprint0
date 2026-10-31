@@ -2,16 +2,25 @@ import { NavLink, useNavigate, useOutletContext } from 'react-router-dom'
 import {
   AlertTriangle,
   Banknote,
+  LayoutDashboard,
+  LifeBuoy,
+  Truck,
+  Users,
   MapPin,
   Route,
   ShieldCheck,
   Wallet,
 } from 'lucide-react'
 import Logo from '../components/brand/Logo.jsx'
+import useSupportUnread from '../hooks/useSupportUnread.js'
 import { logoutPassenger } from '../services/authService.js'
 
 const NAV = [
+  ['/admin/overview', 'Overview', LayoutDashboard],
   ['/admin/dispatch', 'Dispatch', Route],
+  ['/admin/loads', 'Loads', Truck],
+  ['/admin/support', 'Support', LifeBuoy],
+  ['/admin/people', 'People', Users],
   ['/admin/payments', 'Payments', Wallet],
   ['/admin/earnings', 'Earnings', Banknote],
   ['/admin/incidents', 'Incidents', AlertTriangle],
@@ -24,6 +33,7 @@ export default function AdminShell({ eyebrow = 'Operations', title, description,
   const outlet = useOutletContext()
   const user = outlet?.user
   const navigate = useNavigate()
+  const unread = useSupportUnread(Boolean(user))
 
   function signOut() {
     logoutPassenger()
@@ -38,7 +48,7 @@ export default function AdminShell({ eyebrow = 'Operations', title, description,
 
       <aside className="admin-sidebar">
         <div className="row" style={{ gap: 6 }}>
-          <Logo to="/admin/dispatch" reversed size={32} />
+          <Logo to="/admin/overview" reversed size={32} />
         </div>
 
         <nav className="admin-nav" aria-label="Admin">
@@ -46,6 +56,9 @@ export default function AdminShell({ eyebrow = 'Operations', title, description,
             <NavLink key={to} to={to} end>
               <Icon size={19} aria-hidden="true" />
               {label}
+              {to === '/admin/support' && unread > 0 && (
+                <span className="nav-count" aria-label={`${unread} waiting for a reply`}>{unread}</span>
+              )}
             </NavLink>
           ))}
         </nav>

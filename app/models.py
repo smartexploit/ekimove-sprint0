@@ -17,6 +17,12 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(24), default="passenger", index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    email: Mapped[str | None] = mapped_column(String(254), nullable=True)
+    # Set by a super-admin. Suspended accounts can't sign in; removed
+    # accounts are anonymised but their trips and payments are kept.
+    suspended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    suspension_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Driver(Base):
@@ -88,6 +94,12 @@ class RideRequest(Base):
     quoted_fare: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     status: Mapped[str] = mapped_column(String(24), default="requested", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # "ride" (fixed fare) or "haulage" (loads/luggage, priced by quote).
+    service_type: Mapped[str] = mapped_column(String(16), default="ride", server_default="ride", nullable=False, index=True)
+    load_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    scheduled_for: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    quote_terms: Mapped[str | None] = mapped_column(Text, nullable=True)
+    quoted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Ride(Base):
@@ -241,6 +253,45 @@ class EarningEntry(Base):
     commission_percent: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class AppSetting(Base):
+    """Business rules the super-admin can change in the app."""
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(Text)
+    updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class SupportThread(Base):
+    """A conversation between a user and EkiMove support."""
+
+    __tablename__ = "support_threads"
+    __table_args__ = (CheckConstraint("status IN ('open', 'closed')", name="ck_support_threads_status"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
+    subject: Mapped[str] = mapped_column(String(160))
+    status: Mapped[str] = mapped_column(String(16), default="open", nullable=False, index=True)
+    ride_request_id: Mapped[int | None] = mapped_column(ForeignKey("ride_requests.id", ondelete="RESTRICT"), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_message_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    user_last_read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    staff_last_read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class SupportMessage(Base):
+    __tablename__ = "support_messages"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    thread_id: Mapped[int] = mapped_column(ForeignKey("support_threads.id", ondelete="RESTRICT"), index=True)
+    sender_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=True)
+    from_staff: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    body: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
 

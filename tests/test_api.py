@@ -543,7 +543,12 @@ def test_login_rejects_inactive_account(client):
             "password": "Inactive-Test-Password-3!",
         },
     )
-    assert response.status_code == 401
+    assert response.status_code == 403
+    assert "suspended" in response.json()["detail"]
+    assert "access_token" not in response.json()
+    # A wrong password reveals nothing about the account.
+    wrong = client.post("/api/v1/auth/login", json={"phone": "08000000003", "password": "Wrong-Password-000!"})
+    assert wrong.status_code == 401
 
 
 def test_current_user_comes_from_token(client):
@@ -655,16 +660,49 @@ def test_ride_request_rejects_client_supplied_passenger_id(client):
     assert response.status_code == 422
 
 
-def test_motorcycle_rejects_more_than_one_passenger(client):
+def test_motorcycle_second_passenger_costs_extra_and_third_is_refused(client):
     token = login_as_passenger(client)
-    response = client.post(
-        "/api/v1/ride-requests",
-        json=ride_payload(vehicle_type="motorcycle", passenger_count=2),
-        headers={"Authorization": f"Bearer {token}"},
-    )
+    headers = {"Authorization": f"Bearer {token}"}
+    one = client.post("/api/v1/ride-requests", json=ride_payload(vehicle_type="motorcycle", passenger_count=1),
+                      headers=headers)
+    assert one.status_code == 201 and Decimal(str(one.json()["quoted_fare"])) == Decimal("800.00")
+    # Default second-passenger charge is NGN 200 (the route's own extra is 0).
+    two = client.post("/api/v1/ride-requests", json=ride_payload(vehicle_type="motorcycle", passenger_count=2),
+                      headers=headers)
+    assert two.status_code == 201, two.text
+    assert Decimal(str(two.json()["quoted_fare"])) == Decimal("1000.00")
+    three = client.post("/api/v1/ride-requests", json=ride_payload(vehicle_type="motorcycle", passenger_count=3),
+                        headers=headers)
+    assert three.status_code == 422
+    assert "2 passengers at most" in three.json()["detail"]
 
-    assert response.status_code == 422
-    assert "Motorcycle bookings allow at most one passenger" in response.json()["detail"]
+
+def test_super_admin_sets_motorcycle_second_passenger_rule(client):
+    admin = login(client, "08000000004", "SuperAdmin-Test-Password-4!")
+    passenger = login(client, "08000000001", "Passenger-Test-Password-1!")
+    assert client.put("/api/v1/admin/settings", json={"motorcycle_second_passenger_fee": 350},
+                      headers=passenger).status_code == 403
+    rules = client.put("/api/v1/admin/settings", json={"motorcycle_second_passenger_fee": 350},
+                       headers=admin).json()
+    assert rules["motorcycle_second_passenger_fee"] == 350
+    options = client.get("/api/v1/booking-rules").json()
+    assert options["max_passengers"]["motorcycle"] == 2 and options["max_passengers"]["car"] == 4
+    two = client.post("/api/v1/ride-requests", json=ride_payload(vehicle_type="motorcycle", passenger_count=2),
+                      headers=passenger)
+    assert Decimal(str(two.json()["quoted_fare"])) == Decimal("1150.00")
+
+    client.put("/api/v1/admin/settings", json={"motorcycle_second_passenger_enabled": False}, headers=admin)
+    assert client.get("/api/v1/booking-rules").json()["max_passengers"]["motorcycle"] == 1
+    refused = client.post("/api/v1/ride-requests", json=ride_payload(vehicle_type="motorcycle", passenger_count=2),
+                          headers=passenger)
+    assert refused.status_code == 422 and "only 1 passenger" in refused.json()["detail"]
+
+
+def test_four_passengers_at_most_in_a_car(client):
+    headers = {"Authorization": f"Bearer {login_as_passenger(client)}"}
+    assert client.post("/api/v1/ride-requests", json=ride_payload(passenger_count=4), headers=headers).status_code == 201
+    response = client.post("/api/v1/ride-requests", json=ride_payload(passenger_count=5), headers=headers)
+    assert response.status_code == 422 and "4 passengers at most" in response.json()["detail"]
 
 
 def test_ride_request_rejects_unconfigured_fare(client):
@@ -3353,3 +3391,211 @@ def test_virtual_accounts_can_be_off_while_paystack_still_pays_drivers(client, p
     reference = paystack.transfers[0]["reference"]
     # Transfer webhooks are still accepted.
     assert _signed_webhook(client, {"event": "transfer.success", "data": {"reference": reference}}).json() == {"status": "paid"}
+
+
+# ---------------------------------------------------------------------------
+# Profiles, sessions, admin people, support chat and haulage
+# ---------------------------------------------------------------------------
+
+ADMIN_LOGIN = ("08000000004", "SuperAdmin-Test-Password-4!")
+PASSENGER_LOGIN = ("08000000001", "Passenger-Test-Password-1!")
+
+
+def test_profile_view_edit_and_password_change(client):
+    headers = login(client, *PASSENGER_LOGIN)
+    me = client.get("/api/v1/me", headers=headers).json()
+    assert (me["full_name"], me["phone"], me["role"], me["status"]) == ("Test Passenger", "08000000001", "passenger", "active")
+    assert client.patch("/api/v1/me", json={"email": "not-an-email"}, headers=headers).status_code == 422
+    updated = client.patch("/api/v1/me", json={"full_name": "Adebola Oke", "email": "Ade@Example.com"},
+                           headers=headers).json()
+    assert updated["full_name"] == "Adebola Oke" and updated["email"] == "ade@example.com"
+
+    wrong = client.post("/api/v1/me/password", json={"current_password": "nope", "new_password": "A-New-Password-123!"},
+                        headers=headers)
+    assert wrong.status_code == 400
+    short = client.post("/api/v1/me/password", json={"current_password": PASSENGER_LOGIN[1], "new_password": "short"},
+                        headers=headers)
+    assert short.status_code == 422
+    changed = client.post("/api/v1/me/password",
+                          json={"current_password": PASSENGER_LOGIN[1], "new_password": "A-New-Password-123!"},
+                          headers=headers)
+    assert changed.status_code == 200
+    # The old token is signed out; the new one works.
+    assert client.get("/api/v1/me", headers=headers).status_code == 401
+    fresh = {"Authorization": f"Bearer {changed.json()['access_token']}"}
+    assert client.get("/api/v1/me", headers=fresh).status_code == 200
+    assert login(client, "08000000001", "A-New-Password-123!")
+
+
+def test_driver_profile_includes_vehicle(client):
+    me = client.get("/api/v1/me", headers=login(client, *DRIVER_LOGIN)).json()
+    assert me["driver"]["verification_status"] == "approved"
+    assert me["driver"]["vehicles"][0]["plate_number"] == "EKM-TEST-001"
+
+
+def test_session_refresh_issues_a_new_token(client):
+    headers = login(client, *PASSENGER_LOGIN)
+    response = client.post("/api/v1/auth/refresh", headers=headers)
+    assert response.status_code == 200 and response.json()["access_token"]
+    assert client.post("/api/v1/auth/refresh").status_code == 401
+
+
+def test_admin_lists_people_with_profiles(client):
+    admin = login(client, *ADMIN_LOGIN)
+    passengers = client.get("/api/v1/admin/people?role=passenger", headers=admin).json()
+    assert {p["phone"] for p in passengers} >= {"08000000001", "08000000002"}
+    drivers = client.get("/api/v1/admin/people?role=driver&status=approved", headers=admin).json()
+    assert [d["phone"] for d in drivers] == ["08000000006"]
+    assert drivers[0]["driver"]["vehicles"][0]["plate_number"] == "EKM-TEST-001"
+    assert drivers[0]["driver"]["balance"] == "0.00"
+    found = client.get("/api/v1/admin/people?role=passenger&q=Second", headers=admin).json()
+    assert [p["full_name"] for p in found] == ["Second Passenger"]
+    detail = client.get(f"/api/v1/admin/people/{drivers[0]['id']}", headers=admin).json()
+    assert "recent_rides" in detail and "recent_activity" in detail
+    assert client.get("/api/v1/admin/people", headers=login(client, *PASSENGER_LOGIN)).status_code == 403
+
+
+def test_admin_suspends_and_reactivates_an_account(client):
+    admin = login(client, *ADMIN_LOGIN)
+    passenger = login(client, "08000000002", "Second-Test-Password-2!")
+    assert client.post("/api/v1/admin/people/2/suspend", json={"reason": "x"}, headers=admin).status_code == 422
+    suspended = client.post("/api/v1/admin/people/2/suspend", json={"reason": "Abusive messages"}, headers=admin)
+    assert suspended.status_code == 200 and suspended.json()["status"] == "suspended"
+    # Signed out at once, and can't sign back in.
+    assert client.get("/api/v1/me", headers=passenger).status_code == 401
+    blocked = client.post("/api/v1/auth/login", json={"phone": "08000000002", "password": "Second-Test-Password-2!"})
+    assert blocked.status_code == 403
+    suspended_ids = {p["id"] for p in client.get("/api/v1/admin/people?role=passenger&status=suspended",
+                                                  headers=admin).json()}
+    assert suspended_ids == {2, 3}  # 3 is the fixture's inactive passenger
+    back = client.post("/api/v1/admin/people/2/reactivate", json={"reason": "Apologised"}, headers=admin)
+    assert back.json()["status"] == "active"
+    assert login(client, "08000000002", "Second-Test-Password-2!")
+
+
+def test_suspended_driver_goes_offline_and_cant_be_assigned(client):
+    admin = login(client, *ADMIN_LOGIN)
+    client.post("/api/v1/admin/people/5/suspend", json={"reason": "Documents expired"}, headers=admin)
+    with session_for(client) as db:
+        assert db.get(Driver, 1).is_online is False
+
+
+def test_admin_removes_an_account_but_keeps_records(client):
+    admin = login(client, *ADMIN_LOGIN)
+    removed = client.post("/api/v1/admin/people/2/remove", json={"reason": "Asked to delete account"}, headers=admin)
+    assert removed.status_code == 200
+    body = removed.json()
+    assert body["status"] == "removed" and body["full_name"] == "Removed account"
+    assert body["phone"].startswith("removed-2-")
+    assert client.post("/api/v1/auth/login", json={"phone": "08000000002", "password": "Second-Test-Password-2!"}).status_code == 401
+    # The phone number is free to register again.
+    again = client.post("/api/v1/auth/register", json={"phone": "08000000002", "full_name": "New Person",
+                                                       "password": "Brand-New-Password-1!"})
+    assert again.status_code in (200, 201), again.text
+    assert client.post("/api/v1/admin/people/2/remove", json={"reason": "again"}, headers=admin).status_code == 409
+
+
+def test_admin_cant_remove_someone_mid_trip_or_admins(client):
+    passenger_headers, admin, request_id = create_assigned_ride(client)
+    response = client.post("/api/v1/admin/people/1/remove", json={"reason": "Test"}, headers=admin)
+    assert response.status_code == 409 and "trip in progress" in response.json()["detail"]
+    assert client.post("/api/v1/admin/people/4/suspend", json={"reason": "Test"}, headers=admin).status_code == 409
+
+
+def test_admin_overview_counts_activity(client):
+    create_assigned_ride(client)
+    admin = login(client, *ADMIN_LOGIN)
+    overview = client.get("/api/v1/admin/overview", headers=admin).json()
+    assert overview["people"]["passengers"] == 3
+    assert overview["people"]["drivers_approved"] == 1
+    assert overview["trips"]["assigned"] == 1 and overview["trips"]["requests_today"] >= 1
+    assert overview["money"]["payments_to_confirm"] == 0
+    assert isinstance(overview["activity"], list)
+
+
+def test_support_chat_between_customer_and_team(client):
+    passenger = login(client, *PASSENGER_LOGIN)
+    admin = login(client, *ADMIN_LOGIN)
+    thread = client.post("/api/v1/support/threads", headers=passenger,
+                         json={"subject": "Driver was late", "message": "My driver came 20 minutes late."}).json()
+    assert thread["messages"][0]["body"] == "My driver came 20 minutes late."
+
+    inbox = client.get("/api/v1/admin/support/threads", headers=admin).json()
+    assert inbox[0]["id"] == thread["id"] and inbox[0]["unread"] == 1
+    assert inbox[0]["user"]["phone"] == "08000000001"
+    assert client.get("/api/v1/support/unread", headers=admin).json() == {"unread": 1}
+    opened = client.get(f"/api/v1/admin/support/threads/{thread['id']}", headers=admin).json()
+    assert opened["unread"] == 0
+    client.post(f"/api/v1/admin/support/threads/{thread['id']}/messages", headers=admin,
+                json={"body": "Sorry about that. We've spoken to the driver."})
+
+    assert client.get("/api/v1/support/unread", headers=passenger).json() == {"unread": 1}
+    mine = client.get(f"/api/v1/support/threads/{thread['id']}", headers=passenger).json()
+    assert mine["messages"][-1]["sender_name"] == "EkiMove support"
+    assert client.get("/api/v1/support/unread", headers=passenger).json() == {"unread": 0}
+
+    client.post(f"/api/v1/admin/support/threads/{thread['id']}/status", headers=admin, json={"status": "closed"})
+    client.post(f"/api/v1/support/threads/{thread['id']}/messages", headers=passenger, json={"body": "Thanks!"})
+    assert client.get(f"/api/v1/support/threads/{thread['id']}", headers=passenger).json()["status"] == "open"
+
+    other = login(client, "08000000002", "Second-Test-Password-2!")
+    assert client.get(f"/api/v1/support/threads/{thread['id']}", headers=other).status_code == 404
+
+
+def test_haulage_quote_accept_dispatch_and_pay(client):
+    passenger = login(client, *PASSENGER_LOGIN)
+    admin = login(client, *ADMIN_LOGIN)
+    created = client.post("/api/v1/haulage-requests", headers=passenger, json={
+        "vehicle_type": "van", "origin_text": "Oja Oba, Ado-Ekiti", "destination_text": "EKSU hostel, Ado-Ekiti",
+        "load_description": "Two beds, a fridge and 6 boxes", "scheduled_for": "2026-11-05T09:00:00+01:00"})
+    assert created.status_code == 201, created.text
+    load = created.json()
+    assert load["status"] == "quote_requested" and load["support_thread_id"]
+    assert load["quoted_fare"] is None
+
+    # The request opened a support chat with the details.
+    chat = client.get(f"/api/v1/support/threads/{load['support_thread_id']}", headers=passenger).json()
+    assert "Two beds" in chat["messages"][0]["body"]
+    assert client.post(f"/api/v1/haulage-requests/{load['id']}/accept", headers=passenger).status_code == 409
+
+    queue = client.get("/api/v1/admin/haulage-requests", headers=admin).json()
+    assert [q["id"] for q in queue] == [load["id"]]
+    quoted = client.post(f"/api/v1/admin/haulage-requests/{load['id']}/quote", headers=admin,
+                         json={"amount": "25000", "terms": "Includes 2 loaders. 2 hours max."}).json()
+    assert quoted["status"] == "quoted" and quoted["quoted_fare"] == "25000.00"
+    chat = client.get(f"/api/v1/support/threads/{load['support_thread_id']}", headers=passenger).json()
+    assert "₦25,000" in chat["messages"][-1]["body"]
+
+    accepted = client.post(f"/api/v1/haulage-requests/{load['id']}/accept", headers=passenger).json()
+    assert accepted["status"] == "requested"
+    pending = client.get("/api/v1/admin/ride-requests/pending", headers=admin).json()
+    job = next(p for p in pending if p["id"] == load["id"])
+    assert job["service_type"] == "haulage" and job["quoted_fare"] == 25000.0
+
+    # A van driver takes the job; payment then flows through EkiMove.
+    with session_for(client) as db:
+        db.add(Vehicle(id=2, driver_id=1, vehicle_type="van", plate_number="EKM-VAN-01", capacity=2, is_approved=True))
+        db.commit()
+    assigned = client.post(f"/api/v1/admin/ride-requests/{load['id']}/assign", json={"driver_id": 1}, headers=admin)
+    assert assigned.status_code == 201, assigned.text
+    ride_id = assigned.json()["ride_id"]
+    payment = client.post(f"/api/v1/payments/rides/{ride_id}/initiate", headers=passenger).json()
+    assert payment["amount"] == "25000.00"
+
+
+def test_haulage_quote_can_be_declined_or_cancelled_free(client):
+    passenger = login(client, *PASSENGER_LOGIN)
+    admin = login(client, *ADMIN_LOGIN)
+    body = {"vehicle_type": "dyna", "origin_text": "Ikere road", "destination_text": "Iworoko",
+            "load_description": "Building blocks, about 200"}
+    first = client.post("/api/v1/haulage-requests", headers=passenger, json=body).json()
+    client.post(f"/api/v1/admin/haulage-requests/{first['id']}/quote", headers=admin,
+                json={"amount": "40000", "terms": "One trip"})
+    assert client.post(f"/api/v1/haulage-requests/{first['id']}/decline", headers=passenger).json()["status"] == "cancelled"
+    second = client.post("/api/v1/haulage-requests", headers=passenger, json=body).json()
+    preview = client.get(f"/api/v1/ride-requests/{second['id']}/cancel-preview", headers=passenger).json()
+    assert preview["can_cancel"] is True and preview["fee"] == "0.00"
+    assert client.post(f"/api/v1/ride-requests/{second['id']}/cancel", headers=passenger).status_code == 200
+    bad = client.post("/api/v1/haulage-requests", headers=passenger, json={**body, "vehicle_type": "plane"})
+    assert bad.status_code == 422
+    assert client.post("/api/v1/haulage-requests", headers=admin, json=body).status_code == 403

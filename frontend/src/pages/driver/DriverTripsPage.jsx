@@ -1,10 +1,11 @@
-﻿import { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { RefreshCw, Route } from 'lucide-react'
 import AppShell from '../../layouts/AppShell.jsx'
 import Alert from '../../components/ui/Alert.jsx'
 import StatusBadge from '../../components/ui/StatusBadge.jsx'
 import SOSButton from '../../components/SOSButton.jsx'
+import ProfileStrip from '../../components/ProfileStrip.jsx'
 import { apiRequest } from '../../services/authService.js'
 import { formatNaira, formatShortDate } from '../../utils/format.js'
 import { vehicleLabel } from '../../utils/vehicles.js'
@@ -196,6 +197,7 @@ export default function DriverTripsPage() {
       }
     >
       <div className="stack">
+        <ProfileStrip />
         <Alert tone="error">{error}</Alert>
         <Alert tone="success">{notice}</Alert>
 

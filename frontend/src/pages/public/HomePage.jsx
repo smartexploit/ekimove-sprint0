@@ -17,6 +17,7 @@ import InstallAppCard from '../../components/pwa/InstallAppCard.jsx'
 import useTripOptions from '../../hooks/useTripOptions.js'
 import { PublicFooter, PublicHeader } from '../../layouts/PublicChrome.jsx'
 import { formatNaira, isMotorcycle } from '../../utils/format.js'
+import Select from '../../components/ui/Select.jsx'
 
 function TripPlanner() {
   const navigate = useNavigate()
@@ -91,8 +92,7 @@ function TripPlanner() {
       {tripOptions.areas.length > 1 && (
         <label className="field">
           <span className="field-label">Service area</span>
-          <select
-            className="select"
+          <Select
             value={trip.area}
             onChange={(event) => update('area', event.target.value)}
           >
@@ -102,7 +102,7 @@ function TripPlanner() {
                 {area.name}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
       )}
 
@@ -114,8 +114,7 @@ function TripPlanner() {
         </div>
         <label className="field">
           <span className="field-label">Pickup</span>
-          <select
-            className="select"
+          <Select
             value={trip.from}
             onChange={(event) => update('from', event.target.value)}
             disabled={!areaId || tripOptions.loadingPlaces}
@@ -130,12 +129,11 @@ function TripPlanner() {
                 {place.name}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <label className="field">
           <span className="field-label">Destination</span>
-          <select
-            className="select"
+          <Select
             value={trip.to}
             onChange={(event) => update('to', event.target.value)}
             disabled={!areaId || tripOptions.loadingPlaces}
@@ -146,7 +144,7 @@ function TripPlanner() {
                 {place.name}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
       </div>
 

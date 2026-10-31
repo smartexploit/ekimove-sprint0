@@ -1,4 +1,4 @@
-﻿import { useState } from 'react'
+import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { CheckCircle2, MapPin, Wallet } from 'lucide-react'
 import AppShell from '../../layouts/AppShell.jsx'
@@ -9,8 +9,11 @@ import { vehicleBlurb, vehicleLabel } from '../../utils/vehicles.js'
 import useTripOptions from '../../hooks/useTripOptions.js'
 import { apiRequest } from '../../services/authService.js'
 import { formatNaira, isMotorcycle } from '../../utils/format.js'
+import Select from '../../components/ui/Select.jsx'
+import useBookingRules from '../../hooks/useBookingRules.js'
 
-const PASSENGER_COUNTS = [1, 2, 3, 4, 5, 6, 7, 8]
+// Cars carry 4 passengers at most; motorcycle limits come from the admin rules.
+const PASSENGER_COUNTS = [1, 2, 3, 4]
 
 function idParam(value) {
   return value && /^\d+$/.test(value) ? value : ''
@@ -30,11 +33,12 @@ function initialForm(searchParams) {
     origin_text: '',
     destination_text: '',
     vehicle_type: /^[a-z_]+$/i.test(vehicle) ? vehicle : '',
+    // A vehicle chosen on the dashboard stays preferred while the route changes.
+    preferred_vehicle: /^[a-z_]+$/i.test(vehicle) ? vehicle : '',
     passenger_count:
-      isMotorcycle(vehicle) ? '1'
-        : Number.isInteger(passengers) && passengers >= 1 && passengers <= 8
-          ? String(passengers)
-          : '1',
+      Number.isInteger(passengers) && passengers >= 1 && passengers <= (isMotorcycle(vehicle) ? 2 : 4)
+        ? String(passengers)
+        : '1',
   }
 }
 
@@ -66,10 +70,21 @@ export default function BookRidePage() {
 
   const samePlace =
     form.origin_place_id && form.origin_place_id === form.destination_place_id
+  const rules = useBookingRules()
+  const motorcycleMax = rules.max_passengers?.motorcycle ?? 1
+  // The dashboard choice (?vehicle=) applies whenever that vehicle has a fare.
+  const vehicleType =
+    form.vehicle_type ||
+    (fareOptions.some((option) => option.vehicle_type === form.preferred_vehicle)
+      ? form.preferred_vehicle
+      : '')
   const selectedFare = fareOptions.find(
-    (option) => option.vehicle_type === form.vehicle_type,
+    (option) => option.vehicle_type === vehicleType,
   )
-  const motorcycleSelected = isMotorcycle(form.vehicle_type)
+  const motorcycleSelected = isMotorcycle(vehicleType)
+  const passengerChoices = motorcycleSelected
+    ? PASSENGER_COUNTS.filter((count) => count <= motorcycleMax)
+    : PASSENGER_COUNTS
 
   /** Fill the form with a trip Atọ́nà quoted (real place IDs from the API). */
   function applyAtonaBooking(draft) {
@@ -80,9 +95,9 @@ export default function BookRidePage() {
       destination_place_id: draft.destination_place_id ? String(draft.destination_place_id) : '',
       origin_text: draft.origin_name || '',
       destination_text: draft.destination_name || '',
-      passenger_count: isMotorcycle(draft.vehicle_type)
-        ? '1'
-        : String(draft.passenger_count || 1),
+      passenger_count: String(
+        Math.min(Number(draft.passenger_count) || 1, isMotorcycle(draft.vehicle_type) ? 2 : 4),
+      ),
       vehicle_type: draft.vehicle_type || '',
     }))
     setError('')
@@ -117,11 +132,17 @@ export default function BookRidePage() {
       }
 
       if (name === 'passenger_count') {
-        next.vehicle_type = ''
+        // Keep the choice if that vehicle can still take this many people.
+        if (isMotorcycle(current.vehicle_type) && Number(value) > motorcycleMax) {
+          next.vehicle_type = ''
+        }
       }
 
-      if (name === 'vehicle_type' && isMotorcycle(value)) {
-        next.passenger_count = '1'
+      if (name === 'vehicle_type') {
+        next.preferred_vehicle = value
+        if (isMotorcycle(value) && Number(next.passenger_count) > motorcycleMax) {
+          next.passenger_count = '1'
+        }
       }
 
       return next
@@ -161,7 +182,7 @@ export default function BookRidePage() {
         body: JSON.stringify({
           origin_place_id: Number(form.origin_place_id),
           destination_place_id: Number(form.destination_place_id),
-          vehicle_type: form.vehicle_type,
+          vehicle_type: vehicleType,
           passenger_count: Number(form.passenger_count),
         }),
       })
@@ -271,8 +292,7 @@ export default function BookRidePage() {
             {areas.length > 1 && (
               <label className="field">
                 <span className="field-label">Service area</span>
-                <select
-                  className="select"
+                <Select
                   name="service_area_id"
                   value={form.service_area_id}
                   onChange={updateField}
@@ -284,7 +304,7 @@ export default function BookRidePage() {
                       {area.name}
                     </option>
                   ))}
-                </select>
+                </Select>
               </label>
             )}
 
@@ -296,8 +316,7 @@ export default function BookRidePage() {
               </div>
               <label className="field">
                 <span className="field-label">Pickup</span>
-                <select
-                  className="select"
+                <Select
                   name="origin_place_id"
                   value={form.origin_place_id}
                   onChange={updateField}
@@ -312,15 +331,14 @@ export default function BookRidePage() {
                       {place.name}
                     </option>
                   ))}
-                </select>
+                </Select>
                 {form.origin_text && !form.origin_place_id && (
                   <span className="field-hint">You said: “{form.origin_text}”</span>
                 )}
               </label>
               <label className="field">
                 <span className="field-label">Destination</span>
-                <select
-                  className="select"
+                <Select
                   name="destination_place_id"
                   value={form.destination_place_id}
                   onChange={updateField}
@@ -333,7 +351,7 @@ export default function BookRidePage() {
                       {place.name}
                     </option>
                   ))}
-                </select>
+                </Select>
                 {form.destination_text && !form.destination_place_id && (
                   <span className="field-hint">You said: “{form.destination_text}”</span>
                 )}
@@ -346,23 +364,27 @@ export default function BookRidePage() {
 
             <label className="field">
               <span className="field-label">Passengers</span>
-              <select
-                className="select"
+              <Select
                 name="passenger_count"
                 value={form.passenger_count}
                 onChange={updateField}
                 aria-describedby={motorcycleSelected ? 'passenger-hint' : undefined}
               >
-                {(motorcycleSelected ? [1] : PASSENGER_COUNTS).map((count) => (
+                {passengerChoices.map((count) => (
                   <option key={count} value={String(count)}>
                     {count} {count === 1 ? 'passenger' : 'passengers'}
                   </option>
                 ))}
-              </select>
+              </Select>
               {motorcycleSelected && (
                 <span className="field-hint" id="passenger-hint">
-                  Motorcycle rides carry one passenger.
+                  {motorcycleMax >= 2
+                    ? `A motorcycle carries 1 passenger. A second passenger costs ${formatNaira(rules.motorcycle_second_passenger_fee, { decimals: 0 })} extra on most routes.`
+                    : 'A motorcycle carries one passenger. Choose a car for more people.'}
                 </span>
+              )}
+              {!motorcycleSelected && (
+                <span className="field-hint">A car carries up to 4 passengers.</span>
               )}
             </label>
           </div>
@@ -392,7 +414,7 @@ export default function BookRidePage() {
                     type="radio"
                     name="vehicle_type"
                     value={option.vehicle_type}
-                    checked={form.vehicle_type === option.vehicle_type}
+                    checked={vehicleType === option.vehicle_type}
                     onChange={updateField}
                   />
                   <span className={`choice-icon ${isMotorcycle(option.vehicle_type) ? '' : 'choice-icon-warm'}`}>

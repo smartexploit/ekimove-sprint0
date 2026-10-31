@@ -51,11 +51,14 @@ async def submit_driver_application(
     if len(full_name) < 2 or len(phone) < 7:
         raise HTTPException(status_code=422, detail="Enter a valid name and phone number")
 
-    if vehicle_type not in {"motorcycle", "car", "tricycle", "minibus"}:
+    if vehicle_type not in {"motorcycle", "car", "tricycle", "minibus", "big_car", "van", "dyna"}:
         raise HTTPException(status_code=422, detail="Unsupported vehicle type")
 
-    if vehicle_type == "motorcycle" and capacity != 1:
-        raise HTTPException(status_code=422, detail="Motorcycle capacity must be 1")
+    if vehicle_type == "motorcycle" and capacity > 2:
+        raise HTTPException(status_code=422, detail="A motorcycle can carry 2 passengers at most")
+
+    if vehicle_type == "car" and capacity > 4:
+        raise HTTPException(status_code=422, detail="A car can carry 4 passengers at most")
 
     if db.scalar(select(User).where(User.phone == phone)) is not None:
         raise HTTPException(status_code=409, detail="Phone number is already registered")

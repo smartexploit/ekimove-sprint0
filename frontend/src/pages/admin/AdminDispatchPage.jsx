@@ -152,8 +152,16 @@ export default function AdminDispatchPage() {
                         </td>
                         <td style={{ fontWeight: 700 }}>
                           {request.origin_text} → {request.destination_text}
+                          {request.service_type === 'haulage' && (
+                            <p className="muted small" style={{ fontWeight: 500 }}>Load: {request.load_description}</p>
+                          )}
                         </td>
-                        <td>{vehicleLabel(request.vehicle_type)}</td>
+                        <td>
+                          {vehicleLabel(request.vehicle_type)}
+                          {request.service_type === 'haulage' && (
+                            <> <span className="badge badge-gold">Load</span></>
+                          )}
+                        </td>
                         <td>{request.passenger_count}</td>
                         <td className="money" style={{ color: 'var(--green-800)' }}>
                           {formatNaira(request.quoted_fare, { decimals: 0 })}

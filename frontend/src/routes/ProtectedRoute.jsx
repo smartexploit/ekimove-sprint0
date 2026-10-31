@@ -3,6 +3,7 @@ import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { LogoMark } from '../components/brand/Logo.jsx'
 import { getCurrentUser, getAccessToken, logoutPassenger } from '../services/authService.js'
 import { homePathForRole } from '../utils/roles.js'
+import SessionTimeout from '../components/SessionTimeout.jsx'
 
 export default function ProtectedRoute({ requiredRole = 'passenger' }) {
   const location = useLocation()
@@ -62,12 +63,18 @@ export default function ProtectedRoute({ requiredRole = 'passenger' }) {
     return <Navigate to="/login" replace />
   }
 
-  if (state.user.role !== requiredRole) {
+  const allowed = Array.isArray(requiredRole) ? requiredRole : [requiredRole]
+  if (!allowed.includes(state.user.role)) {
     // Send known roles to their own area; anything else goes to the
     // public homepage so an unexpected role can never loop.
     const knownRole = ['passenger', 'driver', 'super_admin'].includes(state.user.role)
     return <Navigate to={knownRole ? homePathForRole(state.user.role) : '/'} replace />
   }
 
-  return <Outlet context={{ user: state.user }} />
+  return (
+    <>
+      <SessionTimeout />
+      <Outlet context={{ user: state.user }} />
+    </>
+  )
 }

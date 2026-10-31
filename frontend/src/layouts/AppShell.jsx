@@ -1,12 +1,14 @@
-import { NavLink, useNavigate, useOutletContext } from 'react-router-dom'
+import { Link, NavLink, useNavigate, useOutletContext } from 'react-router-dom'
 import {
   BadgeCheck,
   House,
+  LifeBuoy,
   LogOut,
   Navigation,
   Route,
   Wallet,
 } from 'lucide-react'
+import useSupportUnread from '../hooks/useSupportUnread.js'
 import Logo from '../components/brand/Logo.jsx'
 import AtonaFloatingAssistant from '../components/AtonaFloatingAssistant.jsx'
 import AtonaHeaderButton from '../components/atona/AtonaHeaderButton.jsx'
@@ -20,11 +22,13 @@ const NAV = {
     ['/book-ride', 'Book', Navigation],
     ['/my-rides', 'My rides', Route],
     ['/payments', 'Payments', Wallet],
+    ['/support', 'Support', LifeBuoy],
   ],
   driver: [
     ['/driver/trips', 'Trips', Route],
     ['/driver/earnings', 'Earnings', Wallet],
     ['/driver/status', 'My status', BadgeCheck],
+    ['/support', 'Support', LifeBuoy],
   ],
 }
 
@@ -46,6 +50,7 @@ export default function AppShell({
   const navigate = useNavigate()
   const role = user?.role === 'driver' ? 'driver' : 'passenger'
   const items = NAV[role]
+  const unread = useSupportUnread(Boolean(user))
 
   function signOut() {
     logoutPassenger()
@@ -70,16 +75,16 @@ export default function AppShell({
               <NavLink key={to} to={to} end>
                 <Icon size={18} aria-hidden="true" />
                 {label}
+                {to === '/support' && unread > 0 && <span className="nav-dot" aria-label={`${unread} unread`} />}
               </NavLink>
             ))}
           </nav>
 
           <div className="app-user">
             <AtonaHeaderButton className="tabbar-only" />
-            <span className="avatar" aria-hidden="true">
+            <Link to="/profile" className="avatar avatar-link" aria-label={`Your profile (${user?.full_name || 'signed in'})`}>
               {initials(user?.full_name)}
-            </span>
-            <span className="sr-only">Signed in as {user?.full_name}</span>
+            </Link>
             <button
               type="button"
               className="btn btn-quiet btn-sm app-signout-desktop"
@@ -119,7 +124,10 @@ export default function AppShell({
       <nav className="tabbar" aria-label="App">
         {items.map(([to, label, Icon]) => (
           <NavLink key={to} to={to} end>
-            <Icon size={22} aria-hidden="true" />
+            <span className="tab-icon">
+              <Icon size={22} aria-hidden="true" />
+              {to === '/support' && unread > 0 && <span className="nav-dot" aria-label={`${unread} unread`} />}
+            </span>
             {label}
           </NavLink>
         ))}

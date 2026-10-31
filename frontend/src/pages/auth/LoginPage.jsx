@@ -1,4 +1,4 @@
-﻿import { useState } from 'react'
+import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   loginPassenger,
@@ -6,6 +6,7 @@ import {
 } from '../../services/authService.js'
 import AuthLayout from '../../layouts/AuthLayout.jsx'
 import Alert from '../../components/ui/Alert.jsx'
+import { IDLE_MINUTES } from '../../utils/session.js'
 import PasswordInput from '../../components/ui/PasswordInput.jsx'
 import { homePathForRole } from '../../utils/roles.js'
 
@@ -54,6 +55,12 @@ export default function LoginPage() {
       heading="Sign in"
       subheading="Use the phone number and password on your EkiMove account."
     >
+      {new URLSearchParams(location.search).get('reason') === 'timeout' && (
+        <Alert tone="info">
+          You were signed out after {IDLE_MINUTES} minutes without activity, to keep your account safe.
+          Please sign in again.
+        </Alert>
+      )}
       {returnTo && (
         <Alert tone="info">Sign in to continue with your trip.</Alert>
       )}

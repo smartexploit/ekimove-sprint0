@@ -36,11 +36,26 @@ function LiveRide({ ride, onChanged }) {
         <p className="small" style={{ marginTop: 4, color: 'var(--green-200)' }}>
           {vehicleLabel(ride.vehicle_type)} · {ride.passenger_count}{' '}
           {ride.passenger_count === 1 ? 'passenger' : 'passengers'} ·{' '}
-          {formatNaira(ride.quoted_fare)}
+          {ride.status === 'quote_requested' ? 'Price to be agreed' : formatNaira(ride.quoted_fare)}
         </p>
       </div>
 
-      {status !== 'incident_review' && (
+      {ride.service_type === 'haulage' && (
+        <p className="small" style={{ color: 'var(--green-200)' }}>
+          Load: {ride.load_description}
+        </p>
+      )}
+
+      {['quote_requested', 'quoted'].includes(status) ? (
+        <p className="small">
+          {status === 'quoted'
+            ? 'Your quote is ready. '
+            : "We're agreeing a price with you in chat. "}
+          <Link className="text-link-light" to="/move-a-load">
+            {status === 'quoted' ? 'Review and accept it' : 'See your load booking'}
+          </Link>
+        </p>
+      ) : status !== 'incident_review' && (
         <ol className="progress" aria-label="Ride progress">
           {PROGRESS_STEPS.map(([key, label], index) => (
             <li
@@ -72,7 +87,7 @@ function LiveRide({ ride, onChanged }) {
             </p>
           </div>
         </div>
-      ) : (
+      ) : ['quote_requested', 'quoted'].includes(status) ? null : (
         <p className="small" style={{ color: 'var(--green-200)' }}>
           We're matching you with a verified driver. This page updates on its own.
         </p>

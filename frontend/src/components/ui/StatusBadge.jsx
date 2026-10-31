@@ -2,6 +2,8 @@ import { titleCase } from '../../utils/format.js'
 
 const STATUS = {
   ride: {
+    quote_requested: ['Waiting for quote', 'gold'],
+    quoted: ['Quote ready', 'bright'],
     requested: ['Requested', 'gold'],
     assigned: ['Driver assigned', 'green'],
     driver_arriving: ['Driver arriving', 'bright'],

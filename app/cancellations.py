@@ -69,6 +69,8 @@ def cancellation_terms(
         return {**base, "can_cancel": False, "message": "This ride is already cancelled."}
 
     if ride is None:
+        if ride_request.status in ("quote_requested", "quoted"):
+            return {**base, "can_cancel": True, "message": "Nothing has been booked yet, so cancelling is free."}
         if ride_request.status != "requested":
             return {**base, "can_cancel": False, "message": "This booking can no longer be cancelled."}
         return {**base, "can_cancel": True, "message": "No driver yet, so cancelling is free."}

@@ -1,7 +1,8 @@
-﻿import { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { BadgeCheck, Ban, Clock3, XCircle } from 'lucide-react'
 import AppShell from '../../layouts/AppShell.jsx'
+import ProfileStrip from '../../components/ProfileStrip.jsx'
 import Alert from '../../components/ui/Alert.jsx'
 import StatusBadge from '../../components/ui/StatusBadge.jsx'
 import VehicleIcon from '../../components/ui/VehicleIcon.jsx'
@@ -109,6 +110,7 @@ export default function DriverStatusPage() {
 
   return (
     <AppShell title="My driver status" description="Your review, vehicles and availability.">
+      <div style={{ marginBottom: 16 }}><ProfileStrip /></div>
       {loading && (
         <div className="loading-block" role="status">
           <span className="spinner" aria-hidden="true" /> Loading your status…
