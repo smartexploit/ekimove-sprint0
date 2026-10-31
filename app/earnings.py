@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_user, require_super_admin
 from app.config import settings
 from app.database import get_db
-from app.instant_payments import PaystackError, _paystack, instant_transfers_enabled
+from app.instant_payments import PaystackError, _paystack, paystack_configured
 from app.models import (
     AuditLog,
     Driver,
@@ -79,7 +79,7 @@ def split_fare(gross) -> tuple[Decimal, Decimal, Decimal]:
 
 
 def payouts_automatic() -> bool:
-    return bool(settings.paystack_transfers_enabled and instant_transfers_enabled())
+    return bool(settings.paystack_transfers_enabled and paystack_configured())
 
 
 def _audit(db: Session, actor_id: int | None, action: str, entity_type: str, entity_id, details: str) -> None:
@@ -378,7 +378,7 @@ def driver_earnings(current_user: User = Depends(get_current_user), db: Session 
 
 @router.get("/banks")
 def list_banks(_user: User = Depends(get_current_user)) -> list[dict]:
-    if instant_transfers_enabled():
+    if paystack_configured():
         try:
             data = _paystack("GET", "/bank?country=nigeria&currency=NGN&perPage=200")
             banks = [{"code": str(b["code"]), "name": b["name"]} for b in data
@@ -415,7 +415,7 @@ class PayoutAccountInput(BaseModel):
 def get_payout_account(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
     driver = _current_driver(current_user, db)
     account = db.scalar(select(DriverPayoutAccount).where(DriverPayoutAccount.driver_id == driver.id))
-    return {"account": _account_result(account), "verification_available": instant_transfers_enabled()}
+    return {"account": _account_result(account), "verification_available": paystack_configured()}
 
 
 @router.put("/driver/payout-account")
@@ -431,7 +431,7 @@ def set_payout_account(
 
     bank_names = {code: name for code, name in COMMON_BANKS}
     verified = False
-    if instant_transfers_enabled():
+    if paystack_configured():
         try:
             resolved = _paystack("GET", f"/bank/resolve?account_number={payload.account_number}"
                                         f"&bank_code={payload.bank_code}")
@@ -466,7 +466,7 @@ def set_payout_account(
            f"Payout account set to {account.bank_name} {_mask(account.account_number)} (verified={verified}).")
     db.commit()
     db.refresh(account)
-    return {"account": _account_result(account), "verification_available": instant_transfers_enabled()}
+    return {"account": _account_result(account), "verification_available": paystack_configured()}
 
 
 # --------------------------------------------------------------------------

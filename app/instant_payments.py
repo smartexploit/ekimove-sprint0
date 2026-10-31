@@ -50,8 +50,13 @@ class PaystackError(Exception):
     """Paystack could not be reached or refused the request."""
 
 
-def instant_transfers_enabled() -> bool:
+def paystack_configured() -> bool:
     return bool(settings.paystack_secret_key)
+
+
+def instant_transfers_enabled() -> bool:
+    """Personal account numbers for passengers are on."""
+    return paystack_configured() and settings.paystack_virtual_accounts_enabled
 
 
 def _paystack(method: str, path: str, payload: dict | None = None) -> dict:
@@ -265,8 +270,8 @@ def find_payment_for_deposit(db: Session, deposit: BankDeposit) -> Payment | Non
 
 @router.post("/payments/paystack/webhook", include_in_schema=False)
 async def paystack_webhook(request: Request, db: Session = Depends(get_db)) -> dict:
-    if not instant_transfers_enabled():
-        raise HTTPException(status_code=503, detail="Instant transfers are not switched on.")
+    if not paystack_configured():
+        raise HTTPException(status_code=503, detail="Paystack is not configured.")
 
     raw = await request.body()
     expected = hmac.new(settings.paystack_secret_key.encode(), raw, hashlib.sha512).hexdigest()

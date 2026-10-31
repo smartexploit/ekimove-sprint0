@@ -17,7 +17,7 @@ const POLL_MS = 5000
  * no one to wait for. While the ride is unpaid the status is re-checked
  * every few seconds and `onPaid` fires as soon as it is confirmed.
  */
-export default function InstantTransfer({ rideId, amount, paid, onPaid }) {
+export default function InstantTransfer({ rideId, amount, paid, onPaid, onUnavailable }) {
   const [state, setState] = useState({ loaded: false, account: null })
   const [agree, setAgree] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -59,7 +59,14 @@ export default function InstantTransfer({ rideId, amount, paid, onPaid }) {
       const data = await createMyVirtualAccount()
       setState({ loaded: true, account: data.account })
     } catch (err) {
-      setError(err.message || 'We could not create your account number. Please try again.')
+      const message = err.message || 'We could not create your account number. Please try again.'
+      // Paystack has not switched the feature on for EkiMove yet: let the
+      // page fall back to paying into EkiMove's own account.
+      if (/not available for your business|not switched on/i.test(message)) {
+        onUnavailable?.()
+        return
+      }
+      setError(message)
     } finally {
       setBusy(false)
     }

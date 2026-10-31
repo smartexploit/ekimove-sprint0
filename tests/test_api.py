@@ -3332,3 +3332,24 @@ def test_scheduled_payout_endpoint_needs_its_token(client, no_paystack, monkeypa
     assert client.post("/api/v1/internal/payouts/run", headers={"X-Cron-Token": "wrong"}).status_code == 401
     ok = client.post("/api/v1/internal/payouts/run", headers={"X-Cron-Token": "cron-secret-123"})
     assert ok.status_code == 200 and ok.json()["created"] == 0
+
+
+def test_virtual_accounts_can_be_off_while_paystack_still_pays_drivers(client, paystack, monkeypatch):
+    monkeypatch.setattr(settings, "paystack_virtual_accounts_enabled", False)
+    monkeypatch.setattr(settings, "paystack_transfers_enabled", True)
+    monkeypatch.setattr(settings, "payout_minimum", 500)
+    passenger = login(client, "08000000001", "Passenger-Test-Password-1!")
+    assert client.get("/api/v1/payments/virtual-account", headers=passenger).json()["enabled"] is False
+    assert client.post("/api/v1/payments/virtual-account", json={"consent": True},
+                       headers=passenger).status_code == 503
+    assert client.get("/api/v1/business-info").json()["instant_transfers"] == {"enabled": False}
+
+    driver_headers, admin_headers, _, _ = complete_paid_ride(client)
+    account = client.put("/api/v1/driver/payout-account", headers=driver_headers,
+                         json={"bank_code": "058", "account_number": "0123456789"}).json()["account"]
+    assert account["verified"] is True
+    summary = client.post("/api/v1/admin/payouts/run", headers=admin_headers).json()
+    assert summary["automatic"] is True and summary["processing"] == 1
+    reference = paystack.transfers[0]["reference"]
+    # Transfer webhooks are still accepted.
+    assert _signed_webhook(client, {"event": "transfer.success", "data": {"reference": reference}}).json() == {"status": "paid"}

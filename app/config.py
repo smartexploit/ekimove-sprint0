@@ -79,6 +79,10 @@ class Settings(BaseSettings):
     paystack_base_url: str = "https://api.paystack.co"
     # "wema-bank" or "titan-paystack" live; "test-bank" with test keys.
     paystack_preferred_bank: str = "wema-bank"
+    # Personal account numbers need Paystack to enable Dedicated Virtual
+    # Accounts for the business. Set false until they have; the Paystack
+    # key keeps working for webhooks and driver payouts.
+    paystack_virtual_accounts_enabled: bool = True
     # Paystack customers need an email; passengers sign up with a phone
     # number, so a stable per-account address on this domain is used.
     paystack_customer_email_domain: str = "passengers.ekimove.app"

@@ -105,7 +105,8 @@ export default function PaymentsPage() {
   const currentPayment =
     payment && String(payment.ride_id) === effectiveRideId ? payment : null
   const { instant_transfers: instant } = useBusinessInfo()
-  const instantOn = Boolean(instant?.enabled)
+  const [instantUnavailable, setInstantUnavailable] = useState(false)
+  const instantOn = Boolean(instant?.enabled) && !instantUnavailable
   const isPaid =
     currentPayment?.status === 'confirmed' ||
     (!currentPayment && selectedRide?.payment_status === 'confirmed')
@@ -366,6 +367,7 @@ export default function PaymentsPage() {
                   amount={amountDue}
                   paid={isPaid}
                   onPaid={handleInstantPaid}
+                  onUnavailable={() => setInstantUnavailable(true)}
                 />
                 <div className="row">
                   <button
@@ -380,6 +382,12 @@ export default function PaymentsPage() {
               </>
             ) : method === 'bank_transfer' ? (
               <>
+                {instantUnavailable && (
+                  <Alert tone="info">
+                    Personal account numbers aren't available yet. Please pay into EkiMove's
+                    account below, then add your transfer reference.
+                  </Alert>
+                )}
                 <BankDetails amount={amountDue} />
                 <div className="row">
                   <button
