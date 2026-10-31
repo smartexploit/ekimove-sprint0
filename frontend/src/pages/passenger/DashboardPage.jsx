@@ -5,6 +5,7 @@ import AppShell from '../../layouts/AppShell.jsx'
 import Hills from '../../components/brand/Hills.jsx'
 import StatusBadge from '../../components/ui/StatusBadge.jsx'
 import SupportContacts from '../../components/SupportContacts.jsx'
+import InstallAppCard from '../../components/pwa/InstallAppCard.jsx'
 import { apiRequest } from '../../services/authService.js'
 import { firstName, formatNaira } from '../../utils/format.js'
 import { isActiveRide, rideStatus } from '../../utils/rides.js'
@@ -46,6 +47,8 @@ export default function DashboardPage() {
           </div>
           <Hills base="#F2F5F1" />
         </section>
+
+        <InstallAppCard />
 
         {activeRide && (
           <Link

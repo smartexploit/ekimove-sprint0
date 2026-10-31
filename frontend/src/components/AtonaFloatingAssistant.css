@@ -360,7 +360,7 @@
   border-radius: 14px;
   background: var(--field, #f7f9f7);
   font: inherit;
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1.4;
   resize: none;
   field-sizing: content;
@@ -406,6 +406,29 @@
   .atona-widget {
     right: 14px;
     bottom: 16px;
+  }
+
+  /* A compact round button on phones so it doesn't cover content. */
+  .atona-launcher {
+    width: 56px;
+    min-height: 56px;
+    padding: 0;
+    justify-content: center;
+    box-shadow: 0 10px 28px rgba(4, 30, 22, 0.32), 0 0 0 3px #fff;
+  }
+
+  .atona-launcher svg {
+    width: 24px;
+    height: 24px;
+  }
+
+  .atona-launcher span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
   }
 
   .atona-panel {

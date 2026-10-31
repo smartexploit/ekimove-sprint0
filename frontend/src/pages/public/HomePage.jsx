@@ -13,6 +13,7 @@ import Alert from '../../components/ui/Alert.jsx'
 import VehicleIcon from '../../components/ui/VehicleIcon.jsx'
 import { vehicleBlurb, vehicleLabel } from '../../utils/vehicles.js'
 import AtonaFloatingAssistant from '../../components/AtonaFloatingAssistant.jsx'
+import InstallAppCard from '../../components/pwa/InstallAppCard.jsx'
 import useTripOptions from '../../hooks/useTripOptions.js'
 import { PublicFooter, PublicHeader } from '../../layouts/PublicChrome.jsx'
 import { formatNaira, isMotorcycle } from '../../utils/format.js'
@@ -267,6 +268,10 @@ export default function HomePage() {
             </div>
           </div>
         </section>
+
+        <div className="container" style={{ paddingTop: 16 }}>
+          <InstallAppCard />
+        </div>
 
         <section className="section" id="rides">
           <div className="container">

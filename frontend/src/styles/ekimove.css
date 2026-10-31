@@ -1069,6 +1069,7 @@ button:disabled {
   display: inline-flex;
   align-items: center;
   gap: 10px;
+  min-height: 44px;
   text-decoration: none;
   color: var(--green-800);
 }
@@ -2339,4 +2340,101 @@ button:disabled {
   .app.has-bottom-bar .atona-widget {
     bottom: 192px;
   }
+}
+
+/* Comfortable tap targets for text links on touch screens. */
+@media (pointer: coarse) {
+  .site-footer a,
+  .text-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+
+  .footer-col {
+    gap: 0;
+  }
+}
+
+/* Installed app (PWA): keep headers clear of the phone's status bar and
+   notch. env() is 0 in a normal browser tab, so this changes nothing there. */
+.app-topbar,
+.site-header {
+  padding-top: env(safe-area-inset-top);
+}
+
+.auth-brand {
+  padding-top: calc(28px + env(safe-area-inset-top));
+}
+
+@media (max-width: 860px) {
+  .admin-sidebar {
+    padding-top: calc(16px + env(safe-area-inset-top));
+  }
+}
+
+/* Offline notice and install card */
+.offline-banner {
+  position: fixed;
+  top: calc(10px + env(safe-area-inset-top));
+  left: 0;
+  right: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: fit-content;
+  max-width: calc(100vw - 32px);
+  margin: 0 auto;
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--white);
+  font-size: 14px;
+  font-weight: 700;
+  box-shadow: var(--shadow-lg);
+}
+
+.install-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+  border-radius: var(--radius-lg);
+  background: var(--white);
+  box-shadow: inset 0 0 0 1.5px var(--green-200);
+}
+
+.offline-banner svg {
+  flex-shrink: 0;
+}
+
+.install-card img {
+  flex-shrink: 0;
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+}
+
+.install-card-body {
+  flex-grow: 1;
+  min-width: 0;
+}
+
+.install-card-title {
+  font-weight: 800;
+}
+
+.install-card-text {
+  margin-top: 2px;
+  font-size: 14px;
+  color: var(--ink-500);
+}
+
+.install-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
 }

@@ -100,6 +100,24 @@ Atọ́nà is EkiMove's chat guide, available to everyone on the homepage and on
 
 It never books rides, assigns drivers or confirms payments. To switch it on, set `ATONA_ENABLED=true` and `GROQ_API_KEY`; the chat button stays hidden until both are set (`GET /api/v1/atona/status`). Messages are rate-limited per account and per guest IP (`ATONA_*_MESSAGE_LIMIT`), using Redis when configured.
 
+## Installable app (PWA)
+The frontend is a Progressive Web App: people can add EkiMove to their phone's home screen and it opens full screen like a native app.
+
+- **Android / Chrome:** an "Install app" card appears on the homepage and passenger home; the browser menu also offers *Install app*.
+- **iPhone / Safari:** the card explains *Share → Add to Home Screen*.
+- The service worker (built by `vite-plugin-pwa`) caches only the app itself, so it opens instantly and works on a weak connection. Ride, fare and payment data always come live from the API and are never cached. New releases install in the background and apply on the next launch.
+- PWAs need HTTPS (Render provides it). Icons live in `frontend/public/brand/`.
+
+## Deploying the frontend on Render
+The frontend is a separate Render **Static Site** (`ekimove.onrender.com`), not part of `render.yaml`. Its settings should be:
+
+- **Branch:** `master`, with **Auto-Deploy** on
+- **Root directory:** `frontend`
+- **Build command:** `npm ci && npm run build`
+- **Publish directory:** `dist`
+- **Environment:** `VITE_API_BASE_URL=https://ekimove-api.onrender.com`
+- **Redirects/Rewrites:** source `/*`, destination `/index.html`, action **Rewrite**, so links such as `/login` or `/my-rides` open directly.
+
 ## Brand assets
 - Logo, app icon and favicon: `frontend/public/favicon.svg`, `frontend/public/brand/`
 - Design system (colours, type, components): `frontend/src/styles/ekimove.css`

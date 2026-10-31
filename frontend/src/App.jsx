@@ -11,6 +11,7 @@ import DriverApplicationPage from './pages/driver/DriverApplicationPage.jsx'
 import DriverStatusPage from './pages/driver/DriverStatusPage.jsx'
 import DriverTripsPage from './pages/driver/DriverTripsPage.jsx'
 import ProtectedRoute from './routes/ProtectedRoute.jsx'
+import OfflineBanner from './components/pwa/OfflineBanner.jsx'
 import AdminDriverVerificationPage from './pages/admin/AdminDriverVerificationPage.jsx'
 import AdminPaymentsPage from './pages/admin/AdminPaymentsPage.jsx'
 import AdminIncidentsPage from './pages/admin/AdminIncidentsPage.jsx'
@@ -19,36 +20,39 @@ import AdminLocationsPage from './pages/admin/AdminLocationsPage.jsx'
 
 export default function App() {
   return (
-    <Routes>
-      <Route path="/" element={<HomePage />} />
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/register" element={<RegisterPage />} />
-      <Route path="/driver/apply" element={<DriverApplicationPage />} />
+    <>
+      <OfflineBanner />
+      <Routes>
+        <Route path="/" element={<HomePage />} />
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
+        <Route path="/driver/apply" element={<DriverApplicationPage />} />
 
-      <Route element={<ProtectedRoute />}>
-        <Route path="/dashboard" element={<DashboardPage />} />
-        <Route path="/book-ride" element={<BookRidePage />} />
-        <Route path="/my-rides" element={<MyRidesPage />} />
-        <Route path="/payments" element={<PaymentsPage />} />
-      </Route>
+        <Route element={<ProtectedRoute />}>
+          <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/book-ride" element={<BookRidePage />} />
+          <Route path="/my-rides" element={<MyRidesPage />} />
+          <Route path="/payments" element={<PaymentsPage />} />
+        </Route>
 
-      <Route element={<ProtectedRoute requiredRole="super_admin" />}>
-        <Route path="/admin/dispatch" element={<AdminDispatchPage />} />
-        <Route path="/admin/payments" element={<AdminPaymentsPage />} />
-        <Route path="/admin/incidents" element={<AdminIncidentsPage />} />
-        <Route path="/admin/locations" element={<AdminLocationsPage />} />
-        <Route path="/admin/drivers" element={<AdminDriverVerificationPage />} />
-      </Route>
+        <Route element={<ProtectedRoute requiredRole="super_admin" />}>
+          <Route path="/admin/dispatch" element={<AdminDispatchPage />} />
+          <Route path="/admin/payments" element={<AdminPaymentsPage />} />
+          <Route path="/admin/incidents" element={<AdminIncidentsPage />} />
+          <Route path="/admin/locations" element={<AdminLocationsPage />} />
+          <Route path="/admin/drivers" element={<AdminDriverVerificationPage />} />
+        </Route>
 
-      <Route element={<ProtectedRoute requiredRole="driver" />}>
-        <Route path="/driver/status" element={<DriverStatusPage />} />
-        <Route path="/driver/trips" element={<DriverTripsPage />} />
-      </Route>
-      <Route path="/profile" element={<Navigate to="/dashboard" replace />} />
-      <Route path="/driver" element={<Navigate to="/driver/apply" replace />} />
-      <Route path="/admin" element={<Navigate to="/admin/dispatch" replace />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+        <Route element={<ProtectedRoute requiredRole="driver" />}>
+          <Route path="/driver/status" element={<DriverStatusPage />} />
+          <Route path="/driver/trips" element={<DriverTripsPage />} />
+        </Route>
+        <Route path="/profile" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/driver" element={<Navigate to="/driver/apply" replace />} />
+        <Route path="/admin" element={<Navigate to="/admin/dispatch" replace />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </>
   )
 }
 

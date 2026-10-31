@@ -4,6 +4,9 @@ import { BrowserRouter } from 'react-router-dom'
 import './styles/ekimove.css'
 
 import App from './App.jsx'
+import { captureInstallPrompt } from './hooks/useInstallPrompt.js'
+
+captureInstallPrompt()
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
