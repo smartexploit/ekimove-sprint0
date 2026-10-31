@@ -2670,3 +2670,22 @@ button:disabled {
   color: var(--ink-500);
   font-size: 13px;
 }
+
+/* Disabled buttons must look disabled, whatever their colour variant. */
+.btn:is(:disabled, [aria-disabled='true']),
+.btn:is(:disabled, [aria-disabled='true']):hover {
+  background: #e6ebe8;
+  color: var(--ink-400);
+  box-shadow: none;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.pay-steps {
+  margin: 0;
+  padding-left: 22px;
+  display: grid;
+  gap: 6px;
+  color: var(--ink-700);
+  font-size: 15px;
+}

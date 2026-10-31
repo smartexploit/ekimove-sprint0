@@ -84,7 +84,12 @@ export default function PaymentsPage() {
       .then((data) => {
         if (!active) return
         const assigned = Array.isArray(data)
-          ? data.filter((ride) => ride.assigned_ride_id && ride.ride_status !== 'cancelled')
+          ? data.filter(
+              // Only rides still waiting for pickup can be paid for.
+              (ride) =>
+                ride.assigned_ride_id &&
+                ['assigned', 'driver_arriving'].includes(ride.ride_status),
+            )
           : []
         setRides({ loaded: true, items: assigned })
       })
@@ -137,7 +142,14 @@ export default function PaymentsPage() {
       const result = await action(id)
       setPayment(result.payment || result)
       setReference((result.payment || result).transfer_reference || '')
-      setMessage('Payment information updated.')
+      const updated = result.payment || result
+      setMessage(
+        updated.status === 'pending'
+          ? 'Now enter your transfer reference below.'
+          : updated.status === 'awaiting_confirmation'
+            ? 'Reference received.'
+            : 'Payment status updated.',
+      )
     } catch (err) {
       setError(err.message || 'Unable to process the payment request.')
     } finally {
@@ -272,8 +284,7 @@ export default function PaymentsPage() {
     !instantOn &&
     currentPayment &&
     currentPayment.method !== 'interswitch' &&
-    currentPayment.status !== 'confirmed' &&
-    currentPayment.status !== 'refunded'
+    ['pending', 'rejected'].includes(currentPayment.status)
 
   return (
     <AppShell
@@ -389,15 +400,65 @@ export default function PaymentsPage() {
                   </Alert>
                 )}
                 <BankDetails amount={amountDue} />
+                {!effectiveRideId ? (
+                  <Alert tone="warning">Choose the ride you're paying for at the top first.</Alert>
+                ) : currentPayment?.status === 'confirmed' ? (
+                  <Alert tone="success">This ride is paid. Your driver can start the trip.</Alert>
+                ) : currentPayment?.status === 'rejected' ? (
+                  <Alert tone="warning">
+                    The EkiMove team couldn't match that reference to money in the account. Check the
+                    reference on your receipt and submit it again, or contact support.
+                  </Alert>
+                ) : currentPayment?.status === 'pending' ? (
+                  <Alert tone="info">Last step: enter your transfer reference below and submit it.</Alert>
+                ) : currentPayment?.status === 'awaiting_confirmation' ? (
+                  <Alert tone="info">
+                    Thanks. We've got your reference ({currentPayment.transfer_reference}). The EkiMove
+                    team will confirm as soon as they see the money in the account, and your driver can
+                    then start the trip. Tap “Check status” to see if it's done.
+                  </Alert>
+                ) : (
+                  <ol className="pay-steps">
+                    <li>Send exactly {amountDue != null ? formatNaira(amountDue) : 'the fare'} to the account above from your bank app.</li>
+                    <li>Tap <strong>I've sent the money</strong>.</li>
+                    <li>Enter the transfer reference from your bank app or receipt, then submit it.</li>
+                  </ol>
+                )}
+                {needsReference && (
+                  <form className="card stack" onSubmit={handleSubmitReference}>
+                    <label className="field" htmlFor="transfer-reference">
+                      <span className="field-label">Transfer reference</span>
+                      <input
+                        id="transfer-reference"
+                        className="input"
+                        type="text"
+                        minLength="3"
+                        maxLength="120"
+                        value={reference}
+                        onChange={(event) => setReference(event.target.value)}
+                        placeholder="From your bank app or receipt"
+                        required
+                      />
+                      <span className="field-hint">
+                        Usually called “Reference”, “Session ID” or “Transaction ID” on your receipt.
+                      </span>
+                    </label>
+                    <button type="submit" className="btn btn-accent" disabled={busy}>
+                      {busy ? 'Submitting…' : 'Submit reference'}
+                    </button>
+                  </form>
+                )}
                 <div className="row">
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    disabled={busy || !effectiveRideId}
-                    onClick={() => runAction(initiateRidePayment)}
-                  >
-                    {busy ? 'Please wait…' : "I'm paying by transfer"}
-                  </button>
+                  {!currentPayment && (
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      disabled={busy || !effectiveRideId}
+                      onClick={() => runAction(initiateRidePayment)}
+                    >
+                      {busy ? 'Please wait…' : "I've sent the money"}
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="btn"
@@ -483,27 +544,6 @@ export default function PaymentsPage() {
               )}
             </div>
 
-            {needsReference && (
-              <form className="card stack" onSubmit={handleSubmitReference}>
-                <label className="field" htmlFor="transfer-reference">
-                  <span className="field-label">Transfer reference</span>
-                  <input
-                    id="transfer-reference"
-                    className="input"
-                    type="text"
-                    minLength="3"
-                    maxLength="120"
-                    value={reference}
-                    onChange={(event) => setReference(event.target.value)}
-                    placeholder="From your bank app or receipt"
-                    required
-                  />
-                </label>
-                <button type="submit" className="btn btn-accent" disabled={busy}>
-                  {busy ? 'Submitting…' : 'Submit for verification'}
-                </button>
-              </form>
-            )}
 
             <Alert tone="warning">
               {currentPayment?.method === 'interswitch' || method === 'interswitch'
