@@ -101,6 +101,10 @@ class Ride(Base):
     agreed_fare: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, server_default=func.now())
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancelled_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=True)
+    cancellation_fee: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
 
 
 class Payment(Base):
@@ -120,6 +124,51 @@ class Payment(Base):
     status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False, index=True)
     confirmed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=True)
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Refund owed back to the passenger (e.g. a cancelled paid ride).
+    # refund_status: None, "due" or "paid".
+    refund_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    refund_status: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
+    refund_reference: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    refunded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PassengerVirtualAccount(Base):
+    """A passenger's personal bank account number for paying rides."""
+
+    __tablename__ = "passenger_virtual_accounts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), unique=True, index=True)
+    provider: Mapped[str] = mapped_column(String(24), default="paystack", nullable=False)
+    customer_code: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    account_number: Mapped[str] = mapped_column(String(20), unique=True, index=True)
+    account_name: Mapped[str] = mapped_column(String(160))
+    bank_name: Mapped[str] = mapped_column(String(120))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class BankDeposit(Base):
+    """A transfer received into a passenger's virtual account."""
+
+    __tablename__ = "bank_deposits"
+    __table_args__ = (
+        CheckConstraint("status IN ('matched', 'unmatched', 'resolved')", name="ck_bank_deposits_status"),
+        CheckConstraint("amount >= 0", name="ck_bank_deposits_amount_nonnegative"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    provider: Mapped[str] = mapped_column(String(24), default="paystack", nullable=False)
+    reference: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=True, index=True)
+    account_number: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    sender_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    payment_id: Mapped[int | None] = mapped_column(ForeignKey("payments.id", ondelete="RESTRICT"), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(16), default="unmatched", nullable=False, index=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resolved_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

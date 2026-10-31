@@ -90,6 +90,17 @@ Until all three bank fields are set, the payments page tells passengers the acco
 
 Driver plate numbers come from each driver's application (`plate_number` on the vehicle record). Passengers see the assigned driver's first name, last initial and plate on My rides once a ride is assigned.
 
+## Instant payments and cancellations
+Passengers pay by bank transfer into a **personal EkiMove account number** (a Paystack dedicated virtual account), so nobody has to type a reference or wait for staff.
+
+1. On *Payments* the passenger agrees once and gets an account number that stays theirs.
+2. Paystack sends a signed `charge.success` webhook to `POST /api/v1/payments/paystack/webhook`. The signature is checked, the transaction is re-verified with Paystack, and the deposit is matched to the passenger's oldest unpaid ride with exactly that fare. The payment is confirmed and the driver can start the trip. Webhook replays are ignored.
+3. Anything that doesn't match (wrong amount, no unpaid ride, unknown account) is listed for admins under **Deposits to check** on *Admin → Payments*, where it can be matched to a ride or closed after refunding.
+
+**Cancelling:** passengers can cancel from *My rides*. It's free before a driver is assigned and for `CANCELLATION_FREE_SECONDS` after. Later, while the driver is still on the way, a paid ride keeps `CANCELLATION_FEE_MOTORCYCLE` / `CANCELLATION_FEE_CAR` for the driver's time and the rest becomes a refund listed under **Refunds to send**. Unpaid rides cancel free. Started trips can't be cancelled (use SOS or support).
+
+**To go live:** EkiMove needs a registered business on Paystack with dedicated virtual accounts enabled (some business types must validate the customer's BVN first; Paystack's default limit is 1,000 accounts). Set `PAYSTACK_SECRET_KEY` on the API and add the webhook URL in the Paystack dashboard. Until then the app keeps the existing manual bank-transfer and Interswitch flows. Refunds are recorded in the app but sent by hand from the bank for now.
+
 ## Atọ́nà assistant
 Atọ́nà is EkiMove's chat guide, available to everyone on the homepage and on every passenger and driver screen. It chats naturally in English or Nigerian Pidgin, and answers EkiMove questions from live data through tools instead of guessing:
 

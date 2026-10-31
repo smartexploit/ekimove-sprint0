@@ -72,6 +72,32 @@ class Settings(BaseSettings):
     interswitch_requery_base_url: str = "https://sandbox.interswitchng.com/collections/api/v1/gettransaction.json"
     interswitch_live_requery_base_url: str = "https://webpay.interswitchng.com/collections/api/v1/gettransaction.json"
 
+    # Paystack dedicated virtual accounts: every passenger gets a personal
+    # account number, and transfers to it confirm payments automatically
+    # through a signed webhook. Disabled until the secret key is set.
+    paystack_secret_key: str | None = None
+    paystack_base_url: str = "https://api.paystack.co"
+    # "wema-bank" or "titan-paystack" live; "test-bank" with test keys.
+    paystack_preferred_bank: str = "wema-bank"
+    # Paystack customers need an email; passengers sign up with a phone
+    # number, so a stable per-account address on this domain is used.
+    paystack_customer_email_domain: str = "passengers.ekimove.app"
+
+    @field_validator("paystack_secret_key", mode="before")
+    @classmethod
+    def clean_paystack_secret_key(cls, value):
+        if value is None:
+            return None
+        cleaned = str(value).strip()
+        return cleaned or None
+
+    # Cancellation policy. Cancelling is free before a driver is assigned
+    # and for this many seconds after; later cancellations of a paid ride
+    # keep a fee for the driver's time and refund the rest.
+    cancellation_free_seconds: int = 120
+    cancellation_fee_motorcycle: int = 200
+    cancellation_fee_car: int = 500
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

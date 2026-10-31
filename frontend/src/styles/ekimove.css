@@ -2497,3 +2497,71 @@ button:disabled {
     padding-top: 28px;
   }
 }
+
+/* Instant transfers (personal account number) */
+.instant-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  flex-shrink: 0;
+  background: var(--green-800);
+  color: var(--gold-500);
+}
+
+.instant-title {
+  font-size: 18px;
+  line-height: 1.25;
+}
+
+.instant-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--gold-100, #fdf3dc);
+  color: var(--ink-700);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.instant-status svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.instant-status.is-paid {
+  background: var(--green-100, #e3f1ea);
+  color: var(--green-800);
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
+  }
+}
+
+/* Cancel a ride */
+.cancel-panel {
+  border: 1px solid var(--laterite-100);
+  background: #fff8f5;
+  border-radius: 14px;
+  padding: 14px;
+}
+
+.cancel-panel .rows {
+  margin: 10px 0;
+}
+
+.cancel-panel,
+.cancel-panel h3,
+.cancel-panel dt,
+.cancel-panel dd {
+  color: var(--ink);
+}

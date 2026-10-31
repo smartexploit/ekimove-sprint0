@@ -34,6 +34,11 @@ def payment_result(payment: Payment) -> dict:
         "method": payment.method,
         "transfer_reference": payment.transfer_reference,
         "status": payment.status,
+        "refund_status": payment.refund_status,
+        "refund_amount": (
+            str(payment.refund_amount)
+            if payment.refund_amount is not None else None
+        ),
         "confirmed_at": (
             payment.confirmed_at.isoformat()
             if payment.confirmed_at else None
@@ -236,6 +241,12 @@ def reconcile_payment(
         payment.confirmed_by_user_id = admin.id
         payment.confirmed_at = datetime.now(timezone.utc)
         action = "payment.confirmed"
+        # Money that arrives for a ride the passenger already cancelled
+        # is owed back in full.
+        paid_ride = db.get(Ride, payment.ride_id)
+        if paid_ride is not None and paid_ride.status == "cancelled":
+            payment.refund_amount = payment.amount
+            payment.refund_status = "due"
     else:
         payment.status = "rejected"
         payment.confirmed_by_user_id = None

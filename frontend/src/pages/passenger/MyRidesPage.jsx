@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Plus, RefreshCw, Route } from 'lucide-react'
 import AppShell from '../../layouts/AppShell.jsx'
@@ -6,6 +6,7 @@ import Alert from '../../components/ui/Alert.jsx'
 import StatusBadge from '../../components/ui/StatusBadge.jsx'
 import { vehicleLabel } from '../../utils/vehicles.js'
 import SOSButton from '../../components/SOSButton.jsx'
+import CancelRide from '../../components/CancelRide.jsx'
 import { apiRequest } from '../../services/authService.js'
 import { formatNaira, formatShortDate, initials } from '../../utils/format.js'
 import {
@@ -15,7 +16,7 @@ import {
   rideStatus,
 } from '../../utils/rides.js'
 
-function LiveRide({ ride }) {
+function LiveRide({ ride, onChanged }) {
   const status = rideStatus(ride)
   const step = progressIndex(status)
 
@@ -79,12 +80,18 @@ function LiveRide({ ride }) {
 
       {ride.assigned_ride_id && (
         <div className="row">
-          <Link className="btn" to={`/payments?rideId=${ride.assigned_ride_id}`}>
-            Pay for ride
-          </Link>
+          {ride.payment_status === 'confirmed' ? (
+            <StatusBadge status="confirmed" kind="payment" />
+          ) : (
+            <Link className="btn" to={`/payments?rideId=${ride.assigned_ride_id}`}>
+              Pay for ride
+            </Link>
+          )}
           <SOSButton rideId={ride.assigned_ride_id} rideStatus={ride.ride_status} />
         </div>
       )}
+
+      <CancelRide requestId={ride.id} status={status} onCancelled={onChanged} />
     </section>
   )
 }
@@ -180,7 +187,13 @@ export default function MyRidesPage() {
         <div className="two-col">
           <div className="stack">
             {activeRides.length > 0 ? (
-              activeRides.map((ride) => <LiveRide key={ride.id} ride={ride} />)
+              activeRides.map((ride) => (
+                <LiveRide
+                  key={ride.id}
+                  ride={ride}
+                  onChanged={() => setRefreshKey((value) => value + 1)}
+                />
+              ))
             ) : (
               <div className="card stack stack-sm">
                 <h2 className="section-title">No ride in progress</h2>
@@ -212,6 +225,14 @@ export default function MyRidesPage() {
                         {vehicleLabel(ride.vehicle_type)} · {formatShortDate(ride.created_at)} ·{' '}
                         {formatNaira(ride.quoted_fare, { decimals: 0 })}
                       </p>
+                      {ride.refund_status && (
+                        <p className="list-item-meta">
+                          {ride.refund_status === 'paid' ? 'Refunded' : 'Refund on the way'}:{' '}
+                          {formatNaira(ride.refund_amount, { decimals: 0 })}
+                          {Number(ride.cancellation_fee) > 0 &&
+                            ` · fee ${formatNaira(ride.cancellation_fee, { decimals: 0 })}`}
+                        </p>
+                      )}
                     </div>
                     <StatusBadge status={rideStatus(ride)} />
                   </li>

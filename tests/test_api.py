@@ -2700,3 +2700,379 @@ def test_atona_never_creates_rides_or_payments(client, atona):
 def test_atona_legacy_endpoints_are_retired(client):
     for path in ("/api/v1/atona/interpret", "/api/v1/atona/geography"):
         assert client.post(path, json={"message": "Hello there"}).status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Phase 1: instant payments (Paystack virtual accounts) and cancellations
+# ---------------------------------------------------------------------------
+
+import hashlib
+import hmac
+from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
+
+import app.instant_payments as instant_payments_module
+from app.models import BankDeposit, PassengerVirtualAccount
+
+PAYSTACK_TEST_SECRET = "sk_test_ekimove_unit"
+
+
+@contextmanager
+def session_for(client):
+    generator = client.app.dependency_overrides[get_db]()
+    db = next(generator)
+    try:
+        yield db
+    finally:
+        generator.close()
+
+
+class FakePaystack:
+    """Stands in for the Paystack API; records every call."""
+
+    def __init__(self):
+        self.calls = []
+        self.transactions = {}
+        self.fail_dedicated = False
+
+    def __call__(self, method, url, json=None, headers=None, timeout=None):
+        self.calls.append((method, url, json))
+        assert headers["Authorization"] == f"Bearer {PAYSTACK_TEST_SECRET}"
+        path = url.split("api.paystack.co", 1)[1]
+        if path == "/customer":
+            return _FakeResponse(200, {"status": True, "data": {"customer_code": "CUS_test1"}})
+        if path == "/dedicated_account":
+            if self.fail_dedicated:
+                return _FakeResponse(400, {"status": False, "message": "BVN validation required"})
+            return _FakeResponse(200, {"status": True, "data": {
+                "account_number": "9930000001", "account_name": "EKIMOVE/TEST PASSENGER",
+                "bank": {"name": "Wema Bank"}, "active": True}})
+        if path.startswith("/transaction/verify/"):
+            reference = path.rsplit("/", 1)[1]
+            if reference not in self.transactions:
+                return _FakeResponse(404, {"status": False, "message": "Transaction not found"})
+            return _FakeResponse(200, {"status": True, "data": self.transactions[reference]})
+        raise AssertionError(f"unexpected Paystack call {method} {path}")
+
+
+class _FakeResponse:
+    def __init__(self, status_code, body):
+        self.status_code = status_code
+        self._body = body
+
+    def json(self):
+        return self._body
+
+
+@pytest.fixture
+def paystack(monkeypatch):
+    fake = FakePaystack()
+    monkeypatch.setattr(settings, "paystack_secret_key", PAYSTACK_TEST_SECRET)
+    monkeypatch.setattr(settings, "paystack_base_url", "https://api.paystack.co")
+    monkeypatch.setattr(instant_payments_module.requests, "request", fake)
+    return fake
+
+
+def _signed_webhook(client, event):
+    raw = json.dumps(event).encode()
+    signature = hmac.new(PAYSTACK_TEST_SECRET.encode(), raw, hashlib.sha512).hexdigest()
+    return client.post(
+        "/api/v1/payments/paystack/webhook",
+        content=raw,
+        headers={"x-paystack-signature": signature, "Content-Type": "application/json"},
+    )
+
+
+def _deposit_event(paystack, reference, naira, customer_code="CUS_test1"):
+    paystack.transactions[reference] = {
+        "status": "success", "amount": int(Decimal(naira) * 100), "currency": "NGN",
+        "customer": {"customer_code": customer_code},
+    }
+    return {
+        "event": "charge.success",
+        "data": {
+            "reference": reference, "channel": "dedicated_nuban",
+            "amount": int(Decimal(naira) * 100),
+            "customer": {"customer_code": customer_code},
+            "authorization": {"receiver_bank_account_number": "9930000001",
+                              "sender_name": "TEST PASSENGER"},
+        },
+    }
+
+
+def _ride_fare(client, headers, request_id):
+    rides = client.get("/api/v1/ride-requests/my-rides", headers=headers).json()
+    return Decimal(str(next(r for r in rides if r["id"] == request_id)["quoted_fare"]))
+
+
+def _create_virtual_account(client, headers):
+    response = client.post("/api/v1/payments/virtual-account", json={"consent": True}, headers=headers)
+    assert response.status_code == 201, response.text
+    return response.json()["account"]
+
+
+def test_virtual_account_is_off_until_paystack_is_configured(client, monkeypatch):
+    monkeypatch.setattr(settings, "paystack_secret_key", None)
+    headers = login(client, "08000000001", "Passenger-Test-Password-1!")
+    response = client.get("/api/v1/payments/virtual-account", headers=headers)
+    assert response.json() == {"enabled": False, "account": None}
+    response = client.post("/api/v1/payments/virtual-account", json={"consent": True}, headers=headers)
+    assert response.status_code == 503
+    assert client.get("/api/v1/business-info").json()["instant_transfers"] == {"enabled": False}
+
+
+def test_passenger_gets_one_personal_account_with_consent(client, paystack):
+    headers = login(client, "08000000001", "Passenger-Test-Password-1!")
+    assert client.post("/api/v1/payments/virtual-account", json={"consent": False},
+                       headers=headers).status_code == 422
+    account = _create_virtual_account(client, headers)
+    assert account == {"bank_name": "Wema Bank", "account_number": "9930000001",
+                       "account_name": "EKIMOVE/TEST PASSENGER", "active": True}
+    customer_call = paystack.calls[0]
+    assert customer_call[2]["phone"] == "+2348000000001"
+    assert customer_call[2]["email"].endswith("@passengers.ekimove.app")
+    # Asking again returns the same account without calling Paystack.
+    calls = len(paystack.calls)
+    again = client.post("/api/v1/payments/virtual-account", json={"consent": True}, headers=headers)
+    assert again.json()["account"]["account_number"] == "9930000001"
+    assert len(paystack.calls) == calls
+    assert client.get("/api/v1/payments/virtual-account", headers=headers).json()["account"] == account
+
+
+def test_virtual_account_reports_paystack_refusal(client, paystack):
+    paystack.fail_dedicated = True
+    headers = login(client, "08000000001", "Passenger-Test-Password-1!")
+    response = client.post("/api/v1/payments/virtual-account", json={"consent": True}, headers=headers)
+    assert response.status_code == 502
+    assert "BVN validation required" in response.json()["detail"]
+
+
+def test_drivers_and_admins_cannot_get_passenger_accounts(client, paystack):
+    headers = login(client, "08000000004", "SuperAdmin-Test-Password-4!")
+    assert client.get("/api/v1/payments/virtual-account", headers=headers).status_code == 403
+
+
+def test_webhook_rejects_a_bad_signature(client, paystack):
+    response = client.post(
+        "/api/v1/payments/paystack/webhook",
+        content=b'{"event":"charge.success"}',
+        headers={"x-paystack-signature": "forged", "Content-Type": "application/json"},
+    )
+    assert response.status_code == 401
+
+
+def test_transfer_to_personal_account_confirms_the_ride_automatically(client, paystack):
+    passenger_headers, admin_headers, request_id = create_assigned_ride(client)
+    ride_id = get_ride_id_from_request(client, request_id, passenger_headers)
+    fare = _ride_fare(client, passenger_headers, request_id)
+    _create_virtual_account(client, passenger_headers)
+
+    # No "initiate" step needed: the deposit creates and confirms the payment.
+    response = _signed_webhook(client, _deposit_event(paystack, "T-auto-1", fare))
+    assert response.status_code == 200, response.text
+    assert response.json() == {"status": "matched"}
+
+    payment = client.get(f"/api/v1/payments/rides/{ride_id}", headers=passenger_headers).json()
+    assert payment["status"] == "confirmed"
+    assert payment["amount"] == f"{fare:.2f}"
+    rides = client.get("/api/v1/ride-requests/my-rides", headers=passenger_headers).json()
+    assert next(r for r in rides if r["id"] == request_id)["payment_status"] == "confirmed"
+
+    # Replays of the same webhook change nothing.
+    assert _signed_webhook(client, _deposit_event(paystack, "T-auto-1", fare)).json() == {"status": "duplicate"}
+    with session_for(client) as db:
+        assert db.query(BankDeposit).count() == 1
+
+    # The driver can now start the trip.
+    driver_headers = login(client, "08000000006", "Driver-Test-Password-5!")
+    assert client.patch(f"/api/v1/driver/rides/{ride_id}/status", json={"status": "driver_arriving"},
+                        headers=driver_headers).status_code == 200
+    assert client.patch(f"/api/v1/driver/rides/{ride_id}/status", json={"status": "in_progress"},
+                        headers=driver_headers).status_code == 200
+
+
+def test_webhook_confirms_an_existing_pending_payment(client, paystack):
+    passenger_headers, _, request_id = create_assigned_ride(client)
+    ride_id = get_ride_id_from_request(client, request_id, passenger_headers)
+    fare = _ride_fare(client, passenger_headers, request_id)
+    _create_virtual_account(client, passenger_headers)
+    created = client.post(f"/api/v1/payments/rides/{ride_id}/initiate", headers=passenger_headers).json()
+    _signed_webhook(client, _deposit_event(paystack, "T-pending-1", fare))
+    payment = client.get(f"/api/v1/payments/rides/{ride_id}", headers=passenger_headers).json()
+    assert payment["id"] == created["id"]
+    assert payment["status"] == "confirmed"
+
+
+def test_wrong_amount_is_kept_for_admin_review_then_resolved(client, paystack):
+    passenger_headers, admin_headers, request_id = create_assigned_ride(client)
+    ride_id = get_ride_id_from_request(client, request_id, passenger_headers)
+    fare = _ride_fare(client, passenger_headers, request_id)
+    _create_virtual_account(client, passenger_headers)
+
+    response = _signed_webhook(client, _deposit_event(paystack, "T-short-1", fare - 100))
+    assert response.json() == {"status": "unmatched"}
+    payment = client.get(f"/api/v1/payments/rides/{ride_id}", headers=passenger_headers)
+    assert payment.status_code == 404  # nothing was confirmed
+
+    deposits = client.get("/api/v1/admin/deposits", headers=admin_headers).json()
+    assert len(deposits) == 1
+    deposit = deposits[0]
+    assert deposit["passenger"]["phone"] == "08000000001"
+    assert deposit["amount"] == f"{fare - 100:.2f}"
+
+    mismatch = client.post(f"/api/v1/admin/deposits/{deposit['id']}/match",
+                           json={"ride_id": ride_id, "reason": "Passenger called"}, headers=admin_headers)
+    assert mismatch.status_code == 409
+
+    resolved = client.post(f"/api/v1/admin/deposits/{deposit['id']}/resolve",
+                           json={"reason": "Refunded to sender"}, headers=admin_headers)
+    assert resolved.status_code == 200
+    assert resolved.json()["status"] == "resolved"
+    assert client.get("/api/v1/admin/deposits", headers=admin_headers).json() == []
+
+
+def test_admin_can_match_a_deposit_from_an_unknown_account(client, paystack):
+    passenger_headers, admin_headers, request_id = create_assigned_ride(client)
+    ride_id = get_ride_id_from_request(client, request_id, passenger_headers)
+    fare = _ride_fare(client, passenger_headers, request_id)
+    response = _signed_webhook(client, _deposit_event(paystack, "T-unknown-1", fare, customer_code="CUS_other"))
+    assert response.json() == {"status": "unmatched"}
+    deposit = client.get("/api/v1/admin/deposits", headers=admin_headers).json()[0]
+    assert deposit["passenger"] is None
+    matched = client.post(f"/api/v1/admin/deposits/{deposit['id']}/match",
+                          json={"ride_id": ride_id, "reason": "Checked bank statement"}, headers=admin_headers)
+    assert matched.status_code == 200, matched.text
+    assert matched.json()["ride_id"] == ride_id
+    payment = client.get(f"/api/v1/payments/rides/{ride_id}", headers=passenger_headers).json()
+    assert payment["status"] == "confirmed"
+
+
+def test_webhook_ignores_unverified_and_unrelated_events(client, paystack):
+    assert _signed_webhook(client, {"event": "transfer.success", "data": {}}).json() == {"status": "ignored"}
+    event = _deposit_event(paystack, "T-fail-1", 1000)
+    paystack.transactions["T-fail-1"]["status"] = "failed"
+    assert _signed_webhook(client, event).json() == {"status": "ignored"}
+    event = _deposit_event(paystack, "T-missing-1", 1000)
+    del paystack.transactions["T-missing-1"]
+    assert _signed_webhook(client, event).status_code == 503  # Paystack will retry
+
+
+def test_cancelling_before_a_driver_is_assigned_is_free(client):
+    headers = login(client, "08000000001", "Passenger-Test-Password-1!")
+    request_id = client.post("/api/v1/ride-requests", json=ride_payload(), headers=headers).json()["id"]
+    preview = client.get(f"/api/v1/ride-requests/{request_id}/cancel-preview", headers=headers).json()
+    assert preview["can_cancel"] is True and preview["fee"] == "0.00"
+    response = client.post(f"/api/v1/ride-requests/{request_id}/cancel", json={"reason": "Changed plans"},
+                           headers=headers)
+    assert response.status_code == 200
+    rides = client.get("/api/v1/ride-requests/my-rides", headers=headers).json()
+    assert next(r for r in rides if r["id"] == request_id)["status"] == "cancelled"
+    again = client.post(f"/api/v1/ride-requests/{request_id}/cancel", headers=headers)
+    assert again.status_code == 409
+
+
+def test_cancelling_inside_the_free_window_refunds_everything(client, paystack):
+    passenger_headers, admin_headers, request_id = create_assigned_ride(client)
+    ride_id = get_ride_id_from_request(client, request_id, passenger_headers)
+    fare = _ride_fare(client, passenger_headers, request_id)
+    _create_virtual_account(client, passenger_headers)
+    _signed_webhook(client, _deposit_event(paystack, "T-free-1", fare))
+    response = client.post(f"/api/v1/ride-requests/{request_id}/cancel", headers=passenger_headers)
+    assert response.status_code == 200
+    assert response.json()["fee"] == "0.00"
+    assert response.json()["refund"] == f"{fare:.2f}"
+    refunds = client.get("/api/v1/admin/refunds", headers=admin_headers).json()
+    assert [r["ride_id"] for r in refunds] == [ride_id]
+    assert refunds[0]["has_payment_account"] is True
+
+
+def test_late_cancellation_of_a_paid_ride_keeps_the_fee(client, paystack, monkeypatch):
+    monkeypatch.setattr(settings, "cancellation_fee_car", 500)
+    passenger_headers, admin_headers, request_id = create_assigned_ride(client)
+    ride_id = get_ride_id_from_request(client, request_id, passenger_headers)
+    fare = _ride_fare(client, passenger_headers, request_id)
+    _create_virtual_account(client, passenger_headers)
+    _signed_webhook(client, _deposit_event(paystack, "T-late-1", fare))
+    with session_for(client) as db:
+        ride = db.get(Ride, ride_id)
+        ride.assigned_at = datetime.now(timezone.utc) - timedelta(minutes=10)
+        db.commit()
+
+    preview = client.get(f"/api/v1/ride-requests/{request_id}/cancel-preview", headers=passenger_headers).json()
+    expected_fee = min(Decimal("500.00"), fare)
+    assert preview["fee"] == f"{expected_fee:.2f}"
+    assert preview["refund"] == f"{fare - expected_fee:.2f}"
+
+    response = client.post(f"/api/v1/ride-requests/{request_id}/cancel", headers=passenger_headers)
+    assert response.status_code == 200
+    rides = client.get("/api/v1/ride-requests/my-rides", headers=passenger_headers).json()
+    mine = next(r for r in rides if r["id"] == request_id)
+    assert mine["ride_status"] == "cancelled"
+    assert mine["cancellation_fee"] == f"{expected_fee:.2f}"
+    assert mine["refund_status"] == ("due" if fare > expected_fee else None)
+
+    if fare > expected_fee:
+        refund = client.get("/api/v1/admin/refunds", headers=admin_headers).json()[0]
+        paid = client.post(f"/api/v1/admin/payments/{refund['payment_id']}/refund-paid",
+                           json={"refund_reference": "TRF-123"}, headers=admin_headers)
+        assert paid.status_code == 200
+        assert paid.json()["refund_status"] == "paid"
+        assert client.get("/api/v1/admin/refunds", headers=admin_headers).json() == []
+        # Partial refund: the payment itself stays confirmed (fee kept).
+        payment = client.get(f"/api/v1/payments/rides/{ride_id}", headers=passenger_headers).json()
+        assert payment["status"] == "confirmed"
+
+
+def test_late_cancellation_of_an_unpaid_ride_is_free(client):
+    passenger_headers, _, request_id = create_assigned_ride(client)
+    ride_id = get_ride_id_from_request(client, request_id, passenger_headers)
+    with session_for(client) as db:
+        db.get(Ride, ride_id).assigned_at = datetime.now(timezone.utc) - timedelta(minutes=10)
+        db.commit()
+    response = client.post(f"/api/v1/ride-requests/{request_id}/cancel", headers=passenger_headers)
+    assert response.status_code == 200
+    assert response.json()["fee"] == "0.00"
+
+
+def test_cancelled_rides_cannot_be_driven_or_paid(client):
+    passenger_headers, _, request_id = create_assigned_ride(client)
+    ride_id = get_ride_id_from_request(client, request_id, passenger_headers)
+    client.post(f"/api/v1/ride-requests/{request_id}/cancel", headers=passenger_headers)
+    driver_headers = login(client, "08000000006", "Driver-Test-Password-5!")
+    assert client.patch(f"/api/v1/driver/rides/{ride_id}/status", json={"status": "driver_arriving"},
+                        headers=driver_headers).status_code == 409
+    assert client.post(f"/api/v1/payments/rides/{ride_id}/initiate",
+                       headers=passenger_headers).status_code == 409
+
+
+def test_trip_in_progress_cannot_be_cancelled(client):
+    passenger_headers, _, request_id = create_assigned_ride(client)
+    ride_id = get_ride_id_from_request(client, request_id, passenger_headers)
+    with session_for(client) as db:
+        db.get(Ride, ride_id).status = "in_progress"
+        db.commit()
+    preview = client.get(f"/api/v1/ride-requests/{request_id}/cancel-preview", headers=passenger_headers).json()
+    assert preview["can_cancel"] is False
+    assert client.post(f"/api/v1/ride-requests/{request_id}/cancel", headers=passenger_headers).status_code == 409
+
+
+def test_other_passengers_cannot_cancel_my_ride(client):
+    _, _, request_id = create_assigned_ride(client)
+    other = login(client, "08000000004", "SuperAdmin-Test-Password-4!")
+    assert client.post(f"/api/v1/ride-requests/{request_id}/cancel", headers=other).status_code == 403
+
+
+def test_manual_confirmation_after_cancel_owes_a_full_refund(client):
+    passenger_headers, admin_headers, request_id = create_assigned_ride(client)
+    ride_id = get_ride_id_from_request(client, request_id, passenger_headers)
+    client.post(f"/api/v1/payments/rides/{ride_id}/initiate", headers=passenger_headers)
+    client.post(f"/api/v1/payments/rides/{ride_id}/submit-transfer",
+                json={"transfer_reference": "BANK-REF-77"}, headers=passenger_headers)
+    client.post(f"/api/v1/ride-requests/{request_id}/cancel", headers=passenger_headers)
+    payment = client.get(f"/api/v1/payments/rides/{ride_id}", headers=passenger_headers).json()
+    response = client.post(f"/api/v1/admin/payments/{payment['id']}/reconcile",
+                           json={"decision": "confirm", "reason": "Seen on statement"}, headers=admin_headers)
+    assert response.status_code == 200, response.text
+    payment = client.get(f"/api/v1/payments/rides/{ride_id}", headers=passenger_headers).json()
+    assert payment["refund_status"] == "due"
+    assert payment["refund_amount"] == payment["amount"]

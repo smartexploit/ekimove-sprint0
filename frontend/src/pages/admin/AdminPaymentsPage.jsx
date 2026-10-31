@@ -1,8 +1,10 @@
-﻿import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { RefreshCw, Wallet } from 'lucide-react'
 import AdminShell from '../../layouts/AdminShell.jsx'
 import Alert from '../../components/ui/Alert.jsx'
 import StatusBadge from '../../components/ui/StatusBadge.jsx'
+import DepositsPanel from '../../components/admin/DepositsPanel.jsx'
+import RefundsPanel from '../../components/admin/RefundsPanel.jsx'
 import { apiRequest } from '../../services/authService.js'
 import { formatDateTime, formatNaira } from '../../utils/format.js'
 
@@ -86,8 +88,8 @@ export default function AdminPaymentsPage() {
 
   return (
     <AdminShell
-      title="Payment reconciliation"
-      description="Confirm bank-transfer payments only after checking the money has actually arrived."
+      title="Payments"
+      description="Transfers to passenger accounts confirm on their own. Handle the exceptions here."
       actions={
         <button type="button" className="btn btn-sm" onClick={() => loadPayments()} disabled={loading}>
           <RefreshCw size={16} aria-hidden="true" /> {loading ? 'Loading…' : 'Refresh'}
@@ -109,7 +111,7 @@ export default function AdminPaymentsPage() {
         ) : payments.length === 0 ? (
           <div className="card empty">
             <span className="empty-icon"><Wallet size={28} aria-hidden="true" /></span>
-            <h2>Nothing to reconcile</h2>
+            <h2>No manual transfers to check</h2>
             <p className="muted">No payments are waiting for confirmation.</p>
           </div>
         ) : (
@@ -187,6 +189,9 @@ export default function AdminPaymentsPage() {
             ))}
           </div>
         )}
+
+        <DepositsPanel />
+        <RefundsPanel />
       </div>
     </AdminShell>
   )

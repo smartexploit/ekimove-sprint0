@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 from typing import Literal
 from app.payments import router as payments_router
 from app.interswitch_payments import router as interswitch_payments_router
+from app.instant_payments import instant_transfers_enabled, router as instant_payments_router
+from app.cancellations import router as cancellations_router
 from decimal import Decimal, ROUND_HALF_UP
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -46,6 +48,8 @@ app.include_router(driver_applications_router)
 app.include_router(admin_driver_verification_router)
 app.include_router(payments_router)
 app.include_router(interswitch_payments_router)
+app.include_router(instant_payments_router)
+app.include_router(cancellations_router)
 
 class LoginRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
@@ -453,6 +457,7 @@ def assign_ride_request(
         driver_id=driver.id,
         status="assigned",
         agreed_fare=Decimal(ride_request.quoted_fare),
+        assigned_at=datetime.now(timezone.utc),
     )
     ride_request.status = "assigned"
     db.add(ride)
@@ -518,6 +523,7 @@ def payment_policy() -> dict[str, object]:
     return {
         "supported_methods": ["bank_transfer", "interswitch"],
         "cash_enabled": False,
+        "instant_transfers_enabled": instant_transfers_enabled(),
         "confirmation_rule": "server_side_provider_verification_or_authorized_reconciliation",
         "screenshot_alone_confirms_payment": False,
     }
@@ -536,6 +542,12 @@ def business_info() -> dict[str, object]:
     account_number = settings.bank_transfer_account_number
     account_name = settings.bank_transfer_account_name
     return {
+        "instant_transfers": {"enabled": instant_transfers_enabled()},
+        "cancellation": {
+            "free_seconds": settings.cancellation_free_seconds,
+            "fee_motorcycle": settings.cancellation_fee_motorcycle,
+            "fee_car": settings.cancellation_fee_car,
+        },
         "bank_transfer": {
             "configured": bool(bank_name and account_number and account_name),
             "bank_name": bank_name,
@@ -933,7 +945,21 @@ def list_my_ride_requests(
                 )
                 .order_by(Vehicle.id)
             )
+            payment = db.scalar(select(Payment).where(Payment.ride_id == ride_id))
+            ride = db.get(Ride, ride_id)
             assigned_rides[request_id] = {
+                "payment_status": payment.status if payment else None,
+                "refund_status": payment.refund_status if payment else None,
+                "refund_amount": (
+                    str(payment.refund_amount)
+                    if payment and payment.refund_amount is not None
+                    else None
+                ),
+                "cancellation_fee": (
+                    str(ride.cancellation_fee)
+                    if ride.cancellation_fee is not None
+                    else None
+                ),
                 "id": ride_id,
                 "status": ride_status,
                 "driver_name": _short_display_name(driver_full_name),
@@ -971,6 +997,15 @@ def list_my_ride_requests(
                 if ride_request.id in assigned_rides
                 else None
             ),
+            **{
+                key: assigned_rides.get(ride_request.id, {}).get(key)
+                for key in (
+                    "payment_status",
+                    "refund_status",
+                    "refund_amount",
+                    "cancellation_fee",
+                )
+            },
         }
         for ride_request in requests
     ]

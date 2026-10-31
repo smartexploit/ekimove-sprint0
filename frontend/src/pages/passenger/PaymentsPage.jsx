@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Check, Copy, CreditCard, Landmark, Wallet } from 'lucide-react'
+import { CreditCard, Landmark, Wallet } from 'lucide-react'
 import AppShell from '../../layouts/AppShell.jsx'
 import Alert from '../../components/ui/Alert.jsx'
 import StatusBadge from '../../components/ui/StatusBadge.jsx'
 import SupportContacts from '../../components/SupportContacts.jsx'
+import CopyButton from '../../components/ui/CopyButton.jsx'
+import InstantTransfer from '../../components/payments/InstantTransfer.jsx'
 import useBusinessInfo from '../../hooks/useBusinessInfo.js'
 import { apiRequest } from '../../services/authService.js'
 import {
@@ -15,27 +17,6 @@ import {
   verifyInterswitchPayment,
 } from '../../services/paymentService.js'
 import { formatNaira } from '../../utils/format.js'
-
-function CopyButton({ value, label }) {
-  const [copied, setCopied] = useState(false)
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(value)
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 2000)
-    } catch {
-      setCopied(false)
-    }
-  }
-
-  return (
-    <button type="button" className="copy-btn row" style={{ gap: 6 }} onClick={copy} aria-label={`Copy ${label}`}>
-      {copied ? <Check size={16} aria-hidden="true" /> : <Copy size={16} aria-hidden="true" />}
-      <span aria-live="polite">{copied ? 'Copied' : 'Copy'}</span>
-    </button>
-  )
-}
 
 function BankDetails({ amount }) {
   const { bank_transfer: bank, loaded } = useBusinessInfo()
@@ -103,7 +84,7 @@ export default function PaymentsPage() {
       .then((data) => {
         if (!active) return
         const assigned = Array.isArray(data)
-          ? data.filter((ride) => ride.assigned_ride_id)
+          ? data.filter((ride) => ride.assigned_ride_id && ride.ride_status !== 'cancelled')
           : []
         setRides({ loaded: true, items: assigned })
       })
@@ -123,6 +104,17 @@ export default function PaymentsPage() {
   )
   const currentPayment =
     payment && String(payment.ride_id) === effectiveRideId ? payment : null
+  const { instant_transfers: instant } = useBusinessInfo()
+  const instantOn = Boolean(instant?.enabled)
+  const isPaid =
+    currentPayment?.status === 'confirmed' ||
+    (!currentPayment && selectedRide?.payment_status === 'confirmed')
+
+  const handleInstantPaid = useCallback((result) => {
+    setPayment(result)
+    setError('')
+    setMessage('Payment received. Your ride is paid.')
+  }, [])
 
   function validRideId() {
     const id = Number(effectiveRideId)
@@ -276,6 +268,7 @@ export default function PaymentsPage() {
 
   const amountDue = currentPayment?.amount ?? selectedRide?.quoted_fare ?? null
   const needsReference =
+    !instantOn &&
     currentPayment &&
     currentPayment.method !== 'interswitch' &&
     currentPayment.status !== 'confirmed' &&
@@ -343,7 +336,9 @@ export default function PaymentsPage() {
                   <span className="choice-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <Landmark size={18} aria-hidden="true" /> Bank transfer
                   </span>
-                  <span className="choice-sub">Checked by the EkiMove team</span>
+                  <span className="choice-sub">
+                    {instantOn ? 'Confirmed automatically in seconds' : 'Checked by the EkiMove team'}
+                  </span>
                 </span>
               </label>
               <label className="choice">
@@ -364,7 +359,26 @@ export default function PaymentsPage() {
               </label>
             </fieldset>
 
-            {method === 'bank_transfer' ? (
+            {method === 'bank_transfer' && instantOn ? (
+              <>
+                <InstantTransfer
+                  rideId={effectiveRideId ? Number(effectiveRideId) : null}
+                  amount={amountDue}
+                  paid={isPaid}
+                  onPaid={handleInstantPaid}
+                />
+                <div className="row">
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={busy || !effectiveRideId}
+                    onClick={checkStatus}
+                  >
+                    Check status now
+                  </button>
+                </div>
+              </>
+            ) : method === 'bank_transfer' ? (
               <>
                 <BankDetails amount={amountDue} />
                 <div className="row">
@@ -436,7 +450,10 @@ export default function PaymentsPage() {
                     {amountDue != null ? formatNaira(amountDue) : '—'}
                   </p>
                 </div>
-                <StatusBadge status={currentPayment?.status || 'pending'} kind="payment" />
+                <StatusBadge
+                  status={currentPayment?.status || selectedRide?.payment_status || 'pending'}
+                  kind="payment"
+                />
               </div>
               {currentPayment && (
                 <dl className="rows">
@@ -483,7 +500,9 @@ export default function PaymentsPage() {
             <Alert tone="warning">
               {currentPayment?.method === 'interswitch' || method === 'interswitch'
                 ? "A checkout success message isn't proof of payment. EkiMove confirms it only after checking with Interswitch."
-                : "Your payment is confirmed only after the EkiMove team checks the transfer. A screenshot alone doesn't confirm it."}
+                : instantOn
+                  ? "Only pay into your own EkiMove account number shown here. Your ride is marked paid when the money arrives, not from a screenshot."
+                  : "Your payment is confirmed only after the EkiMove team checks the transfer. A screenshot alone doesn't confirm it."}
             </Alert>
           </aside>
         </div>
