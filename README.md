@@ -1,4 +1,4 @@
-# EkiMove API â€” Sprint 1 booking foundation
+# EkiMove API Sprint 1 booking foundation
 
 Provisional brand for the Ride & Share Ekiti mobility platform. Initial pilot target: Ado-Ekiti, Ekiti State.
 
