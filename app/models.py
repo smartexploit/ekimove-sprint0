@@ -11,13 +11,19 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    phone: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    # People sign up with a phone number, an email address, or both.
+    phone: Mapped[str | None] = mapped_column(String(32), unique=True, index=True, nullable=True)
     full_name: Mapped[str] = mapped_column(String(160))
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     role: Mapped[str] = mapped_column(String(24), default="passenger", index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    email: Mapped[str | None] = mapped_column(String(254), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(254), unique=True, index=True, nullable=True)
+    # Set when the person proves they own the number or address with a code.
+    phone_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Set after a super-admin resets the password: choose a new one first.
+    must_change_password: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
     # Set by a super-admin. Suspended accounts can't sign in; removed
     # accounts are anonymised but their trips and payments are kept.
     suspended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -548,4 +554,41 @@ class PlaceFare(Base):
     )
 
 
+class VerificationCode(Base):
+    """A one-time code sent by text or email. Only a hash is stored."""
 
+    __tablename__ = "verification_codes"
+    __table_args__ = (
+        CheckConstraint("channel IN ('sms', 'email')", name="ck_verification_codes_channel"),
+        CheckConstraint(
+            "purpose IN ('verify_contact', 'reset_password', 'change_contact')",
+            name="ck_verification_codes_purpose",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    purpose: Mapped[str] = mapped_column(String(24))
+    channel: Mapped[str] = mapped_column(String(8))
+    destination: Mapped[str] = mapped_column(String(254), index=True)
+    code_hash: Mapped[str] = mapped_column(String(64))
+    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class PushSubscription(Base):
+    """A phone or browser that agreed to receive EkiMove notifications."""
+
+    __tablename__ = "push_subscriptions"
+    __table_args__ = (UniqueConstraint("endpoint", name="uq_push_subscriptions_endpoint"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    endpoint: Mapped[str] = mapped_column(String(1024))
+    p256dh: Mapped[str] = mapped_column(String(255))
+    auth: Mapped[str] = mapped_column(String(255))
+    user_agent: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

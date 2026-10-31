@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import hash_password
 from app.config import settings
+from app.contacts import ContactError, clean_email, clean_phone, email_taken, phone_taken
 from app.database import get_db
 from app.models import Driver, User, Vehicle
 from app.photo_storage import PhotoStorageError, upload_driver_photo, delete_driver_photo
@@ -40,6 +41,7 @@ async def submit_driver_application(
     capacity: int = Form(ge=1, le=8),
     face_photo: UploadFile = File(...),
     accept_policies: bool = Form(False),
+    email: str | None = Form(default=None, max_length=254),
     db: Session = Depends(get_db),
 ):
     """Create a driver account pending review and keep the face photo private."""
@@ -47,7 +49,11 @@ async def submit_driver_application(
         raise HTTPException(status_code=503, detail="Authentication is not configured")
 
     full_name = full_name.strip()
-    phone = phone.strip()
+    try:
+        phone = clean_phone(phone) or ""
+        email = clean_email(email)
+    except ContactError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
     vehicle_type = vehicle_type.strip().lower()
     plate_number = plate_number.strip().upper()
 
@@ -63,8 +69,11 @@ async def submit_driver_application(
     if vehicle_type == "car" and capacity > 4:
         raise HTTPException(status_code=422, detail="A car can carry 4 passengers at most")
 
-    if db.scalar(select(User).where(User.phone == phone)) is not None:
+    if phone_taken(db, phone):
         raise HTTPException(status_code=409, detail="Phone number is already registered")
+
+    if email and email_taken(db, email):
+        raise HTTPException(status_code=409, detail="Email address is already registered")
 
     if db.scalar(select(Vehicle).where(Vehicle.plate_number == plate_number)) is not None:
         raise HTTPException(status_code=409, detail="Vehicle plate number is already registered")
@@ -93,6 +102,7 @@ async def submit_driver_application(
 
         user = User(
             phone=phone,
+            email=email,
             full_name=full_name,
             password_hash=hash_password(password),
             role="driver",

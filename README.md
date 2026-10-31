@@ -142,9 +142,29 @@ Passengers describe the load and route on *Move a load*. That opens a support ch
 Passengers and drivers can chat with the EkiMove team under *Support*; the team answers from *Admin → Support* (unanswered chats first, with a count in the menu). Conversations can be marked resolved and reopen when the customer writes again.
 
 ## Profiles, sessions and accounts
-- Everyone has a *Profile* (tap your initials): name, email, password change. Changing the password signs out other devices.
+- Everyone has a *Profile* (tap your initials): name, sign-in details (phone and email), phone notifications, password change. Changing the password signs out other devices.
 - **Session timeout:** after 15 minutes without activity the app (including the installed PWA) warns for one minute, then signs out. While people are active, their session renews silently (`POST /api/v1/auth/refresh`).
 - **Super-admin:** *Overview* shows what needs attention, live trips, money and recent activity (refreshes every 20 seconds). *People* lists passengers and drivers with their profile, trips, vehicles, balance and activity, and can **suspend** (signed out at once, can't sign in or be assigned), **reactivate** or **remove** an account (name, phone and sign-in erased; trips, payments and earnings kept). Super-admin accounts can't be changed there, and people can't be removed mid-trip.
+
+## Sign-up, codes and password reset
+- **Phone or email:** passengers sign up with a phone number *or* an email address (drivers give a phone number, email optional) and sign in with either. Numbers match in any common form (`0803…`, `234803…`, `+234 803…`); emails are case-insensitive and unique.
+- **Codes:** once text messages or email are set up, new and existing people confirm their phone number or email with a 6-digit code before they can book (super-admins are never asked). Codes last 10 minutes, allow 5 tries, can be re-sent once a minute and 5 times an hour per number, and only a hash is stored. `SMS_DAILY_LIMIT` (default 300) caps texts per 24 hours so abuse can't run up a bill. *Places & fares → Booking rules* can switch confirmation off at once if a provider has a problem.
+- **Forgot password:** `/forgot-password` sends a code to the phone or email on the account (it says the same thing whether or not an account exists). Until a provider is set up, the page tells people to message support.
+- **Changing phone or email:** from the profile, with the password; a code goes to the *new* number or address.
+- **Admin reset:** *People → Reset password* gives a one-time temporary password to read out to the person (after checking it's really them). They must choose their own on next sign-in, and every device they were on is signed out.
+- **Setting up text messages (recommended: BulkSMSNigeria, ₦6.49 per text, DND numbers included):** create an account, buy units, request the sender ID `EkiMove` (choose *transactional/OTP* so it reaches DND numbers), generate an API token, then in Render set `SMS_PROVIDER=bulksmsnigeria`, `BULKSMS_API_TOKEN` and `SMS_SENDER_ID=EkiMove`. Termii also works: `SMS_PROVIDER=termii`, `TERMII_API_KEY`, and `TERMII_BASE_URL` from your Termii dashboard.
+- **Setting up email (optional):** Render's free plan blocks SMTP, so use Brevo's web API: `EMAIL_PROVIDER=brevo`, `BREVO_API_KEY`, `EMAIL_FROM_ADDRESS` (a sender verified in Brevo). Any SMTP server works on paid plans with `EMAIL_PROVIDER=smtp` and the `SMTP_*` settings. Email from a free Gmail address may land in spam; use an address on your own domain once you have one.
+
+## Phone notifications
+People turn notifications on from *Profile* (drivers also on *My driver status*, super-admins on *Overview*). They get: trip offers (drivers), driver assigned/arrived, trip started/completed and cancellations, payment confirmed (both sides), load quotes, support replies, ID and driver-application decisions; super-admins get new support messages and SOS alerts. On iPhone, notifications need iOS 16.4+ and EkiMove added to the Home Screen first. The server's signing keys are created automatically and stored in the database; nothing to set up (`PUSH_ENABLED=false` turns notifications off). Notifications are sent only after the change is saved, in the background.
+
+## Reports
+*Admin → Reports* shows daily totals (Lagos days): requests, completed trips and fares, cancellations, payments received, refunds, commission, driver earnings, payouts and new sign-ups, for any range up to a year. CSV downloads (daily summary, trips, payments, payouts) open in Excel or Google Sheets.
+
+## Running in production
+- **Error alerts (optional):** set `SENTRY_DSN` from a free Sentry project to be emailed when the API crashes. No personal data is sent.
+- **Uptime:** add a free monitor (e.g. UptimeRobot) on `https://<api>/health` every 5 minutes. On Render's free plan this also stops the API from sleeping.
+- **Backups:** Render's paid Postgres plans take daily backups with point-in-time recovery; free databases have no backups and expire, so move to a paid database before real money flows. Before big changes, download a backup from the database's *Recovery* page.
 
 ## Atọ́nà assistant
 Atọ́nà is EkiMove's chat guide, available to everyone on the homepage and on every passenger and driver screen. It chats naturally in English or Nigerian Pidgin, and answers EkiMove questions from live data through tools instead of guessing:

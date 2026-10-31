@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { registerPassenger } from '../../services/authService.js'
+import { getAuthOptions, registerPassenger } from '../../services/authService.js'
 import AuthLayout from '../../layouts/AuthLayout.jsx'
 import Alert from '../../components/ui/Alert.jsx'
 import PasswordInput from '../../components/ui/PasswordInput.jsx'
@@ -20,12 +20,23 @@ export default function RegisterPage() {
   const [form, setForm] = useState({
     full_name: '',
     phone: '',
+    email: '',
     password: '',
     confirmPassword: '',
   })
+  const [method, setMethod] = useState('phone')
+  const [options, setOptions] = useState(null)
   const [agree, setAgree] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    getAuthOptions().then((result) => active && setOptions(result))
+    return () => {
+      active = false
+    }
+  }, [])
 
   function update(event) {
     setForm((current) => ({
@@ -58,7 +69,8 @@ export default function RegisterPage() {
     try {
       await registerPassenger({
         full_name: form.full_name,
-        phone: form.phone,
+        phone: method === 'phone' ? form.phone : '',
+        email: method === 'email' ? form.email : '',
         password: form.password,
         accept_policies: true,
       })
@@ -98,23 +110,63 @@ export default function RegisterPage() {
           />
         </label>
 
-        <label className="field" htmlFor="phone">
-          <span className="field-label">Phone number</span>
-          <input
-            id="phone"
-            className="input"
-            name="phone"
-            type="tel"
-            inputMode="tel"
-            autoComplete="tel"
-            placeholder="e.g. 08012345678"
-            value={form.phone}
-            onChange={update}
-            minLength={7}
-            maxLength={32}
-            required
-          />
-        </label>
+        <div className="field">
+          <span className="field-label" id="signup-with">Sign up with</span>
+          <div className="segmented segmented-block" role="tablist" aria-labelledby="signup-with">
+            {[['phone', 'Phone number'], ['email', 'Email']].map(([value, label]) => (
+              <button key={value} type="button" role="tab" aria-selected={method === value}
+                className={method === value ? 'is-active' : ''} onClick={() => setMethod(value)}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {method === 'phone' ? (
+          <label className="field" htmlFor="phone">
+            <span className="field-label">Phone number</span>
+            <input
+              id="phone"
+              className="input"
+              name="phone"
+              type="tel"
+              inputMode="tel"
+              autoComplete="tel"
+              placeholder="e.g. 08012345678"
+              value={form.phone}
+              onChange={update}
+              minLength={7}
+              maxLength={32}
+              aria-describedby="contact-hint"
+              required
+            />
+          </label>
+        ) : (
+          <label className="field" htmlFor="email">
+            <span className="field-label">Email address</span>
+            <input
+              id="email"
+              className="input"
+              name="email"
+              type="email"
+              inputMode="email"
+              autoComplete="email"
+              autoCapitalize="none"
+              spellCheck={false}
+              placeholder="you@example.com"
+              value={form.email}
+              onChange={update}
+              maxLength={254}
+              aria-describedby="contact-hint"
+              required
+            />
+          </label>
+        )}
+        <span className="field-hint" id="contact-hint" style={{ marginTop: -8 }}>
+          {(method === 'phone' ? options?.sms : options?.email)
+            ? `We'll ${method === 'phone' ? 'text' : 'email'} you a 6-digit code to confirm it's yours.`
+            : `You'll sign in with this ${method === 'phone' ? 'number' : 'address'}. You can add the other later in your profile.`}
+        </span>
 
         <div className="field">
           <label className="field-label" htmlFor="password">

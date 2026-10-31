@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app import notifications
 from app.app_settings import HAULAGE_TYPES
 from app.auth import get_current_user, require_super_admin
 from app.database import get_db
@@ -173,7 +174,7 @@ def admin_haulage_requests(
     for request in requests:
         customer = db.get(User, request.passenger_user_id)
         rows.append({**haulage_result(db, request),
-                     "customer": {"id": customer.id, "name": customer.full_name, "phone": customer.phone}
+                     "customer": {"id": customer.id, "name": customer.full_name, "phone": customer.phone or customer.email}
                      if customer else None})
     return rows
 
@@ -201,7 +202,8 @@ def admin_send_quote(request_id: int, payload: QuoteInput, db: Session = Depends
         post_message(db, thread, admin,
                      f"Quote for your load: ₦{payload.amount:,.0f}.\nTerms: {payload.terms}\n"
                      "Accept it on the Move a load page to book. You'll pay through EkiMove once a driver is assigned.",
-                     from_staff=True)
+                     from_staff=True, notify=False)
+    notifications.quote_ready(db, request)
     db.add(AuditLog(actor_user_id=admin.id, action="haulage.quoted", entity_type="ride_request",
                     entity_id=str(request.id), details=f"NGN {payload.amount}: {payload.terms}"))
     db.commit()

@@ -244,6 +244,11 @@ def verify_interswitch(
             entity_id=str(payment.id),
             details="Provider requery returned success and matching amount.",
         ))
+        paid_ride = db.get(Ride, payment.ride_id)
+        if paid_ride is not None:
+            from app import notifications  # avoid an import cycle
+
+            notifications.payment_confirmed(db, paid_ride)
         db.commit()
     else:
         db.rollback()

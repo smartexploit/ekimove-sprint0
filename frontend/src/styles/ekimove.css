@@ -3561,3 +3561,118 @@ a.chip {
   line-height: 44px;
   font-size: 22px;
 }
+
+/* Phase 5: sign-up choice, codes, notifications, reports */
+.segmented-block {
+  display: flex;
+  align-self: stretch;
+}
+
+.segmented-block button {
+  flex: 1 1 0;
+  padding: 0 10px;
+}
+
+.field-label-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.code-input {
+  font-size: 1.5rem;
+  font-weight: 800;
+  letter-spacing: 0.4em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.temp-password {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--green-50, #eaf4ef);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 1.15rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  overflow-wrap: anywhere;
+}
+
+.contact-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.contact-row-main {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.report-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 14px;
+}
+
+.report-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.report-table th,
+.report-table td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line, #e3e8e5);
+  text-align: right;
+}
+
+.report-table th:first-child,
+.report-table td:first-child {
+  text-align: left;
+  position: sticky;
+  left: 0;
+  background: var(--white, #fff);
+}
+
+.report-table thead th {
+  font-weight: 800;
+  color: var(--ink-700);
+  white-space: normal;
+  min-width: 90px;
+  vertical-align: bottom;
+}
+
+.report-table tfoot td {
+  font-weight: 800;
+  border-top: 2px solid var(--ink-700);
+}
+
+.date-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+.date-row .field {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
+/* Tall dialogs (e.g. choosing a new password) scroll on small phones. */
+.session-card {
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}

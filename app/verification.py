@@ -66,6 +66,13 @@ def require_verified_passengers(db: Session) -> bool:
 
 
 def ensure_passenger_may_book(db: Session, user: User) -> None:
+    from app.codes import contact_status  # avoid an import cycle
+
+    needs = contact_status(db, user)["needs_verification"]
+    if needs:
+        raise HTTPException(status_code=403, detail="Please confirm your "
+                            f"{'phone number' if needs == 'sms' else 'email address'} with the code we send you "
+                            "before booking.")
     if not require_verified_passengers(db):
         return
     verified = db.scalar(select(PassengerVerification.id).where(
@@ -173,7 +180,7 @@ def admin_verifications(
                       .where(PassengerVerification.status == status)
                       .order_by(PassengerVerification.submitted_at).limit(200)).all()
     return [{**verification_result(record, full=True), "user_id": user.id, "name": user.full_name,
-             "phone": user.phone} for record, user in rows]
+             "phone": user.phone or user.email} for record, user in rows]
 
 
 class ReviewInput(BaseModel):
@@ -196,6 +203,9 @@ def admin_review_verification(user_id: int, payload: ReviewInput, db: Session = 
     record.reviewed_by_user_id = admin.id
     db.add(AuditLog(actor_user_id=admin.id, action=f"verification.{record.status}", entity_type="user",
                     entity_id=str(user_id), details=payload.note or record.status))
+    from app import notifications  # avoid an import cycle
+
+    notifications.id_reviewed(db, user_id, record.status == "approved")
     db.commit()
     return verification_result(record, full=True)
 
@@ -325,7 +335,7 @@ def admin_live_map(db: Session = Depends(get_db), _admin: User = Depends(require
         driver_user = db.get(User, driver.user_id) if driver else None
         trips.append({
             "ride_id": ride.id, "status": ride.status, "route": f"{request.origin_text} → {request.destination_text}",
-            "passenger": passenger.full_name if passenger else None, "passenger_phone": passenger.phone if passenger else None,
+            "passenger": passenger.full_name if passenger else None, "passenger_phone": (passenger.phone or passenger.email) if passenger else None,
             "driver": driver_user.full_name if driver_user else None,
             "pickup": _coords(db.get(Place, request.origin_place_id) if request.origin_place_id else None),
             "destination": _coords(db.get(Place, request.destination_place_id) if request.destination_place_id else None),
@@ -347,7 +357,7 @@ def admin_ride_trail(ride_id: int, db: Session = Depends(get_db), _admin: User =
     vehicle = db.get(Vehicle, ride.vehicle_id) if ride.vehicle_id else None
     return {
         "ride_id": ride.id, "status": ride.status, "route": f"{request.origin_text} → {request.destination_text}",
-        "passenger": {"id": passenger.id, "name": passenger.full_name, "phone": passenger.phone} if passenger else None,
+        "passenger": {"id": passenger.id, "name": passenger.full_name, "phone": passenger.phone or passenger.email} if passenger else None,
         "driver": {"id": driver_user.id, "name": driver_user.full_name, "phone": driver_user.phone} if driver_user else None,
         "vehicle": {"plate_number": vehicle.plate_number, "vehicle_type": vehicle.vehicle_type} if vehicle else None,
         "assigned_at": _iso(ride.assigned_at), "arrived_at": _iso(ride.arrived_at),

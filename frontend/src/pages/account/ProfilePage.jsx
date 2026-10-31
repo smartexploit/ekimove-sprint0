@@ -9,9 +9,11 @@ import { changePassword, getProfile, updateProfile } from '../../services/accoun
 import { formatShortDate, initials } from '../../utils/format.js'
 import { vehicleLabel } from '../../utils/vehicles.js'
 import { EmergencyContactCard, VerificationCard } from '../../components/account/SafetyCards.jsx'
+import ContactCard from '../../components/account/ContactCard.jsx'
+import NotificationsCard from '../../components/account/NotificationsCard.jsx'
 
 function DetailsForm({ profile, onSaved }) {
-  const [form, setForm] = useState({ full_name: profile.full_name, email: profile.email || '' })
+  const [form, setForm] = useState({ full_name: profile.full_name })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -22,7 +24,7 @@ function DetailsForm({ profile, onSaved }) {
     setError('')
     setNotice('')
     try {
-      const updated = await updateProfile({ full_name: form.full_name.trim(), email: form.email.trim() })
+      const updated = await updateProfile({ full_name: form.full_name.trim() })
       onSaved(updated)
       setNotice('Your details are saved.')
     } catch (err) {
@@ -44,17 +46,6 @@ function DetailsForm({ profile, onSaved }) {
         {profile.role === 'driver' && (
           <span className="field-hint">Passengers see your first name and last initial.</span>
         )}
-      </label>
-      <label className="field">
-        <span className="field-label">Phone number</span>
-        <input className="input" value={profile.phone} disabled readOnly />
-        <span className="field-hint">To change your phone number, contact support.</span>
-      </label>
-      <label className="field">
-        <span className="field-label">Email (optional)</span>
-        <input className="input" type="email" autoComplete="email" maxLength={254}
-          value={form.email} onChange={(event) => setForm((f) => ({ ...f, email: event.target.value }))}
-          placeholder="For receipts and account messages" />
       </label>
       <div>
         <button type="submit" className="btn btn-primary" disabled={busy}>
@@ -156,7 +147,8 @@ export default function ProfilePage() {
               <div style={{ minWidth: 0 }}>
                 <p className="profile-name">{profile.full_name}</p>
                 <p className="muted small">
-                  {profile.role === 'driver' ? 'Driver' : 'Passenger'} · {profile.phone}
+                  {profile.role === 'driver' ? 'Driver' : profile.role === 'super_admin' ? 'Super-admin' : 'Passenger'}
+                  {' · '}{profile.phone || profile.email}
                 </p>
                 <p className="muted small">Member since {formatShortDate(profile.joined_at)}</p>
                 {profile.rating?.average && (
@@ -193,9 +185,12 @@ export default function ProfilePage() {
             )}
 
             <DetailsForm key={profile.id} profile={profile} onSaved={setProfile} />
+            <ContactCard profile={profile} onSaved={setProfile}
+              onReload={() => getProfile().then(setProfile).catch(() => {})} />
             {profile.role === 'passenger' && <VerificationCard />}
           </div>
           <div className="stack">
+            <NotificationsCard role={profile.role} />
             <EmergencyContactCard initial={profile.emergency_contact} />
             <PasswordForm />
             <section className="card stack stack-sm" aria-labelledby="privacy-title">

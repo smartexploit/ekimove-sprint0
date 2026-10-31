@@ -126,7 +126,7 @@ export default function DashboardPage() {
           <Link className="action-card" to="/profile">
             <span className="avatar" aria-hidden="true">{initials(user.full_name)}</span>
             <h2>Your profile</h2>
-            <p>{user.full_name} · {user.phone}</p>
+            <p>{user.full_name} · {user.phone || user.email}</p>
             <span className="row small" style={{ gap: 6, fontWeight: 800, color: 'var(--green-800)' }}>
               <UserRound size={16} aria-hidden="true" /> Edit details or password
             </span>

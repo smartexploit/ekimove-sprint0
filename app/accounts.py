@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import re
+import secrets
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Literal
@@ -21,6 +22,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from app.codes import contact_status
+from app.contacts import email_taken, search_filter
+from app.messaging import email_configured
 from app.auth import create_access_token, get_current_user, hash_password, require_super_admin, verify_password
 from app.config import settings
 from app.database import get_db
@@ -94,6 +98,8 @@ def profile_result(db: Session, user: User) -> dict:
         "full_name": user.full_name,
         "phone": user.phone,
         "email": user.email,
+        "contact": contact_status(db, user),
+        "must_change_password": bool(user.must_change_password),
         "role": user.role,
         "status": account_status(user),
         "joined_at": _iso(user.created_at),
@@ -134,8 +140,17 @@ def update_my_profile(
 ) -> dict:
     if payload.full_name is not None:
         current_user.full_name = payload.full_name
-    if payload.email is not None:
+    if payload.email is not None and payload.email != (current_user.email or ""):
+        if not payload.email:
+            if not current_user.phone:
+                raise HTTPException(status_code=409, detail="You sign in with this email. Add a phone number "
+                                                            "before removing it.")
+        elif email_configured():
+            raise HTTPException(status_code=409, detail="Use \"Change email\" so we can send a code to the new address.")
+        elif email_taken(db, payload.email, current_user.id):
+            raise HTTPException(status_code=409, detail="That email address is already used by another EkiMove account.")
         current_user.email = payload.email or None
+        current_user.email_verified_at = None
     db.add(AuditLog(actor_user_id=current_user.id, action="profile.updated", entity_type="user",
                     entity_id=str(current_user.id), details="Profile details updated."))
     db.commit()
@@ -160,6 +175,7 @@ def change_my_password(
     if payload.new_password == payload.current_password:
         raise HTTPException(status_code=400, detail="Choose a password you haven't just used.")
     current_user.password_hash = hash_password(payload.new_password)
+    current_user.must_change_password = False
     db.add(AuditLog(actor_user_id=current_user.id, action="password.changed", entity_type="user",
                     entity_id=str(current_user.id), details="Password changed; older sessions signed out."))
     db.commit()
@@ -239,7 +255,7 @@ def admin_list_people(
         query = query.where(User.removed_at.is_(None))
     if q:
         like = f"%{q.strip()}%"
-        query = query.where(or_(User.full_name.ilike(like), User.phone.ilike(like)))
+        query = query.where(search_filter(like))
     users = db.scalars(query.order_by(User.created_at.desc(), User.id.desc()).limit(300)).all()
     return [_person_row(db, user) for user in users]
 
@@ -357,20 +373,42 @@ def admin_remove(user_id: int, payload: AccountAction, db: Session = Depends(get
     if _active_trip(db, user):
         raise HTTPException(status_code=409, detail="This person has a trip in progress. "
                                                     "Wait for it to finish or cancel it first.")
-    original = user.phone
+    original = user.phone or user.email or ""
     user.is_active = False
     user.removed_at = datetime.now(timezone.utc)
     user.suspension_reason = payload.reason
     user.full_name = "Removed account"
     user.email = None
     user.password_hash = None
-    # Free the phone number so the person could register again later.
+    # Free the phone number and email so the person could register again.
     user.phone = f"removed-{user.id}-{original[-4:]}"[:32]
+    user.phone_verified_at = None
+    user.email_verified_at = None
     _take_driver_offline(db, user)
     db.add(AuditLog(actor_user_id=admin.id, action="account.removed", entity_type="user",
-                    entity_id=str(user.id), details=f"{payload.reason} (phone ending {original[-4:]})"))
+                    entity_id=str(user.id), details=f"{payload.reason} (contact ending {original[-4:]})"))
     db.commit()
     return _person_row(db, user)
+
+
+# Letters and digits that are hard to confuse when read out over the phone.
+_TEMP_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+
+
+@router.post("/admin/people/{user_id}/reset-password")
+def admin_reset_password(user_id: int, payload: AccountAction, db: Session = Depends(get_db),
+                         admin: User = Depends(require_super_admin)) -> dict:
+    """Set a temporary password to give the person (shown once). They must
+    choose their own when they next sign in; older sessions are signed out."""
+    user = _target(db, user_id, admin)
+    temporary = "-".join("".join(secrets.choice(_TEMP_ALPHABET) for _ in range(4)) for _ in range(3))
+    user.password_hash = hash_password(temporary)
+    user.must_change_password = True
+    db.add(AuditLog(actor_user_id=admin.id, action="password.admin_reset", entity_type="user",
+                    entity_id=str(user.id), details=payload.reason))
+    db.commit()
+    db.refresh(user)
+    return {"temporary_password": temporary, "person": _person_row(db, user)}
 
 
 # --------------------------------------------------------------------------

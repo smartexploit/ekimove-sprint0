@@ -97,9 +97,10 @@ export async function getPaymentPolicy() {
   return apiRequest('/api/v1/policy/payments')
 }
 
-export async function registerPassenger({ phone, full_name, password, accept_policies = false }) {
+export async function registerPassenger({ phone = '', email = '', full_name, password, accept_policies = false }) {
   const data = await requestAuth('register', {
-    phone: phone.trim(),
+    ...(phone.trim() ? { phone: phone.trim() } : {}),
+    ...(email.trim() ? { email: email.trim() } : {}),
     full_name: full_name.trim(),
     password,
     accept_policies,
@@ -109,9 +110,10 @@ export async function registerPassenger({ phone, full_name, password, accept_pol
   return data
 }
 
-export async function loginPassenger({ phone, password }) {
+/** Sign in with a phone number or an email address. */
+export async function loginPassenger({ identifier, phone, password }) {
   const data = await requestAuth('login', {
-    phone: phone.trim(),
+    identifier: (identifier ?? phone ?? '').trim(),
     password,
   })
 
@@ -132,6 +134,23 @@ function saveSession(token, user) {
     sessionStorage.removeItem(USER_KEY)
   }
 }
+
+/** Which code channels (SMS, email) the server has switched on. */
+export async function getAuthOptions() {
+  try {
+    const response = await fetch(apiUrl('/api/v1/auth/options'))
+    if (!response.ok) throw new Error('unavailable')
+    return await response.json()
+  } catch {
+    return { sms: false, email: false, password_reset: false }
+  }
+}
+
+export const requestPasswordReset = (identifier) =>
+  requestAuth('password-reset/request', { identifier: identifier.trim() })
+
+export const confirmPasswordReset = ({ identifier, code, new_password }) =>
+  requestAuth('password-reset/confirm', { identifier: identifier.trim(), code: code.trim(), new_password })
 
 export function getAccessToken() {
   return sessionStorage.getItem(TOKEN_KEY)
@@ -179,4 +198,28 @@ export async function fetchImageUrl(path) {
   const blob = await response.blob()
   if (!blob.type.startsWith('image/')) throw new Error('The server did not return an image.')
   return URL.createObjectURL(blob)
+}
+
+/** Download a protected file (e.g. a CSV report) to the device. */
+export async function downloadFile(path, fallbackName = 'download.csv') {
+  let response
+  try {
+    response = await fetch(apiUrl(path), { headers: { Authorization: `Bearer ${getAccessToken()}` } })
+  } catch {
+    throw new Error('Unable to reach EkiMove. Check your connection and try again.')
+  }
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    throw new Error(typeof data.detail === 'string' ? data.detail : 'Could not download the file.')
+  }
+  const disposition = response.headers.get('content-disposition') || ''
+  const name = /filename="([^"]+)"/.exec(disposition)?.[1] || fallbackName
+  const url = URL.createObjectURL(await response.blob())
+  const link = document.createElement('a')
+  link.href = url
+  link.download = name
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
 }

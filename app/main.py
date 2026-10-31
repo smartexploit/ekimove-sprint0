@@ -6,7 +6,11 @@ from app.payments import router as payments_router
 from app.interswitch_payments import router as interswitch_payments_router
 from app.instant_payments import instant_transfers_enabled, router as instant_payments_router
 from app.cancellations import router as cancellations_router
+from app import notifications
 from app.accounts import router as accounts_router
+from app.codes import router as codes_router
+from app.push import router as push_router
+from app.reports import router as reports_router
 from app.support import router as support_router
 from app.haulage import router as haulage_router
 from app.verification import client_fingerprint, ensure_passenger_may_book, record_policy_acceptance, router as verification_router
@@ -30,6 +34,7 @@ from app.auth import (
     verify_password,
 )
 from app.config import settings
+from app.contacts import ContactError, clean_email, clean_phone, email_taken, find_user, international_number, is_email, phone_taken
 from app.database import engine, get_db
 from app.driver_applications import router as driver_applications_router
 from app.models import AuditLog, Driver, Fare, Incident, Payment, Place, PlaceFare, Ride, RideRequest, ServiceArea, User, Vehicle, Zone
@@ -40,6 +45,18 @@ from app.rate_limit import (
     check_login_allowed,
     record_failed_login,
 )
+
+if settings.sentry_dsn:
+    # Optional error monitoring: crashes are reported to Sentry without
+    # personal data (no request bodies, cookies or IP addresses).
+    import sentry_sdk
+
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        environment=settings.app_env,
+        send_default_pii=False,
+        traces_sample_rate=0.0,
+    )
 
 app = FastAPI(
     title=settings.app_name,
@@ -66,18 +83,25 @@ app.include_router(haulage_router)
 app.include_router(dispatch_router)
 app.include_router(trips_router)
 app.include_router(verification_router)
+app.include_router(codes_router)
+app.include_router(push_router)
+app.include_router(reports_router)
 
 class LoginRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
 
-    phone: str = Field(min_length=7, max_length=32)
+    # A phone number or an email address. "phone" is kept for older apps.
+    identifier: str | None = Field(default=None, min_length=3, max_length=254)
+    phone: str | None = Field(default=None, min_length=3, max_length=254)
     password: str = Field(min_length=1, max_length=256)
 
 
 class RegisterRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
 
-    phone: str = Field(min_length=7, max_length=32)
+    # Sign up with a phone number, an email address, or both.
+    phone: str | None = Field(default=None, min_length=7, max_length=32)
+    email: str | None = Field(default=None, max_length=254)
     full_name: str = Field(min_length=2, max_length=160)
     password: str = Field(min_length=12, max_length=256)
     # The app sends true after the person ticks "I agree" to EkiMove's policies.
@@ -92,10 +116,24 @@ class TokenResponse(BaseModel):
 
 class CurrentUserResponse(BaseModel):
     id: int
-    phone: str
+    phone: str | None
+    email: str | None = None
     full_name: str
     role: str
     is_active: bool
+    must_change_password: bool = False
+
+
+def current_user_response(user: User) -> CurrentUserResponse:
+    return CurrentUserResponse(
+        id=user.id,
+        phone=user.phone,
+        email=user.email,
+        full_name=user.full_name,
+        role=user.role,
+        is_active=user.is_active,
+        must_change_password=bool(user.must_change_password),
+    )
 
 
 class AuthenticatedResponse(BaseModel):
@@ -569,26 +607,33 @@ def register(
             detail="Authentication is not configured",
         )
 
-    phone = payload.phone.strip()
     full_name = payload.full_name.strip()
+    try:
+        phone = clean_phone(payload.phone)
+        email = clean_email(payload.email)
+    except ContactError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
 
-    if len(phone) < 7 or len(full_name) < 2:
+    if not (phone or email) or len(full_name) < 2:
         raise HTTPException(
             status_code=422,
-            detail="A valid phone number and full name are required",
+            detail="Enter your phone number or email address, and your full name",
         )
 
-    existing_user = db.scalar(
-        select(User).where(User.phone == phone)
-    )
-    if existing_user is not None:
+    if phone and phone_taken(db, phone):
         raise HTTPException(
             status_code=409,
             detail="Phone number is already registered",
         )
+    if email and email_taken(db, email):
+        raise HTTPException(
+            status_code=409,
+            detail="Email address is already registered",
+        )
 
     user = User(
         phone=phone,
+        email=email,
         full_name=full_name,
         password_hash=hash_password(payload.password),
         role="passenger",
@@ -600,13 +645,15 @@ def register(
         db.flush()
         if payload.accept_policies:
             record_policy_acceptance(db, user, request)
+        db.add(AuditLog(actor_user_id=user.id, action="auth.registered", entity_type="user",
+                        entity_id=str(user.id), details=client_fingerprint(request)))
         db.commit()
         db.refresh(user)
     except IntegrityError:
         db.rollback()
         raise HTTPException(
             status_code=409,
-            detail="Phone number is already registered",
+            detail="This phone number or email address is already registered",
         ) from None
     except SQLAlchemyError:
         db.rollback()
@@ -620,13 +667,7 @@ def register(
     return AuthenticatedResponse(
         access_token=token,
         expires_in=settings.access_token_expire_minutes * 60,
-        user=CurrentUserResponse(
-            id=user.id,
-            phone=user.phone,
-            full_name=user.full_name,
-            role=user.role,
-            is_active=user.is_active,
-        ),
+        user=current_user_response(user),
     )
 @app.post(
     "/api/v1/auth/login",
@@ -645,15 +686,19 @@ def login(
             detail="Authentication is not configured",
         )
 
-    # Normalize surrounding whitespace consistently across login operations.
-    phone = payload.phone.strip()
+    # A phone number or an email address; whitespace is trimmed.
+    identifier = (payload.identifier or payload.phone or "").strip()
+    if not identifier:
+        raise HTTPException(status_code=422, detail="Enter your phone number or email address")
+    # Rate-limit on one spelling of the identifier.
+    limit_key = identifier.lower() if is_email(identifier) else international_number(identifier)
 
     ip_address = (
         request.client.host if request.client is not None else "unknown"
     )
 
     try:
-        allowed, retry_after = check_login_allowed(ip_address, phone)
+        allowed, retry_after = check_login_allowed(ip_address, limit_key)
     except RateLimitUnavailable:
         raise HTTPException(
             status_code=503,
@@ -667,7 +712,7 @@ def login(
             headers={"Retry-After": str(max(1, retry_after))},
         )
 
-    user = db.scalar(select(User).where(User.phone == phone))
+    user = find_user(db, identifier)
 
     if (
         user is not None
@@ -687,7 +732,7 @@ def login(
         or not verify_password(payload.password, user.password_hash)
     ):
         try:
-            recorded, retry_after = record_failed_login(ip_address, phone)
+            recorded, retry_after = record_failed_login(ip_address, limit_key)
         except RateLimitUnavailable:
             raise HTTPException(
                 status_code=503,
@@ -703,7 +748,7 @@ def login(
 
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid phone number or password",
+            detail="Invalid phone number, email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -725,13 +770,7 @@ def read_current_user(
     current_user: User = Depends(get_current_user),
 ) -> CurrentUserResponse:
     """Return the identity associated with the validated access token."""
-    return CurrentUserResponse(
-        id=current_user.id,
-        phone=current_user.phone,
-        full_name=current_user.full_name,
-        role=current_user.role,
-        is_active=current_user.is_active,
-    )
+    return current_user_response(current_user)
 
 
 @app.get("/api/v1/zones", tags=["booking"])
@@ -1276,6 +1315,7 @@ def report_ride_sos(
     )
     db.add(incident)
     db.flush()
+    notifications.sos_raised(db, ride.id, current_user)
 
     previous_status = ride.status
     ride.status = "incident_review"
@@ -1505,6 +1545,9 @@ def update_driver_ride_status(
         ride.completed_at = now
         # Credit the driver: fare minus EkiMove's commission.
         record_trip_earning(db, ride)
+    status_request = db.get(RideRequest, ride.request_id)
+    if status_request is not None:
+        notifications.ride_status(db, ride, status_request)
 
     db.add(
         AuditLog(

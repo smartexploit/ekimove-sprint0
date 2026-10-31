@@ -48,6 +48,8 @@ export default defineConfig({
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/api\//],
         cleanupOutdatedCaches: true,
+        // Phone notifications (push and notification taps).
+        importScripts: ['/push-sw.js'],
         clientsClaim: true,
         skipWaiting: true,
         runtimeCaching: [

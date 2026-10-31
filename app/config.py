@@ -123,6 +123,53 @@ class Settings(BaseSettings):
         cleaned = str(value).strip()
         return cleaned or None
 
+    # Text messages (SMS) for sign-up codes and password resets.
+    # sms_provider: "bulksmsnigeria" (recommended, cheapest) or "termii".
+    # Codes are switched off until a provider and its key are set.
+    sms_provider: str | None = None
+    sms_sender_id: str = "EkiMove"
+    bulksms_api_token: str | None = None
+    bulksms_api_url: str = "https://www.bulksmsnigeria.com/api/v1/sms/create"
+    termii_api_key: str | None = None
+    termii_base_url: str = "https://api.ng.termii.com"
+    # Most code texts sent in any 24 hours (caps cost if sign-up is abused).
+    sms_daily_limit: int = 300
+
+    # Email for codes. "brevo" uses Brevo's web API (works on Render's
+    # free plan, which blocks SMTP); "smtp" uses any SMTP server.
+    email_provider: str | None = None
+    email_from_address: str | None = None
+    email_from_name: str = "EkiMove"
+    brevo_api_key: str | None = None
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    smtp_use_ssl: bool = False
+
+    # Phone push notifications. Keys are created automatically and kept
+    # in the database; set these only to supply your own pair.
+    push_enabled: bool = True
+    vapid_public_key: str | None = None
+    vapid_private_key: str | None = None
+    vapid_subject: str | None = None
+
+    # Optional error monitoring with Sentry.
+    sentry_dsn: str | None = None
+
+    @field_validator(
+        "sms_provider", "bulksms_api_token", "termii_api_key", "email_provider", "email_from_address",
+        "brevo_api_key", "smtp_host", "smtp_username", "smtp_password", "vapid_public_key",
+        "vapid_private_key", "vapid_subject", "sentry_dsn",
+        mode="before",
+    )
+    @classmethod
+    def clean_optional_text(cls, value):
+        if value is None:
+            return None
+        cleaned = str(value).strip()
+        return cleaned or None
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

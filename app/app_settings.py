@@ -38,6 +38,9 @@ DEFAULTS = {
     "dispatch_offer_seconds": "30",
     "dispatch_max_offers": "5",
     "require_verified_passengers": "false",
+    # Once text or email codes are set up, people confirm their phone
+    # number or email with a code before using the app.
+    "require_contact_verification": "true",
 }
 
 
@@ -104,12 +107,18 @@ class SettingsUpdate(BaseModel):
     dispatch_offer_seconds: int | None = Field(default=None, ge=15, le=120)
     dispatch_max_offers: int | None = Field(default=None, ge=1, le=20)
     require_verified_passengers: bool | None = None
+    require_contact_verification: bool | None = None
 
 
 def all_settings(db: Session) -> dict:
     from app.dispatch import dispatch_rules  # avoid an import cycle
 
-    return {**booking_rules(db), **dispatch_rules(db)}
+    from app import messaging
+
+    return {**booking_rules(db), **dispatch_rules(db),
+            "require_contact_verification": _get(db, "require_contact_verification") == "true",
+            "sms_configured": messaging.sms_configured(),
+            "email_configured": messaging.email_configured()}
 
 
 @router.get("/admin/settings")
@@ -136,6 +145,8 @@ def admin_update_settings(
         changes["dispatch_max_offers"] = str(payload.dispatch_max_offers)
     if payload.require_verified_passengers is not None:
         changes["require_verified_passengers"] = "true" if payload.require_verified_passengers else "false"
+    if payload.require_contact_verification is not None:
+        changes["require_contact_verification"] = "true" if payload.require_contact_verification else "false"
     if not changes:
         raise HTTPException(status_code=422, detail="Nothing to change.")
     for key, value in changes.items():

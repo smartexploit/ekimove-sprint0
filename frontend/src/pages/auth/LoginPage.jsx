@@ -21,7 +21,7 @@ export default function LoginPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const returnTo = safeReturnPath(location.state?.from)
-  const [phone, setPhone] = useState('')
+  const [identifier, setIdentifier] = useState(location.state?.identifier || '')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -32,7 +32,7 @@ export default function LoginPage() {
     setLoading(true)
 
     try {
-      await loginPassenger({ phone, password })
+      await loginPassenger({ identifier, password })
       const user = await getCurrentUser()
       const home = homePathForRole(user.role)
       const destination =
@@ -53,7 +53,7 @@ export default function LoginPage() {
       title="Welcome back."
       intro="Your next journey around Ekiti starts here."
       heading="Sign in"
-      subheading="Use the phone number and password on your EkiMove account."
+      subheading="Use the phone number or email and the password on your EkiMove account."
     >
       {new URLSearchParams(location.search).get('reason') === 'timeout' && (
         <Alert tone="info">
@@ -64,30 +64,40 @@ export default function LoginPage() {
       {returnTo && (
         <Alert tone="info">Sign in to continue with your trip.</Alert>
       )}
+      {location.state?.passwordReset && (
+        <Alert tone="success">Your password has been changed. Sign in with your new password.</Alert>
+      )}
 
       <form className="form" onSubmit={submit}>
-        <label className="field" htmlFor="login-phone">
-          <span className="field-label">Phone number</span>
+        <label className="field" htmlFor="login-identifier">
+          <span className="field-label">Phone number or email</span>
           <input
-            id="login-phone"
+            id="login-identifier"
             className="input"
-            name="phone"
-            type="tel"
-            inputMode="tel"
-            autoComplete="tel"
-            value={phone}
-            onChange={(event) => setPhone(event.target.value)}
-            minLength={7}
-            maxLength={32}
-            placeholder="e.g. 0803 000 0000"
+            name="username"
+            type="text"
+            inputMode="email"
+            autoComplete="username"
+            autoCapitalize="none"
+            spellCheck={false}
+            value={identifier}
+            onChange={(event) => setIdentifier(event.target.value)}
+            minLength={3}
+            maxLength={254}
+            placeholder="0803 000 0000 or you@example.com"
             required
           />
         </label>
 
         <div className="field">
-          <label className="field-label" htmlFor="login-password">
-            Password
-          </label>
+          <div className="field-label-row">
+            <label className="field-label" htmlFor="login-password">
+              Password
+            </label>
+            <Link className="text-link small" to="/forgot-password" state={{ identifier }}>
+              Forgot password?
+            </Link>
+          </div>
           <PasswordInput
             id="login-password"
             name="password"

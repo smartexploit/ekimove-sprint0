@@ -247,6 +247,10 @@ def reconcile_payment(
         if paid_ride is not None and paid_ride.status == "cancelled":
             payment.refund_amount = payment.amount
             payment.refund_status = "due"
+        elif paid_ride is not None:
+            from app import notifications  # avoid an import cycle
+
+            notifications.payment_confirmed(db, paid_ride)
     else:
         payment.status = "rejected"
         payment.confirmed_by_user_id = None

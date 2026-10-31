@@ -19,6 +19,23 @@ export async function refreshSession() {
   return data
 }
 
+// Confirming and changing my phone number or email
+export const sendVerifyCode = (channel) => apiRequest('/api/v1/me/verify/send', json('POST', { channel }))
+export const confirmVerifyCode = (channel, code) =>
+  apiRequest('/api/v1/me/verify/confirm', json('POST', { channel, code }))
+export const startContactChange = (kind, value, password) =>
+  apiRequest('/api/v1/me/contact/start', json('POST', { kind, value, password }))
+export const confirmContactChange = (kind, value, code) =>
+  apiRequest('/api/v1/me/contact/confirm', json('POST', { kind, value, code }))
+
+// Phone notifications
+export const getPushConfig = () => apiRequest('/api/v1/push/config')
+export const savePushSubscription = (subscription) =>
+  apiRequest('/api/v1/push/subscriptions', json('POST', subscription))
+export const removePushSubscription = (endpoint) =>
+  apiRequest('/api/v1/push/unsubscribe', json('POST', { endpoint }))
+export const sendTestNotification = () => apiRequest('/api/v1/push/test', { method: 'POST' })
+
 // Booking rules
 export const getBookingRules = () => apiRequest('/api/v1/booking-rules')
 
@@ -46,6 +63,10 @@ export const listPeople = ({ role, status = 'all', q = '' }) =>
 export const getPerson = (id) => apiRequest(`/api/v1/admin/people/${id}`)
 export const personAction = (id, action, reason) =>
   apiRequest(`/api/v1/admin/people/${id}/${action}`, json('POST', { reason }))
+export const resetPersonPassword = (id, reason) =>
+  apiRequest(`/api/v1/admin/people/${id}/reset-password`, json('POST', { reason }))
+export const getReportSummary = (start, end) =>
+  apiRequest(`/api/v1/admin/reports/summary?start=${start}&end=${end}`)
 export const getAdminSettings = () => apiRequest('/api/v1/admin/settings')
 export const saveAdminSettings = (changes) => apiRequest('/api/v1/admin/settings', json('PUT', changes))
 export const listStaffThreads = (status = 'open') => apiRequest(`/api/v1/admin/support/threads?status=${status}`)

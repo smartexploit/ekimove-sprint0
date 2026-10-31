@@ -7,6 +7,7 @@ import Alert from '../../components/ui/Alert.jsx'
 import StatusBadge from '../../components/ui/StatusBadge.jsx'
 import VehicleIcon from '../../components/ui/VehicleIcon.jsx'
 import SupportContacts from '../../components/SupportContacts.jsx'
+import NotificationsCard from '../../components/account/NotificationsCard.jsx'
 import { apiRequest } from '../../services/authService.js'
 import { vehicleLabel } from '../../utils/vehicles.js'
 
@@ -229,6 +230,7 @@ export default function DriverStatusPage() {
               </p>
             )}
           </section>
+          <NotificationsCard role="driver" />
         </div>
       )}
     </AppShell>

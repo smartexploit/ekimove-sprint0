@@ -173,7 +173,7 @@ def create_my_virtual_account(
                 "email": f"passenger-{current_user.id}@{settings.paystack_customer_email_domain}",
                 "first_name": first_name,
                 "last_name": last_name,
-                "phone": _international_phone(current_user.phone),
+                **({"phone": _international_phone(current_user.phone)} if current_user.phone else {}),
                 "metadata": {"ekimove_user_id": current_user.id},
             },
         )
@@ -239,6 +239,11 @@ def confirm_payment_from_deposit(
     deposit.status = "matched"
     _audit(db, actor_id, "payment.confirmed", "payment", payment.id,
            f"Payment confirmed {how} from deposit {deposit.reference} (NGN {deposit.amount}).")
+    ride = db.get(Ride, payment.ride_id)
+    if ride is not None and ride.status != "cancelled":
+        from app import notifications  # avoid an import cycle
+
+        notifications.payment_confirmed(db, ride)
 
 
 def find_payment_for_deposit(db: Session, deposit: BankDeposit) -> Payment | None:
@@ -367,7 +372,7 @@ def _deposit_result(deposit: BankDeposit, db: Session) -> dict:
         "status": deposit.status,
         "sender_name": deposit.sender_name,
         "account_number": deposit.account_number,
-        "passenger": ({"id": owner.id, "name": owner.full_name, "phone": owner.phone} if owner else None),
+        "passenger": ({"id": owner.id, "name": owner.full_name, "phone": owner.phone or owner.email} if owner else None),
         "ride_id": payment.ride_id if payment else None,
         "note": deposit.note,
         "created_at": deposit.created_at.isoformat() if deposit.created_at else None,
@@ -474,7 +479,7 @@ def _refund_result(payment: Payment, db: Session) -> dict:
         "refund_status": payment.refund_status,
         "refund_reference": payment.refund_reference,
         "currency": "NGN",
-        "passenger": ({"id": passenger.id, "name": passenger.full_name, "phone": passenger.phone} if passenger else None),
+        "passenger": ({"id": passenger.id, "name": passenger.full_name, "phone": passenger.phone or passenger.email} if passenger else None),
         "has_payment_account": account is not None,
         "route": f"{ride_request.origin_text} → {ride_request.destination_text}" if ride_request else None,
         "cancelled_at": ride.cancelled_at.isoformat() if ride and ride.cancelled_at else None,

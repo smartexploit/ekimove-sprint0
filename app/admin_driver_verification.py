@@ -133,6 +133,9 @@ def decide_driver_application(
         "approved" if payload.decision == "approve" else "rejected"
     )
     driver.is_online = False
+    from app import notifications  # avoid an import cycle
+
+    notifications.driver_reviewed(db, driver, payload.decision == "approve")
     db.commit()
 
     return {

@@ -4,7 +4,8 @@ import { Search, UserRound, X } from 'lucide-react'
 import AdminShell from '../../layouts/AdminShell.jsx'
 import Alert from '../../components/ui/Alert.jsx'
 import StatusBadge from '../../components/ui/StatusBadge.jsx'
-import { getPerson, listPeople, personAction } from '../../services/accountService.js'
+import CopyButton from '../../components/ui/CopyButton.jsx'
+import { getPerson, listPeople, personAction, resetPersonPassword } from '../../services/accountService.js'
 import { formatDateTime, formatNaira, formatShortDate, initials } from '../../utils/format.js'
 import { vehicleLabel } from '../../utils/vehicles.js'
 import { TrailViewer, VerificationReview } from '../../components/admin/PersonSafety.jsx'
@@ -17,6 +18,7 @@ const STATUS_FILTERS = {
 const ACTIONS = {
   suspend: ['Suspend account', 'They are signed out at once and can’t sign in or take trips until reactivated.', 'btn-danger-outline'],
   reactivate: ['Reactivate account', 'They can sign in and use EkiMove again.', 'btn-primary'],
+  'reset-password': ['Reset password', 'They get a temporary password to sign in with, then must choose their own. Any phone they’re signed in on is signed out. Check it’s really them first (for example, call the number on the account).', 'btn-primary'],
   remove: ['Remove account', 'Their name, phone and sign-in are erased for good. Trips, payments and earnings stay in the records. This can’t be undone.', 'btn-accent'],
 }
 
@@ -34,6 +36,7 @@ function PersonDetail({ id, onClose, onChanged }) {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [trailRide, setTrailRide] = useState(null)
+  const [temporary, setTemporary] = useState('')
 
   const load = useCallback(() => getPerson(id).then(setPerson).catch((err) => setError(err.message)), [id])
   useEffect(() => {
@@ -49,7 +52,12 @@ function PersonDetail({ id, onClose, onChanged }) {
     setBusy(true)
     setError('')
     try {
-      await personAction(id, action, reason.trim())
+      if (action === 'reset-password') {
+        const result = await resetPersonPassword(id, reason.trim())
+        setTemporary(result.temporary_password)
+      } else {
+        await personAction(id, action, reason.trim())
+      }
       setNotice(`${ACTIONS[action][0]}: done.`)
       setAction(null)
       setReason('')
@@ -72,7 +80,7 @@ function PersonDetail({ id, onClose, onChanged }) {
           <span className="avatar avatar-lg" aria-hidden="true">{initials(person?.full_name)}</span>
           <div style={{ minWidth: 0 }}>
             <p className="profile-name">{person?.full_name || 'Loading…'}</p>
-            {person && <p className="muted small">{person.phone}{person.email ? ` · ${person.email}` : ''}</p>}
+            {person && <p className="muted small" style={{ overflowWrap: 'anywhere' }}>{[person.phone, person.email].filter(Boolean).join(' · ')}</p>}
           </div>
         </div>
         <button type="button" className="icon-btn" onClick={onClose} aria-label="Close details">
@@ -89,6 +97,11 @@ function PersonDetail({ id, onClose, onChanged }) {
             <div><dt>Joined</dt><dd>{formatShortDate(person.joined_at)}</dd></div>
             <div><dt>Trips</dt><dd>{person.rides.completed} completed · {person.rides.active} active · {person.rides.trips} total</dd></div>
             <div><dt>Rating</dt><dd>{person.rating?.average ? `★ ${person.rating.average} (${person.rating.count})` : 'No ratings yet'}</dd></div>
+            <div>
+              <dt>Confirmed</dt>
+              <dd>{[person.contact?.phone_verified && 'phone', person.contact?.email_verified && 'email'].filter(Boolean).join(' and ')
+                || 'Not yet (no code entered)'}</dd>
+            </div>
             <div><dt>Policies</dt><dd>{person.policies?.accepted_at ? `Accepted ${formatShortDate(person.policies.accepted_at)}` : 'Not yet accepted'}</dd></div>
             {person.emergency_contact && (
               <div><dt>Emergency contact</dt><dd>{person.emergency_contact.name} · {person.emergency_contact.phone}</dd></div>
@@ -166,6 +179,16 @@ function PersonDetail({ id, onClose, onChanged }) {
             </details>
           )}
 
+          {temporary && (
+            <div className="stack stack-sm" role="status">
+              <p className="small" style={{ fontWeight: 800 }}>Temporary password (shown once)</p>
+              <div className="temp-password">
+                <span>{temporary}</span>
+                <CopyButton value={temporary} label="Copy" />
+              </div>
+              <p className="muted small">Give it to them by phone or in person, never in a group chat.</p>
+            </div>
+          )}
           {canAct && !action && (
             <div className="row">
               {person.status === 'active' && (
@@ -174,6 +197,9 @@ function PersonDetail({ id, onClose, onChanged }) {
               {person.status === 'suspended' && (
                 <button type="button" className="btn btn-primary btn-sm" onClick={() => setAction('reactivate')}>Reactivate</button>
               )}
+              <button type="button" className="btn btn-sm" onClick={() => { setTemporary(''); setAction('reset-password') }}>
+                Reset password
+              </button>
               <button type="button" className="btn btn-sm" onClick={() => setAction('remove')}>Remove account</button>
             </div>
           )}
@@ -245,9 +271,9 @@ export default function AdminPeoplePage() {
         <div className="row" style={{ gap: 10 }}>
           <label className="search-field">
             <Search size={18} aria-hidden="true" />
-            <span className="sr-only">Search by name or phone</span>
+            <span className="sr-only">Search by name, phone or email</span>
             <input className="input" type="search" value={query} onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search name or phone" />
+              placeholder="Search name, phone or email" />
           </label>
           <div className="chip-row" aria-label="Filter">
             {STATUS_FILTERS[role].map(([value, label]) => (
@@ -277,7 +303,7 @@ export default function AdminPeoplePage() {
                       <span className="list-item-main">
                         <span className="list-item-title">{person.full_name}</span>
                         <span className="list-item-meta">
-                          {person.phone} · {person.rides.completed} {person.rides.completed === 1 ? 'trip' : 'trips'}
+                          {person.phone || person.email} · {person.rides.completed} {person.rides.completed === 1 ? 'trip' : 'trips'}
                           {person.driver ? ` · ${person.driver.vehicles.map((v) => v.plate_number).join(', ')}` : ''}
                         </span>
                       </span>

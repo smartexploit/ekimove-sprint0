@@ -8,6 +8,7 @@ export default function BookingRulesCard() {
   const [rules, setRules] = useState(null)
   const [enabled, setEnabled] = useState(true)
   const [requireId, setRequireId] = useState(false)
+  const [requireContact, setRequireContact] = useState(true)
   const [fee, setFee] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -21,6 +22,7 @@ export default function BookingRulesCard() {
         setRules(data)
         setEnabled(data.motorcycle_second_passenger_enabled)
         setRequireId(Boolean(data.require_verified_passengers))
+        setRequireContact(data.require_contact_verification !== false)
         setFee(String(data.motorcycle_second_passenger_fee))
       })
       .catch((err) => active && setError(err.message || 'Could not load booking rules.'))
@@ -41,6 +43,7 @@ export default function BookingRulesCard() {
         motorcycle_second_passenger_enabled: enabled,
         motorcycle_second_passenger_fee: amount,
         require_verified_passengers: requireId,
+        require_contact_verification: requireContact,
       })
       setRules(data)
       setNotice('Saved. New bookings use these rules straight away.')
@@ -80,6 +83,17 @@ export default function BookingRulesCard() {
           <label className="check-row">
             <input type="checkbox" checked={requireId} onChange={(event) => setRequireId(event.target.checked)} />
             Passengers must verify their ID before booking
+          </label>
+          <label className="check-row">
+            <input type="checkbox" checked={requireContact} onChange={(event) => setRequireContact(event.target.checked)} />
+            <span>
+              Everyone confirms their phone number or email with a code
+              <span className="field-hint" style={{ display: 'block' }}>
+                {rules.sms_configured || rules.email_configured
+                  ? `Codes are on (${[rules.sms_configured && 'text messages', rules.email_configured && 'email'].filter(Boolean).join(' and ')}). Untick this if the provider has a problem.`
+                  : 'Codes switch on once text messages or email are set up on the server.'}
+              </span>
+            </span>
           </label>
           <div>
             <button type="submit" className="btn btn-primary btn-sm" disabled={busy}>

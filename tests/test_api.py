@@ -4086,3 +4086,503 @@ def test_trips_without_a_pin_say_so_to_the_driver(client):
     trip = next(t for t in client.get("/api/v1/driver/rides", headers=driver).json() if t["id"] == ride_id)
     assert trip["pin_required"] is False
     assert _start_trip(client, ride_id, driver).status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Phase 5: phone or email sign-up, codes, notifications, reports
+# ---------------------------------------------------------------------------
+
+import csv as csv_module
+import io
+
+import app.messaging as messaging_module
+import app.push as push_module
+from app.models import AppSetting, PushSubscription, VerificationCode
+
+FCM_ENDPOINT = "https://fcm.googleapis.com/fcm/send/abc123-device-token"
+SUB_KEYS = {"p256dh": "BOr" + "x" * 84, "auth": "a1b2c3d4e5f6g7h8"}
+
+
+@pytest.fixture(autouse=True)
+def quiet_messaging_and_push(monkeypatch):
+    """No real texts, emails or pushes in tests; record what would be sent."""
+    for name in ("sms_provider", "bulksms_api_token", "termii_api_key", "email_provider", "email_from_address",
+                 "brevo_api_key", "smtp_host", "vapid_public_key", "vapid_private_key", "sentry_dsn"):
+        monkeypatch.setattr(settings, name, None)
+    monkeypatch.setattr(settings, "push_enabled", True)
+    pushed = []
+    monkeypatch.setattr(push_module, "_dispatch", lambda bind, private, queue: pushed.extend(queue))
+    return pushed
+
+
+@pytest.fixture()
+def outbox(monkeypatch):
+    """Switch on SMS and email codes and capture the messages."""
+    sent = []
+    monkeypatch.setattr(settings, "sms_provider", "bulksmsnigeria")
+    monkeypatch.setattr(settings, "bulksms_api_token", "test-token")
+    monkeypatch.setattr(settings, "email_provider", "brevo")
+    monkeypatch.setattr(settings, "brevo_api_key", "test-brevo")
+    monkeypatch.setattr(settings, "email_from_address", "hello@example.com")
+    monkeypatch.setattr(messaging_module, "send_sms", lambda to, body: sent.append(("sms", to, body)))
+    monkeypatch.setattr(messaging_module, "send_email", lambda to, subject, text: sent.append(("email", to, text)))
+    return sent
+
+
+def last_code(outbox):
+    import re
+
+    return re.search(r"\b(\d{6})\b", outbox[-1][2]).group(1)
+
+
+def age_codes(client, seconds=120):
+    """Pretend earlier codes were sent a while ago (skips the resend wait)."""
+    with session_for(client) as db:
+        for record in db.scalars(select(VerificationCode)).all():
+            record.created_at = record.created_at.replace(tzinfo=timezone.utc) - timedelta(seconds=seconds) \
+                if record.created_at.tzinfo is None else record.created_at - timedelta(seconds=seconds)
+        db.commit()
+
+
+def register(client, **fields):
+    body = {"full_name": "Ada Email", "password": "Email-Signup-Password-1!", "accept_policies": True, **fields}
+    return client.post("/api/v1/auth/register", json=body)
+
+
+def test_register_with_email_only_and_sign_in_with_it(client):
+    response = register(client, email="Ada@Example.COM")
+    assert response.status_code == 201, response.text
+    user = response.json()["user"]
+    assert user["email"] == "ada@example.com" and user["phone"] is None
+    token = client.post("/api/v1/auth/login", json={"identifier": "  ADA@example.com ",
+                                                    "password": "Email-Signup-Password-1!"})
+    assert token.status_code == 200, token.text
+    me = client.get("/api/v1/me", headers={"Authorization": f"Bearer {token.json()['access_token']}"}).json()
+    assert me["email"] == "ada@example.com" and me["contact"]["needs_verification"] is None
+
+
+def test_register_needs_phone_or_email_and_rejects_duplicates(client):
+    assert register(client).status_code == 422
+    assert register(client, email="not-an-email").status_code == 422
+    assert register(client, email="dup@example.com").status_code == 201
+    duplicate = register(client, email="DUP@example.com")
+    assert duplicate.status_code == 409 and duplicate.json()["detail"] == "Email address is already registered"
+    # The same number written another way is still the same number.
+    assert register(client, phone="+234 800 000 0001").status_code == 409
+
+
+def test_login_accepts_phone_in_any_common_form(client):
+    for form in ("08000000001", "+2348000000001", "2348000000001", "0800 000 0001"):
+        response = client.post("/api/v1/auth/login", json={"identifier": form,
+                                                           "password": "Passenger-Test-Password-1!"})
+        assert response.status_code == 200, (form, response.text)
+    wrong = client.post("/api/v1/auth/login", json={"identifier": "nobody@example.com", "password": "x"})
+    assert wrong.status_code == 401
+    assert client.post("/api/v1/auth/login", json={"password": "x"}).status_code == 422
+
+
+def test_codes_are_off_until_a_provider_is_set(client):
+    assert client.get("/api/v1/auth/options").json() == {"sms": False, "email": False, "password_reset": False}
+    response = client.post("/api/v1/auth/password-reset/request", json={"identifier": "08000000001"})
+    assert response.status_code == 503
+    headers = login(client, "08000000001", "Passenger-Test-Password-1!")
+    assert client.post("/api/v1/me/verify/send", json={"channel": "sms"}, headers=headers).status_code == 503
+    # Booking isn't blocked by contact checks while codes are off.
+    assert client.post("/api/v1/ride-requests", json=ride_payload(), headers=headers).status_code == 201
+
+
+def test_new_phone_account_confirms_with_a_texted_code_before_booking(client, outbox):
+    assert client.get("/api/v1/auth/options").json()["sms"] is True
+    response = register(client, phone="0803 123 4567")
+    assert response.status_code == 201, response.text
+    headers = {"Authorization": f"Bearer {response.json()['access_token']}"}
+    me = client.get("/api/v1/me", headers=headers).json()
+    assert me["phone"] == "08031234567"
+    assert me["contact"]["needs_verification"] == "sms"
+    blocked = client.post("/api/v1/ride-requests", json=ride_payload(), headers=headers)
+    assert blocked.status_code == 403 and "confirm your phone number" in blocked.json()["detail"]
+
+    sent = client.post("/api/v1/me/verify/send", json={"channel": "sms"}, headers=headers)
+    assert sent.status_code == 200, sent.text
+    assert sent.json()["sent_to"] == "0803•••4567"
+    assert outbox[-1][0] == "sms" and outbox[-1][1] == "08031234567"
+    assert len(outbox[-1][2]) <= 160 and outbox[-1][2].isascii()
+    again = client.post("/api/v1/me/verify/send", json={"channel": "sms"}, headers=headers)
+    assert again.status_code == 429 and "Retry-After" in again.headers
+
+    code = last_code(outbox)
+    wrong = client.post("/api/v1/me/verify/confirm", json={"channel": "sms", "code": "000000" if code != "000000"
+                                                           else "111111"}, headers=headers)
+    assert wrong.status_code == 400 and "4 tries left" in wrong.json()["detail"]
+    ok = client.post("/api/v1/me/verify/confirm", json={"channel": "sms", "code": code}, headers=headers)
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["phone_verified"] is True and ok.json()["needs_verification"] is None
+    # Codes work once.
+    assert client.post("/api/v1/me/verify/confirm", json={"channel": "sms", "code": code},
+                       headers=headers).status_code == 400
+    with session_for(client) as db:
+        stored = db.scalars(select(VerificationCode)).all()
+        assert all(code not in record.code_hash for record in stored)
+    created = client.post("/api/v1/ride-requests", json=ride_payload(), headers=headers)
+    assert created.status_code == 201, created.text
+
+
+def test_super_admin_can_switch_off_contact_confirmation(client, outbox):
+    headers = {"Authorization": f"Bearer {register(client, email='late@example.com').json()['access_token']}"}
+    assert client.get("/api/v1/me", headers=headers).json()["contact"]["needs_verification"] == "email"
+    admin = _login_as_super_admin(client)
+    settings_now = client.put("/api/v1/admin/settings", json={"require_contact_verification": False}, headers=admin)
+    assert settings_now.status_code == 200
+    assert settings_now.json()["require_contact_verification"] is False
+    assert settings_now.json()["sms_configured"] is True
+    assert client.get("/api/v1/me", headers=headers).json()["contact"]["needs_verification"] is None
+    # Super-admins are never held up by codes.
+    assert client.get("/api/v1/me", headers=admin).json()["contact"]["needs_verification"] is None
+
+
+def test_password_reset_by_text_code(client, outbox):
+    old = login(client, "08000000001", "Passenger-Test-Password-1!")
+    unknown = client.post("/api/v1/auth/password-reset/request", json={"identifier": "08099999999"})
+    known = client.post("/api/v1/auth/password-reset/request", json={"identifier": "+2348000000001"})
+    assert unknown.status_code == known.status_code == 200
+    assert unknown.json() == known.json()
+    assert len(outbox) == 1 and outbox[0][1] == "08000000001"
+    code = last_code(outbox)
+    bad = client.post("/api/v1/auth/password-reset/confirm", json={
+        "identifier": "08000000001", "code": code, "new_password": "short"})
+    assert bad.status_code == 422
+    done = client.post("/api/v1/auth/password-reset/confirm", json={
+        "identifier": "08000000001", "code": code, "new_password": "Brand-New-Password-9!"})
+    assert done.status_code == 200, done.text
+    assert client.get("/api/v1/auth/me", headers=old).status_code == 401
+    login(client, "08000000001", "Brand-New-Password-9!")
+    with session_for(client) as db:
+        user = db.get(User, 1)
+        assert user.phone_verified_at is not None
+        assert db.scalar(select(AuditLog).where(AuditLog.action == "password.reset")) is not None
+
+
+def test_reset_code_locks_after_five_wrong_tries(client, outbox):
+    client.post("/api/v1/auth/password-reset/request", json={"identifier": "08000000001"})
+    code = last_code(outbox)
+    wrong = "123456" if code != "123456" else "654321"
+    for _ in range(5):
+        response = client.post("/api/v1/auth/password-reset/confirm", json={
+            "identifier": "08000000001", "code": wrong, "new_password": "Brand-New-Password-9!"})
+        assert response.status_code == 400
+    assert "Too many wrong tries" in response.json()["detail"]
+    locked = client.post("/api/v1/auth/password-reset/confirm", json={
+        "identifier": "08000000001", "code": code, "new_password": "Brand-New-Password-9!"})
+    assert locked.status_code == 400
+
+
+def test_reset_falls_back_to_the_other_contact(client, outbox, monkeypatch):
+    monkeypatch.setattr(settings, "sms_provider", None)
+    register(client, phone="08031112222", email="both@example.com")
+    client.post("/api/v1/auth/password-reset/request", json={"identifier": "08031112222"})
+    assert outbox[-1][0] == "email" and outbox[-1][1] == "both@example.com"
+
+
+def test_codes_are_limited_per_hour(client, outbox):
+    for attempt in range(5):
+        response = client.post("/api/v1/auth/password-reset/request", json={"identifier": "08000000001"})
+        assert response.status_code == 200, (attempt, response.text)
+        age_codes(client, 70)
+    blocked = client.post("/api/v1/auth/password-reset/request", json={"identifier": "08000000001"})
+    assert blocked.status_code == 429
+
+
+def test_failed_send_reports_an_error(client, outbox, monkeypatch):
+    def broken(to, body):
+        raise messaging_module.MessagingError("insufficient units")
+
+    monkeypatch.setattr(messaging_module, "send_sms", broken)
+    response = client.post("/api/v1/auth/password-reset/request", json={"identifier": "08000000001"})
+    assert response.status_code == 502
+    with session_for(client) as db:
+        assert db.scalars(select(VerificationCode)).all() == []
+
+
+def test_change_email_with_a_code(client, outbox):
+    headers = login(client, "08000000001", "Passenger-Test-Password-1!")
+    register(client, email="taken@example.com")
+    wrong = client.post("/api/v1/me/contact/start", json={"kind": "email", "value": "new@example.com",
+                                                          "password": "nope"}, headers=headers)
+    assert wrong.status_code == 400
+    taken = client.post("/api/v1/me/contact/start", json={"kind": "email", "value": "Taken@example.com",
+                                                          "password": "Passenger-Test-Password-1!"}, headers=headers)
+    assert taken.status_code == 409
+    start = client.post("/api/v1/me/contact/start", json={"kind": "email", "value": "New@Example.com",
+                                                          "password": "Passenger-Test-Password-1!"}, headers=headers)
+    assert start.status_code == 200 and start.json()["code_sent"] is True
+    assert outbox[-1][:2] == ("email", "new@example.com")
+    assert client.patch("/api/v1/me", json={"email": "sneaky@example.com"}, headers=headers).status_code == 409
+    done = client.post("/api/v1/me/contact/confirm", json={"kind": "email", "value": "new@example.com",
+                                                           "code": last_code(outbox)}, headers=headers)
+    assert done.status_code == 200, done.text
+    profile = done.json()["profile"]
+    assert profile["email"] == "new@example.com" and profile["contact"]["email_verified"] is True
+    login(client, "new@example.com", "Passenger-Test-Password-1!")
+
+
+def test_change_phone_without_codes_saves_it_unconfirmed(client):
+    headers = login(client, "08000000001", "Passenger-Test-Password-1!")
+    response = client.post("/api/v1/me/contact/start", json={"kind": "phone", "value": "0805 555 6666",
+                                                             "password": "Passenger-Test-Password-1!"}, headers=headers)
+    assert response.status_code == 200, response.text
+    assert response.json()["code_sent"] is False
+    assert response.json()["profile"]["phone"] == "08055556666"
+    login(client, "08055556666", "Passenger-Test-Password-1!")
+    email_only = register(client, email="solo@example.com").json()["access_token"]
+    removal = client.patch("/api/v1/me", json={"email": ""}, headers={"Authorization": f"Bearer {email_only}"})
+    assert removal.status_code == 409
+
+
+def test_admin_reset_password_gives_a_temporary_password(client):
+    admin = _login_as_super_admin(client)
+    old = login(client, "08000000001", "Passenger-Test-Password-1!")
+    response = client.post("/api/v1/admin/people/1/reset-password", json={"reason": "Called in, ID checked"},
+                           headers=admin)
+    assert response.status_code == 200, response.text
+    temporary = response.json()["temporary_password"]
+    assert len(temporary) == 14 and temporary.count("-") == 2
+    assert client.get("/api/v1/auth/me", headers=old).status_code == 401
+    headers = login(client, "08000000001", temporary)
+    assert client.get("/api/v1/auth/me", headers=headers).json()["must_change_password"] is True
+    changed = client.post("/api/v1/me/password", json={"current_password": temporary,
+                                                       "new_password": "Chosen-By-Me-Password-2!"}, headers=headers)
+    assert changed.status_code == 200
+    fresh = {"Authorization": f"Bearer {changed.json()['access_token']}"}
+    assert client.get("/api/v1/auth/me", headers=fresh).json()["must_change_password"] is False
+    assert client.post("/api/v1/admin/people/4/reset-password", json={"reason": "self"},
+                       headers=admin).status_code == 409
+    assert client.post("/api/v1/admin/people/1/reset-password", json={"reason": "nope"},
+                       headers=fresh).status_code == 403
+
+
+def test_admin_people_search_finds_email(client):
+    register(client, email="findme@example.com")
+    admin = _login_as_super_admin(client)
+    rows = client.get("/api/v1/admin/people", params={"q": "findme"}, headers=admin).json()
+    assert [row["email"] for row in rows] == ["findme@example.com"]
+
+
+def test_removed_email_account_frees_the_address(client):
+    user_id = register(client, email="gone@example.com").json()["user"]["id"]
+    admin = _login_as_super_admin(client)
+    assert client.post(f"/api/v1/admin/people/{user_id}/remove", json={"reason": "Asked to delete"},
+                       headers=admin).status_code == 200
+    assert register(client, email="gone@example.com").status_code == 201
+
+
+def test_bulksmsnigeria_request_shape(monkeypatch):
+    calls = []
+
+    class Reply:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"data": {"status": "success", "message": "Message Sent"}}
+
+    monkeypatch.setattr(settings, "sms_provider", "bulksmsnigeria")
+    monkeypatch.setattr(settings, "bulksms_api_token", "tok")
+    monkeypatch.setattr(messaging_module.requests, "post", lambda url, **kw: calls.append((url, kw)) or Reply())
+    messaging_module.send_sms("0803 123 4567", "Your EkiMove code is 123456.")
+    url, kw = calls[0]
+    assert url == "https://www.bulksmsnigeria.com/api/v1/sms/create"
+    assert kw["data"] == {"api_token": "tok", "from": "EkiMove", "to": "2348031234567",
+                          "body": "Your EkiMove code is 123456.", "dnd": "2"}
+
+    class Refused(Reply):
+        @staticmethod
+        def json():
+            return {"error": {"code": 401, "message": "Insufficient balance"}}
+
+    monkeypatch.setattr(messaging_module.requests, "post", lambda url, **kw: Refused())
+    with pytest.raises(messaging_module.MessagingError, match="Insufficient balance"):
+        messaging_module.send_sms("08031234567", "x")
+
+
+def test_termii_and_brevo_request_shapes(monkeypatch):
+    calls = []
+
+    class Reply:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"message_id": "9", "message": "Successfully Sent"}
+
+    monkeypatch.setattr(settings, "sms_provider", "termii")
+    monkeypatch.setattr(settings, "termii_api_key", "tk")
+    monkeypatch.setattr(settings, "email_provider", "brevo")
+    monkeypatch.setattr(settings, "brevo_api_key", "bk")
+    monkeypatch.setattr(settings, "email_from_address", "hello@example.com")
+    monkeypatch.setattr(messaging_module.requests, "post", lambda url, **kw: calls.append((url, kw)) or Reply())
+    messaging_module.send_sms("+2348031234567", "hi")
+    messaging_module.send_email("a@example.com", "Subject", "Body")
+    assert calls[0][0].endswith("/api/sms/send")
+    assert calls[0][1]["json"]["to"] == "2348031234567" and calls[0][1]["json"]["channel"] == "dnd"
+    assert calls[1][0] == "https://api.brevo.com/v3/smtp/email"
+    assert calls[1][1]["headers"]["api-key"] == "bk"
+    assert calls[1][1]["json"]["to"] == [{"email": "a@example.com"}]
+
+
+def test_push_keys_are_created_once(client):
+    first = client.get("/api/v1/push/config").json()
+    second = client.get("/api/v1/push/config").json()
+    assert first["enabled"] is True and first["public_key"] == second["public_key"]
+    assert len(first["public_key"]) == 87  # 65 bytes, base64url without padding
+
+
+def test_push_subscription_only_for_real_push_services(client):
+    headers = login(client, "08000000001", "Passenger-Test-Password-1!")
+    client.get("/api/v1/push/config")
+    bad = client.post("/api/v1/push/subscriptions", json={"endpoint": "https://evil.example.com/x", "keys": SUB_KEYS},
+                      headers=headers)
+    assert bad.status_code == 422
+    insecure = client.post("/api/v1/push/subscriptions", json={"endpoint": "http://fcm.googleapis.com/fcm/send/x",
+                                                               "keys": SUB_KEYS}, headers=headers)
+    assert insecure.status_code == 422
+    ok = client.post("/api/v1/push/subscriptions", json={"endpoint": FCM_ENDPOINT, "keys": SUB_KEYS}, headers=headers)
+    assert ok.status_code == 200 and ok.json()["devices"] == 1
+    # Same phone, another person signs in: the phone now belongs to them.
+    other = login(client, "08000000002", "Second-Test-Password-2!")
+    client.post("/api/v1/push/subscriptions", json={"endpoint": FCM_ENDPOINT, "keys": SUB_KEYS}, headers=other)
+    with session_for(client) as db:
+        assert [s.user_id for s in db.scalars(select(PushSubscription)).all()] == [2]
+
+
+def subscribe(client, headers, endpoint=FCM_ENDPOINT):
+    client.get("/api/v1/push/config")
+    response = client.post("/api/v1/push/subscriptions", json={"endpoint": endpoint, "keys": SUB_KEYS},
+                           headers=headers)
+    assert response.status_code == 200, response.text
+
+
+def test_trip_events_notify_the_right_phones(client, quiet_messaging_and_push):
+    pushed = quiet_messaging_and_push
+    passenger = login(client, "08000000001", "Passenger-Test-Password-1!")
+    driver = login(client, *DRIVER_LOGIN)
+    subscribe(client, passenger, "https://fcm.googleapis.com/fcm/send/passenger")
+    subscribe(client, driver, "https://web.push.apple.com/driver-phone")
+    _, request_id = new_request(client, passenger)
+    client.get("/api/v1/driver/offers/current", headers=driver)
+    offers = [json.loads(p["payload"]) for p in pushed if "driver-phone" in p["endpoint"]]
+    assert offers and offers[0]["title"].startswith("New trip offer")
+    assert offers[0]["url"] == "/driver/trips"
+    assert [p for p in pushed if "driver-phone" in p["endpoint"]][0]["urgent"] is True
+    offer = client.get("/api/v1/driver/offers/current", headers=driver).json()["offer"]
+    assert client.post(f"/api/v1/driver/offers/{offer['id']}/accept", headers=driver).status_code == 200
+    titles = [json.loads(p["payload"])["title"] for p in pushed if "passenger" in p["endpoint"]]
+    assert "Your driver is assigned" in titles
+    ride_id = get_ride_id_from_request(client, request_id, passenger)
+    _confirm_payment(client, passenger, _login_as_super_admin(client), ride_id)
+    driver_titles = [json.loads(p["payload"])["title"] for p in pushed if "driver-phone" in p["endpoint"]]
+    assert "Passenger has paid" in driver_titles
+    client.patch(f"/api/v1/driver/rides/{ride_id}/status", json={"status": "driver_arriving"}, headers=driver)
+    titles = [json.loads(p["payload"])["title"] for p in pushed if "passenger" in p["endpoint"]]
+    assert {"Payment received", "Your driver has arrived"} <= set(titles)
+
+
+def test_support_reply_and_sos_notify(client, quiet_messaging_and_push):
+    pushed = quiet_messaging_and_push
+    passenger = login(client, "08000000001", "Passenger-Test-Password-1!")
+    admin = _login_as_super_admin(client)
+    subscribe(client, passenger, "https://fcm.googleapis.com/fcm/send/p1")
+    subscribe(client, admin, "https://updates.push.services.mozilla.com/wpush/v2/admin")
+    thread = client.post("/api/v1/support/threads", json={"subject": "Lost item", "message": "I left my bag"},
+                         headers=passenger).json()
+    admin_push = [json.loads(p["payload"]) for p in pushed if "mozilla" in p["endpoint"]]
+    assert admin_push[-1]["title"] == "Support: Test Passenger"
+    client.post(f"/api/v1/admin/support/threads/{thread['id']}/messages", json={"body": "We found it"},
+                headers=admin)
+    mine = [json.loads(p["payload"]) for p in pushed if "p1" in p["endpoint"]]
+    assert mine[-1] == {"title": "EkiMove support replied", "body": "We found it",
+                        "url": f"/support?thread={thread['id']}", "tag": f"support-{thread['id']}"}
+
+
+def test_notifications_are_not_sent_when_the_request_fails(client, quiet_messaging_and_push):
+    pushed = quiet_messaging_and_push
+    passenger = login(client, "08000000001", "Passenger-Test-Password-1!")
+    subscribe(client, passenger)
+    with session_for(client) as db:
+        push_module.notify(db, 1, "Should not arrive", "rolled back")
+        db.rollback()
+        push_module.notify(db, 1, "Arrives", "committed")
+        db.commit()
+    assert [json.loads(p["payload"])["title"] for p in pushed] == ["Arrives"]
+
+
+def test_gone_subscriptions_are_removed(client, monkeypatch):
+    passenger = login(client, "08000000001", "Passenger-Test-Password-1!")
+    subscribe(client, passenger)
+    from pywebpush import WebPushException
+
+    def fake_webpush(**kwargs):
+        raise WebPushException("gone", response=SimpleNamespace(status_code=410, text="gone"))
+
+    import pywebpush
+
+    monkeypatch.setattr(pywebpush, "webpush", fake_webpush)
+    with session_for(client) as db:
+        private = db.get(AppSetting, push_module.PRIVATE_KEY).value
+        sub = db.scalars(select(PushSubscription)).one()
+        queue = [{"id": sub.id, "endpoint": sub.endpoint, "p256dh": sub.p256dh, "auth": sub.auth,
+                  "payload": "{}", "urgent": False, "ttl": 60}]
+        bind = db.get_bind()
+    push_module.deliver(bind, private, queue)
+    with session_for(client) as db:
+        assert db.scalars(select(PushSubscription)).all() == []
+
+
+def test_test_notification_needs_a_subscription(client, quiet_messaging_and_push):
+    headers = login(client, "08000000001", "Passenger-Test-Password-1!")
+    assert client.post("/api/v1/push/test", headers=headers).status_code == 409
+    subscribe(client, headers)
+    assert client.post("/api/v1/push/test", headers=headers).json() == {"sent_to_devices": 1}
+    assert json.loads(quiet_messaging_and_push[-1]["payload"])["title"] == "Notifications are on"
+
+
+def test_reports_count_a_completed_paid_trip(client, no_paystack):
+    _, admin, ride_id, fare = complete_paid_ride(client)
+    report = client.get("/api/v1/admin/reports/summary", headers=admin)
+    assert report.status_code == 200, report.text
+    totals = report.json()["totals"]
+    assert len(report.json()["days"]) == 30
+    assert totals["completed_trips"] == 1 and totals["payments_confirmed"] == 1
+    assert totals["completed_fares"] == f"{fare:.2f}" and totals["payments_amount"] == f"{fare:.2f}"
+    commission = (fare * Decimal("0.10")).quantize(Decimal("0.01"))
+    assert totals["commission"] == f"{commission:.2f}"
+    assert totals["driver_earnings"] == f"{fare - commission:.2f}"
+
+    export = client.get("/api/v1/admin/reports/export", params={"kind": "trips"}, headers=admin)
+    assert export.status_code == 200
+    assert export.headers["content-type"].startswith("text/csv")
+    assert "attachment" in export.headers["content-disposition"]
+    rows = list(csv_module.reader(io.StringIO(export.text.lstrip("﻿"))))
+    assert rows[0][0] == "Trip" and rows[1][0] == str(ride_id) and rows[1][4] == "completed"
+    daily = client.get("/api/v1/admin/reports/export", params={"kind": "daily"}, headers=admin).text
+    assert daily.strip().splitlines()[-1].startswith("Total,")
+    for kind in ("payments", "payouts"):
+        assert client.get("/api/v1/admin/reports/export", params={"kind": kind}, headers=admin).status_code == 200
+
+
+def test_reports_validate_dates_and_need_super_admin(client):
+    admin = _login_as_super_admin(client)
+    passenger = login(client, "08000000001", "Passenger-Test-Password-1!")
+    assert client.get("/api/v1/admin/reports/summary", headers=passenger).status_code == 403
+    assert client.get("/api/v1/admin/reports/summary", params={"start": "2026-10-10", "end": "2026-10-01"},
+                      headers=admin).status_code == 422
+    assert client.get("/api/v1/admin/reports/summary", params={"start": "2024-01-01", "end": "2026-10-01"},
+                      headers=admin).status_code == 422
+
+
+def test_csv_cells_cannot_run_as_formulas():
+    from app.reports import _safe
+
+    assert _safe("=HYPERLINK(\"x\")") == "'=HYPERLINK(\"x\")"
+    assert _safe("@cmd") == "'@cmd"
+    assert _safe("-1500.00") == "-1500.00"
+    assert _safe("Ado-Ekiti") == "Ado-Ekiti"

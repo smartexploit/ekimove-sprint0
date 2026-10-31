@@ -34,6 +34,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app import notifications
 from app.app_settings import seats_needed
 from app.auth import get_current_user
 from app.config import settings
@@ -156,6 +157,7 @@ def assign_driver(db: Session, ride_request: RideRequest, driver: Driver, actor_
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="Ride request has already been assigned") from None
+    notifications.driver_assigned(db, ride_request, driver, vehicle)
     return ride, vehicle
 
 
@@ -224,6 +226,7 @@ def _offer_next(db: Session, ride_request: RideRequest, rules: dict) -> None:
                      expires_at=_now() + timedelta(seconds=rules["dispatch_offer_seconds"])))
     ride_request.dispatch_attempts += 1
     ride_request.dispatch_status = "offering"
+    notifications.trip_offered(db, ride_request, driver, rules["dispatch_offer_seconds"])
     try:
         db.commit()
     except IntegrityError:

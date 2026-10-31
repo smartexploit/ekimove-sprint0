@@ -3,8 +3,10 @@ import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { LogoMark } from '../components/brand/Logo.jsx'
 import { getCurrentUser, getAccessToken, logoutPassenger } from '../services/authService.js'
 import { homePathForRole } from '../utils/roles.js'
+import { syncNotifications } from '../utils/push.js'
 import SessionTimeout from '../components/SessionTimeout.jsx'
 import PolicyGate from '../components/PolicyGate.jsx'
+import AccountGate from '../components/account/AccountGate.jsx'
 
 export default function ProtectedRoute({ requiredRole = 'passenger' }) {
   const location = useLocation()
@@ -25,6 +27,8 @@ export default function ProtectedRoute({ requiredRole = 'passenger' }) {
       try {
         const user = await getCurrentUser()
         if (active) setState({ loading: false, user })
+        // Link this phone's notifications to whoever is now signed in.
+        syncNotifications()
       } catch {
         logoutPassenger()
         if (active) setState({ loading: false, user: null })
@@ -76,6 +80,7 @@ export default function ProtectedRoute({ requiredRole = 'passenger' }) {
     <>
       <SessionTimeout />
       <PolicyGate role={state.user.role} />
+      <AccountGate />
       <Outlet context={{ user: state.user }} />
     </>
   )

@@ -155,6 +155,9 @@ def cancel_ride(
         if terms["paid"] and fee > 0:
             # The kept fee goes to the driver, minus commission.
             record_cancellation_earning(db, ride, fee)
+        from app import notifications  # avoid an import cycle
+
+        notifications.ride_cancelled(db, ride, ride_request, current_user.id)
 
     reason = (payload.reason if payload else None) or "No reason given"
     db.add(

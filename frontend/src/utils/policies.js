@@ -14,7 +14,7 @@ export const POLICIES = [
         'By creating an account or using EkiMove, you agree to these Terms, our Privacy Policy, our Community & Safety Guidelines and our Cancellation & Refund Policy. Drivers also agree to the Driver Agreement.',
       ]],
       ['Your account', [
-        'You must be at least 18 years old and give accurate details, including your real name and a phone number you control.',
+        'You must be at least 18 years old and give accurate details, including your real name and a phone number or email address you control.',
         'Keep your password private. You are responsible for activity on your account. Tell us at once through Support if you think someone else has used it.',
         'One person, one account. Accounts cannot be sold or transferred.',
       ]],
@@ -51,7 +51,7 @@ export const POLICIES = [
     summary: 'What personal data we collect, why, who we share it with, and your rights under the Nigeria Data Protection Act 2023.',
     sections: [
       ['What we collect', [
-        'Account details: your name, phone number, optional email and password (stored only in a scrambled, one-way form).',
+        'Account details: your name, the phone number and/or email you sign in with, whether you have confirmed them with a code, and your password (stored only in a scrambled, one-way form).',
         'Trip details: pickups, destinations, times, fares, vehicle, ratings, cancellations, and messages with Support.',
         'Payment records: amounts, methods and references. We do not store card numbers; card payments are handled by our payment partners.',
         'Identity checks: passengers who verify their ID give the ID type, number and a photo of it. Drivers give a face photo and vehicle details.',
@@ -69,7 +69,7 @@ export const POLICIES = [
         'Your driver sees your first name and last initial, pickup and destination, and whether your ID is verified. Passengers see their driver’s first name and last initial, vehicle and plate number, rating and live location during the trip.',
         'Anyone you send a trip-sharing link to can see that trip’s status, driver details and map until two hours after it ends, or until you stop sharing.',
         'EkiMove staff see what they need to run and protect the service, including ID photos and trip trails, and every review is recorded.',
-        'Service providers that process data for us: payment partners (Paystack, Interswitch), photo storage (Cloudinary), hosting (Render), maps (OpenStreetMap or Geoapify) and, if you use the Atọ́nà assistant, an AI provider that processes your chat messages to reply.',
+        'Service providers that process data for us: payment partners (Paystack, Interswitch), photo storage (Cloudinary), hosting (Render), maps (OpenStreetMap or Geoapify), text-message and email providers (to send sign-in and reset codes), your phone’s notification service (if you turn notifications on), error monitoring (without your name or contact details) and, if you use the Atọ́nà assistant, an AI provider that processes your chat messages to reply.',
         'Authorities, when the law requires it or to protect someone’s safety.',
       ]],
       ['How long we keep it', [

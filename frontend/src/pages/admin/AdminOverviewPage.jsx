@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { RefreshCw } from 'lucide-react'
 import AdminShell from '../../layouts/AdminShell.jsx'
 import Alert from '../../components/ui/Alert.jsx'
+import NotificationsCard from '../../components/account/NotificationsCard.jsx'
 import { getOverview } from '../../services/accountService.js'
 import { formatDateTime, formatNaira } from '../../utils/format.js'
 
@@ -145,6 +146,7 @@ export default function AdminOverviewPage() {
                 </ul>
               )}
             </section>
+            <NotificationsCard role="super_admin" />
           </>
         )}
       </div>

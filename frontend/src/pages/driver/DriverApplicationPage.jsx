@@ -106,6 +106,13 @@ export default function DriverApplicationPage() {
             </label>
           </div>
 
+          <label className="field" htmlFor="driver-email">
+            <span className="field-label">Email (optional)</span>
+            <input id="driver-email" className="input" name="email" type="email" inputMode="email" autoComplete="email"
+              autoCapitalize="none" spellCheck={false} maxLength={254} placeholder="you@example.com" />
+            <span className="field-hint">You can sign in with your phone number or this email.</span>
+          </label>
+
           <div className="field">
             <label className="field-label" htmlFor="driver-password">Password</label>
             <PasswordInput

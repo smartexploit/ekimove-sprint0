@@ -58,7 +58,7 @@ def thread_summary(db: Session, thread: SupportThread, for_staff: bool) -> dict:
     }
     if for_staff:
         user = db.get(User, thread.user_id)
-        result["user"] = ({"id": user.id, "name": user.full_name, "phone": user.phone, "role": user.role}
+        result["user"] = ({"id": user.id, "name": user.full_name, "phone": user.phone or user.email, "role": user.role}
                           if user else None)
     return result
 
@@ -95,7 +95,8 @@ def thread_detail(db: Session, thread: SupportThread, for_staff: bool) -> dict:
     }
 
 
-def post_message(db: Session, thread: SupportThread, sender: User | None, body: str, from_staff: bool) -> SupportMessage:
+def post_message(db: Session, thread: SupportThread, sender: User | None, body: str, from_staff: bool,
+                 notify: bool = True) -> SupportMessage:
     now = _now()
     message = SupportMessage(thread_id=thread.id, sender_user_id=sender.id if sender else None,
                              from_staff=from_staff, body=body, created_at=now)
@@ -106,6 +107,13 @@ def post_message(db: Session, thread: SupportThread, sender: User | None, body: 
     else:
         thread.user_last_read_at = now
         thread.status = "open"  # a customer writing again reopens the chat
+    if notify:
+        from app import notifications  # avoid an import cycle
+
+        if from_staff:
+            notifications.support_reply(db, thread.user_id, thread.id, body)
+        elif sender is not None:
+            notifications.support_message(db, thread.id, sender, body)
     return message
 
 
