@@ -8,6 +8,7 @@ import {
   Wallet,
 } from 'lucide-react'
 import Logo from '../components/brand/Logo.jsx'
+import AtonaFloatingAssistant from '../components/AtonaFloatingAssistant.jsx'
 import { logoutPassenger } from '../services/authService.js'
 import { firstName, initials } from '../utils/format.js'
 import { homePathForRole } from '../utils/roles.js'
@@ -36,6 +37,7 @@ export default function AppShell({
   children,
   hideHead = false,
   className = '',
+  onApplyBooking,
 }) {
   const outlet = useOutletContext()
   const user = outlet?.user
@@ -108,6 +110,8 @@ export default function AppShell({
           {children}
         </div>
       </main>
+
+      <AtonaFloatingAssistant onApplyBooking={onApplyBooking} />
 
       <nav className="tabbar" aria-label="App">
         {items.map(([to, label, Icon]) => (

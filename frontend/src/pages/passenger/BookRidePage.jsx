@@ -6,7 +6,6 @@ import Alert from '../../components/ui/Alert.jsx'
 import StatusBadge from '../../components/ui/StatusBadge.jsx'
 import VehicleIcon from '../../components/ui/VehicleIcon.jsx'
 import { vehicleBlurb, vehicleLabel } from '../../utils/vehicles.js'
-import AtonaFloatingAssistant from '../../components/AtonaFloatingAssistant.jsx'
 import useTripOptions from '../../hooks/useTripOptions.js'
 import { apiRequest } from '../../services/authService.js'
 import { formatNaira, isMotorcycle } from '../../utils/format.js'
@@ -72,20 +71,22 @@ export default function BookRidePage() {
   )
   const motorcycleSelected = isMotorcycle(form.vehicle_type)
 
-  function applyAtonaBooking(booking) {
+  /** Fill the form with a trip Atọ́nà quoted (real place IDs from the API). */
+  function applyAtonaBooking(draft) {
     setForm((current) => ({
       ...current,
-      origin_text: booking.origin_text || '',
-      destination_text: booking.destination_text || '',
-      passenger_count: String(booking.passenger_count || 1),
-      origin_place_id: '',
-      destination_place_id: '',
-      vehicle_type: '',
+      service_area_id: draft.service_area_id ? String(draft.service_area_id) : current.service_area_id,
+      origin_place_id: draft.origin_place_id ? String(draft.origin_place_id) : '',
+      destination_place_id: draft.destination_place_id ? String(draft.destination_place_id) : '',
+      origin_text: draft.origin_name || '',
+      destination_text: draft.destination_name || '',
+      passenger_count: isMotorcycle(draft.vehicle_type)
+        ? '1'
+        : String(draft.passenger_count || 1),
+      vehicle_type: draft.vehicle_type || '',
     }))
     setError('')
-    setMessage(
-      'Atọ́nà added your trip details. Choose the matching pickup and destination places to see fares.',
-    )
+    setMessage('Atọ́nà filled in your trip. Check the details and choose your ride.')
     setRide(null)
   }
 
@@ -240,6 +241,7 @@ export default function BookRidePage() {
   return (
     <AppShell
       className="has-bottom-bar"
+      onApplyBooking={applyAtonaBooking}
       title="Book a ride"
       description="Choose your route to see the approved fares for it."
       actions={
@@ -437,7 +439,6 @@ export default function BookRidePage() {
           </div>
         </form>
       )}
-      <AtonaFloatingAssistant onApplyBooking={applyAtonaBooking} />
     </AppShell>
   )
 }

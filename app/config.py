@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     groq_api_key: str | None = None
     groq_model: str = "llama-3.3-70b-versatile"
     atona_enabled: bool = False
+    # Messages allowed per rolling window, per signed-in account or per
+    # guest IP address. Protects the paid AI service from abuse.
+    atona_user_message_limit: int = 40
+    atona_guest_message_limit: int = 20
+    atona_rate_limit_window_seconds: int = 600
     # Optional map and geocoding provider; disabled without a key.
     geoapify_api_key: str | None = None
 

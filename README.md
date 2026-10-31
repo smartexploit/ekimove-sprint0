@@ -90,6 +90,16 @@ Until all three bank fields are set, the payments page tells passengers the acco
 
 Driver plate numbers come from each driver's application (`plate_number` on the vehicle record). Passengers see the assigned driver's first name, last initial and plate on My rides once a ride is assigned.
 
+## Atọ́nà assistant
+Atọ́nà is EkiMove's chat guide, available to everyone on the homepage and on every passenger and driver screen. It chats naturally in English or Nigerian Pidgin, and answers EkiMove questions from live data through tools instead of guessing:
+
+- **Places and fares:** quotes the approved fare for an exact route and shows a "Trip ready" card that opens Book a ride prefilled.
+- **Your rides:** a passenger's latest rides with status, driver and plate; a driver's trips and approval status. Guests are asked to sign in, with buttons in the chat.
+- **Payments and support:** how to pay, plus the bank details and contacts from the business settings above.
+- **Map lookups (optional):** with `GEOAPIFY_API_KEY`, it can check landmarks and estimate driving distance and time.
+
+It never books rides, assigns drivers or confirms payments. To switch it on, set `ATONA_ENABLED=true` and `GROQ_API_KEY`; the chat button stays hidden until both are set (`GET /api/v1/atona/status`). Messages are rate-limited per account and per guest IP (`ATONA_*_MESSAGE_LIMIT`), using Redis when configured.
+
 ## Brand assets
 - Logo, app icon and favicon: `frontend/public/favicon.svg`, `frontend/public/brand/`
 - Design system (colours, type, components): `frontend/src/styles/ekimove.css`
