@@ -3676,3 +3676,186 @@ a.chip {
   overflow-y: auto;
   overscroll-behavior: contain;
 }
+
+/* Phase 6: saved places, promo codes, trip chat */
+.chip-sm {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+.saved-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.save-place {
+  display: grid;
+  gap: 8px;
+}
+
+.input-sm {
+  min-height: 40px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.promo-applied,
+.promo-suggestion {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--green-50);
+  color: var(--green-800);
+  text-align: left;
+}
+
+.promo-applied span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.promo-suggestion {
+  width: 100%;
+  border: 1.5px dashed var(--green-800);
+  font: inherit;
+  cursor: pointer;
+}
+
+.fare-was {
+  display: block;
+  color: var(--ink-500, #6b7a72);
+  font-size: 13px;
+  text-decoration: line-through;
+}
+
+.trip-chat {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 16px;
+  background: var(--surface-2, #f4f7f5);
+}
+
+.trip-chat-log {
+  display: grid;
+  gap: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.trip-bubble {
+  max-width: 85%;
+  padding: 8px 12px;
+  border-radius: 14px;
+  background: var(--white);
+  overflow-wrap: anywhere;
+  font-size: 15px;
+}
+
+.trip-bubble.is-mine {
+  justify-self: end;
+  background: var(--green-800);
+  color: var(--white);
+}
+
+.trip-bubble time {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.quick-replies {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+}
+
+.quick-replies .chip {
+  flex: 0 0 auto;
+}
+
+.invite-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 1.4rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.route-extras {
+  display: grid;
+  gap: 6px;
+  margin-top: -6px;
+}
+
+.route-extras:empty {
+  display: none;
+}
+
+.segmented button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+/* The chat sits on the dark live-ride card: keep its own readable colours. */
+.trip-chat {
+  color: var(--ink);
+}
+
+.trip-chat .link-button {
+  color: var(--green-800);
+}
+
+.trip-chat .row-between {
+  flex-wrap: nowrap;
+  gap: 10px;
+}
+
+.saved-bar {
+  display: grid;
+  gap: 8px;
+  margin-top: -6px;
+}
+
+.saved-chips {
+  align-items: center;
+}
+
+.saved-chips-label {
+  min-width: 82px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-500);
+}
+
+.saved-bar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+}
+
+.saved-bar-actions:empty {
+  display: none;
+}
+
+.saved-bar-actions .save-place {
+  flex: 1 1 100%;
+}
+
+/* Text-style buttons that still give a full-size tap area. */
+.link-tap {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}

@@ -21,6 +21,7 @@ export default function RegisterPage() {
     full_name: '',
     phone: '',
     email: '',
+    referral_code: (new URLSearchParams(location.search).get('ref') || '').toUpperCase().slice(0, 40),
     password: '',
     confirmPassword: '',
   })
@@ -71,6 +72,7 @@ export default function RegisterPage() {
         full_name: form.full_name,
         phone: method === 'phone' ? form.phone : '',
         email: method === 'email' ? form.email : '',
+        referral_code: form.referral_code,
         password: form.password,
         accept_policies: true,
       })
@@ -216,6 +218,14 @@ export default function RegisterPage() {
               : ''}
           </span>
         </div>
+
+        <label className="field" htmlFor="referral_code">
+          <span className="field-label">Invite code (optional)</span>
+          <input id="referral_code" className="input" name="referral_code" autoCapitalize="characters" spellCheck={false}
+            maxLength={40} value={form.referral_code} placeholder="From a friend"
+            onChange={(event) => setForm((current) => ({ ...current, referral_code: event.target.value.toUpperCase() }))} />
+          {form.referral_code && <span className="field-hint">You’ll get money off your first ride.</span>}
+        </label>
 
         <label className="check-row">
           <input type="checkbox" checked={agree} onChange={(event) => setAgree(event.target.checked)} />

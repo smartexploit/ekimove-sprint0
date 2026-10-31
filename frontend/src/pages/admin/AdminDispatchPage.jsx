@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { RefreshCw, Route } from 'lucide-react'
+import { formatPickupTime } from '../../utils/schedule.js'
 import AdminShell from '../../layouts/AdminShell.jsx'
 import Alert from '../../components/ui/Alert.jsx'
 import { apiRequest } from '../../services/authService.js'
@@ -18,6 +19,14 @@ function DispatchState({ request }) {
     return (
       <p className="small dispatch-state">
         <span className="badge badge-bright">Offered</span> to {offer.driver_name} · {offer.seconds_left}s left
+      </p>
+    )
+  }
+  if (request.dispatch_status === 'scheduled') {
+    return (
+      <p className="small dispatch-state">
+        <span className="badge badge-green">Booked ahead</span> Pickup {formatPickupTime(request.scheduled_for)} ·
+        drivers are offered it shortly before
       </p>
     )
   }

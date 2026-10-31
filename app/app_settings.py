@@ -41,6 +41,14 @@ DEFAULTS = {
     # Once text or email codes are set up, people confirm their phone
     # number or email with a code before using the app.
     "require_contact_verification": "true",
+    # Invites: money off a new passenger's first ride, and a thank-you
+    # code for whoever invited them once that ride is done (naira).
+    "referral_enabled": "true",
+    "referral_new_user_amount": "300",
+    "referral_reward_amount": "300",
+    # Rides booked for later start looking for a driver this many minutes
+    # before pickup.
+    "schedule_lead_minutes": "20",
 }
 
 
@@ -65,6 +73,7 @@ def booking_rules(db: Session) -> dict:
         "max_passengers": {"motorcycle": 2 if second else 1, **PASSENGER_LIMITS},
         "require_verified_passengers": _get(db, "require_verified_passengers") == "true",
         "haulage_vehicle_types": [{"value": k, "label": v} for k, v in HAULAGE_TYPES.items()],
+        "schedule_lead_minutes": schedule_lead_minutes(db),
     }
 
 
@@ -108,14 +117,27 @@ class SettingsUpdate(BaseModel):
     dispatch_max_offers: int | None = Field(default=None, ge=1, le=20)
     require_verified_passengers: bool | None = None
     require_contact_verification: bool | None = None
+    referral_enabled: bool | None = None
+    referral_new_user_amount: int | None = Field(default=None, ge=0, le=50_000)
+    referral_reward_amount: int | None = Field(default=None, ge=0, le=50_000)
+    schedule_lead_minutes: int | None = Field(default=None, ge=5, le=120)
+
+
+def schedule_lead_minutes(db: Session) -> int:
+    try:
+        return min(max(int(_get(db, "schedule_lead_minutes")), 5), 120)
+    except ValueError:
+        return int(DEFAULTS["schedule_lead_minutes"])
 
 
 def all_settings(db: Session) -> dict:
     from app.dispatch import dispatch_rules  # avoid an import cycle
 
     from app import messaging
+    from app.promos import referral_rules
 
-    return {**booking_rules(db), **dispatch_rules(db),
+    return {**booking_rules(db), **dispatch_rules(db), **referral_rules(db),
+            "schedule_lead_minutes": schedule_lead_minutes(db),
             "require_contact_verification": _get(db, "require_contact_verification") == "true",
             "sms_configured": messaging.sms_configured(),
             "email_configured": messaging.email_configured()}
@@ -147,6 +169,11 @@ def admin_update_settings(
         changes["require_verified_passengers"] = "true" if payload.require_verified_passengers else "false"
     if payload.require_contact_verification is not None:
         changes["require_contact_verification"] = "true" if payload.require_contact_verification else "false"
+    for key in ("referral_new_user_amount", "referral_reward_amount", "schedule_lead_minutes"):
+        if getattr(payload, key) is not None:
+            changes[key] = str(getattr(payload, key))
+    if payload.referral_enabled is not None:
+        changes["referral_enabled"] = "true" if payload.referral_enabled else "false"
     if not changes:
         raise HTTPException(status_code=422, detail="Nothing to change.")
     for key, value in changes.items():

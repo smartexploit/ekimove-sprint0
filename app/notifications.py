@@ -38,6 +38,12 @@ def trip_offered(db: Session, request: RideRequest, driver: Driver, seconds: int
            urgent=True, ttl=max(seconds, 30))
 
 
+def scheduled_search_started(db: Session, request: RideRequest) -> None:
+    notify(db, request.passenger_user_id, "Finding your driver",
+           f"Your booked ride {_route(request)} is coming up. We're finding a driver now.",
+           url="/my-rides", tag=f"ride-{request.id}")
+
+
 def driver_assigned(db: Session, request: RideRequest, driver: Driver, vehicle: Vehicle) -> None:
     driver_user = db.get(User, driver.user_id)
     notify(db, request.passenger_user_id, "Your driver is assigned",
@@ -75,6 +81,13 @@ def ride_cancelled(db: Session, ride: Ride, request: RideRequest, by_user_id: in
     target = driver_user_id if by_user_id == request.passenger_user_id else request.passenger_user_id
     notify(db, target, "Trip cancelled", f"{_route(request)} was cancelled.",
            url="/driver/trips" if target == driver_user_id else "/my-rides", tag=f"ride-{request.id}")
+
+
+def trip_message(db: Session, ride: Ride, request: RideRequest, sender: User, body: str) -> None:
+    passenger_side = sender.id == request.passenger_user_id
+    target = _driver_user_id(db, ride.driver_id) if passenger_side else request.passenger_user_id
+    notify(db, target, f"{_first_name(sender)}: new message", body[:120],
+           url="/driver/trips" if passenger_side else "/my-rides", tag=f"chat-{ride.id}", urgent=True, ttl=600)
 
 
 def quote_ready(db: Session, request: RideRequest) -> None:

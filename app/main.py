@@ -6,11 +6,17 @@ from app.payments import router as payments_router
 from app.interswitch_payments import router as interswitch_payments_router
 from app.instant_payments import instant_transfers_enabled, router as instant_payments_router
 from app.cancellations import router as cancellations_router
-from app import notifications
+from app import notifications, promos
+from app.scheduling import check_pickup_time, iso_utc
+from app.trip_chat import chat_unread
 from app.accounts import router as accounts_router
 from app.codes import router as codes_router
 from app.push import router as push_router
 from app.reports import router as reports_router
+from app.promos import router as promos_router
+from app.scheduling import router as scheduling_router
+from app.trip_chat import router as trip_chat_router
+from app.data_rights import router as data_rights_router
 from app.support import router as support_router
 from app.haulage import router as haulage_router
 from app.verification import client_fingerprint, ensure_passenger_may_book, record_policy_acceptance, router as verification_router
@@ -86,6 +92,10 @@ app.include_router(verification_router)
 app.include_router(codes_router)
 app.include_router(push_router)
 app.include_router(reports_router)
+app.include_router(promos_router)
+app.include_router(scheduling_router)
+app.include_router(trip_chat_router)
+app.include_router(data_rights_router)
 
 class LoginRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
@@ -106,6 +116,8 @@ class RegisterRequest(BaseModel):
     password: str = Field(min_length=12, max_length=256)
     # The app sends true after the person ticks "I agree" to EkiMove's policies.
     accept_policies: bool | None = None
+    # Optional invite code from a friend (money off the first ride).
+    referral_code: str | None = Field(default=None, max_length=40)
 
 
 class TokenResponse(BaseModel):
@@ -155,6 +167,9 @@ class RideRequestCreate(BaseModel):
     destination_text: str | None = Field(default=None, min_length=3, max_length=255)
     vehicle_type: str = Field(min_length=2, max_length=32)
     passenger_count: int = Field(default=1, ge=1, le=8)
+    # Book for later: pickup time (30 minutes to 7 days ahead).
+    scheduled_for: datetime | None = None
+    promo_code: str | None = Field(default=None, max_length=40)
 
 class RideStatusUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -191,6 +206,9 @@ class RideRequestCreated(BaseModel):
     quoted_fare: Decimal
     currency: str = "NGN"
     status: str
+    discount_amount: Decimal = Decimal("0.00")
+    amount_to_pay: Decimal | None = None
+    scheduled_for: str | None = None
 
 
 class RideAssignment(BaseModel):
@@ -630,6 +648,7 @@ def register(
             status_code=409,
             detail="Email address is already registered",
         )
+    inviter = promos.find_inviter(db, payload.referral_code)
 
     user = User(
         phone=phone,
@@ -645,6 +664,7 @@ def register(
         db.flush()
         if payload.accept_policies:
             record_policy_acceptance(db, user, request)
+        promos.welcome_invited(db, user, inviter)
         db.add(AuditLog(actor_user_id=user.id, action="auth.registered", entity_type="user",
                         entity_id=str(user.id), details=client_fingerprint(request)))
         db.commit()
@@ -968,6 +988,9 @@ def list_my_ride_requests(
 
     request_ids = [item.id for item in requests]
     requests_by_id = {item.id: item for item in requests}
+    place_ids = {item.origin_place_id for item in requests if item.origin_place_id}
+    place_areas = dict(db.execute(select(Place.id, Place.service_area_id).where(Place.id.in_(place_ids))).all()) \
+        if place_ids else {}
     assigned_rides = {}
     if request_ids:
         rows = db.execute(
@@ -1011,6 +1034,7 @@ def list_my_ride_requests(
                     if ride.cancellation_fee is not None
                     else None
                 ),
+                "chat_unread": chat_unread(db, ride, current_user),
                 "id": ride_id,
                 "status": ride_status,
                 "driver_name": _short_display_name(driver_full_name),
@@ -1032,6 +1056,12 @@ def list_my_ride_requests(
             "load_description": ride_request.load_description,
             "dispatch_status": ride_request.dispatch_status,
             "quote_terms": ride_request.quote_terms,
+            "scheduled_for": iso_utc(ride_request.scheduled_for),
+            "discount_amount": str(Decimal(ride_request.discount_amount or 0)),
+            "amount_to_pay": str(Decimal(ride_request.quoted_fare) - Decimal(ride_request.discount_amount or 0)),
+            "origin_place_id": ride_request.origin_place_id,
+            "destination_place_id": ride_request.destination_place_id,
+            "service_area_id": place_areas.get(ride_request.origin_place_id),
             "assigned_ride_id": (
                 assigned_rides[ride_request.id]["id"]
                 if ride_request.id in assigned_rides
@@ -1063,6 +1093,7 @@ def list_my_ride_requests(
                     "my_rating",
                     "share_active",
                     "driver_rating",
+                    "chat_unread",
                 )
             },
         }
@@ -1221,6 +1252,7 @@ def create_ride_request(
         raise HTTPException(status_code=422, detail=detail)
 
     calculated = quote_amount(rules, fare, payload.vehicle_type, payload.passenger_count)
+    scheduled_for = check_pickup_time(db, payload.scheduled_for)
 
     request = RideRequest(
         passenger_user_id=current_user.id,
@@ -1232,9 +1264,14 @@ def create_ride_request(
         passenger_count=payload.passenger_count,
         quoted_fare=calculated,
         status="requested",
+        scheduled_for=scheduled_for,
+        dispatch_status="scheduled" if scheduled_for else None,
     )
 
     db.add(request)
+    if payload.promo_code and payload.promo_code.strip():
+        db.flush()
+        promos.apply_code(db, current_user, request, payload.promo_code)
     try:
         db.commit()
         db.refresh(request)
@@ -1260,6 +1297,9 @@ def create_ride_request(
         passenger_count=request.passenger_count,
         quoted_fare=Decimal(request.quoted_fare),
         status=request.status,
+        discount_amount=Decimal(request.discount_amount or 0),
+        amount_to_pay=Decimal(request.quoted_fare) - Decimal(request.discount_amount or 0),
+        scheduled_for=iso_utc(request.scheduled_for),
     )
 
 from datetime import timezone
@@ -1464,6 +1504,8 @@ def list_driver_rides(
             "my_rating": my_rating(db, ride.id, current_user.id),
             "service_type": request.service_type,
             "load_description": request.load_description,
+            "scheduled_for": iso_utc(request.scheduled_for),
+            "chat_unread": chat_unread(db, ride, current_user),
         }
         for ride, request in rows
     ]
@@ -1548,6 +1590,10 @@ def update_driver_ride_status(
     status_request = db.get(RideRequest, ride.request_id)
     if status_request is not None:
         notifications.ride_status(db, ride, status_request)
+        if payload.status == "completed":
+            trip_passenger = db.get(User, status_request.passenger_user_id)
+            if trip_passenger is not None:
+                promos.reward_inviter(db, trip_passenger)
 
     db.add(
         AuditLog(

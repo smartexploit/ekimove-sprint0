@@ -259,13 +259,24 @@ def advance_dispatch(db: Session, force: bool = False) -> None:
                                              RideRequest.dispatch_status != "manual"))
             .order_by(RideRequest.created_at, RideRequest.id)
         ).all()
+        from app.app_settings import schedule_lead_minutes  # avoid an import cycle
+        from app.scheduling import due_for_dispatch
+
+        lead = schedule_lead_minutes(db)
         for request_id in waiting_ids:
             if db.scalar(select(RideOffer.id).where(RideOffer.request_id == request_id,
                                                     RideOffer.status == "pending")):
                 continue
             ride_request = db.get(RideRequest, request_id)
-            if ride_request is not None and ride_request.status == "requested":
-                _offer_next(db, ride_request, rules)
+            if ride_request is None or ride_request.status != "requested":
+                continue
+            # Rides booked for later wait until shortly before pickup.
+            if not due_for_dispatch(ride_request, lead, now):
+                continue
+            if ride_request.dispatch_status == "scheduled":
+                ride_request.dispatch_status = None
+                notifications.scheduled_search_started(db, ride_request)
+            _offer_next(db, ride_request, rules)
     except SQLAlchemyError:
         db.rollback()
 
@@ -401,7 +412,12 @@ def dispatch_summary(db: Session, ride_request: RideRequest) -> dict:
     declined = db.scalar(select(func.count(RideOffer.id)).where(
         RideOffer.request_id == ride_request.id, RideOffer.status.in_(("declined", "expired"))))
     created = _as_utc(ride_request.created_at) or _now()
+    if ride_request.scheduled_for is not None:
+        from app.app_settings import schedule_lead_minutes  # avoid an import cycle
+
+        created = max(created, _as_utc(ride_request.scheduled_for) - timedelta(minutes=schedule_lead_minutes(db)))
     return {
+        "scheduled_for": _as_utc(ride_request.scheduled_for).isoformat() if ride_request.scheduled_for else None,
         "dispatch_status": ride_request.dispatch_status,
         "dispatch_attempts": ride_request.dispatch_attempts,
         "declined_or_missed": declined,

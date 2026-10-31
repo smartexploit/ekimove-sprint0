@@ -9,6 +9,8 @@ import SOSButton from '../../components/SOSButton.jsx'
 import CancelRide from '../../components/CancelRide.jsx'
 import TripTracker from '../../components/trips/TripTracker.jsx'
 import RateTrip from '../../components/trips/RateTrip.jsx'
+import TripChat from '../../components/trips/TripChat.jsx'
+import { formatPickupTime } from '../../utils/schedule.js'
 import { getProfile } from '../../services/accountService.js'
 import { apiRequest } from '../../services/authService.js'
 import { formatNaira, formatShortDate, initials } from '../../utils/format.js'
@@ -39,8 +41,14 @@ function LiveRide({ ride, onChanged, emergencyContact }) {
         <p className="small" style={{ marginTop: 4, color: 'var(--green-200)' }}>
           {vehicleLabel(ride.vehicle_type)} · {ride.passenger_count}{' '}
           {ride.passenger_count === 1 ? 'passenger' : 'passengers'} ·{' '}
-          {ride.status === 'quote_requested' ? 'Price to be agreed' : formatNaira(ride.quoted_fare)}
+          {ride.status === 'quote_requested' ? 'Price to be agreed' : formatNaira(ride.amount_to_pay ?? ride.quoted_fare)}
+          {Number(ride.discount_amount) > 0 && ` (${formatNaira(ride.discount_amount, { decimals: 0 })} promo off)`}
         </p>
+        {ride.scheduled_for && (
+          <p className="small" style={{ marginTop: 4, fontWeight: 800 }}>
+            Pickup {formatPickupTime(ride.scheduled_for)}
+          </p>
+        )}
       </div>
 
       {ride.service_type === 'haulage' && (
@@ -92,7 +100,9 @@ function LiveRide({ ride, onChanged, emergencyContact }) {
         </div>
       ) : ['quote_requested', 'quoted'].includes(status) ? null : (
         <p className="small" style={{ color: 'var(--green-200)' }}>
-          {ride.dispatch_status === 'offering'
+          {ride.dispatch_status === 'scheduled'
+            ? 'Booked. We’ll start finding your driver shortly before pickup and notify you.'
+            : ride.dispatch_status === 'offering'
             ? 'Offering your trip to a nearby verified driver…'
             : ride.dispatch_status === 'manual'
               ? 'Our team is finding you a driver. You can also cancel for free.'
@@ -115,7 +125,10 @@ function LiveRide({ ride, onChanged, emergencyContact }) {
       )}
 
       {ride.assigned_ride_id && ['assigned', 'driver_arriving', 'in_progress'].includes(ride.ride_status) && (
-        <TripTracker rideId={ride.assigned_ride_id} emergencyContact={emergencyContact} />
+        <>
+          <TripChat rideId={ride.assigned_ride_id} who="passenger" unread={ride.chat_unread || 0} />
+          <TripTracker rideId={ride.assigned_ride_id} emergencyContact={emergencyContact} />
+        </>
       )}
 
       <CancelRide requestId={ride.id} status={status} onCancelled={onChanged} />
@@ -260,7 +273,7 @@ export default function MyRidesPage() {
                       </p>
                       <p className="list-item-meta">
                         {vehicleLabel(ride.vehicle_type)} · {formatShortDate(ride.created_at)} ·{' '}
-                        {formatNaira(ride.quoted_fare, { decimals: 0 })}
+                        {formatNaira(ride.amount_to_pay ?? ride.quoted_fare, { decimals: 0 })}
                       </p>
                       {ride.refund_status && (
                         <p className="list-item-meta">
@@ -273,6 +286,13 @@ export default function MyRidesPage() {
                       {ride.assigned_ride_id && ['completed', 'cancelled'].includes(ride.ride_status) && (
                         <p className="list-item-meta">
                           <Link className="text-link" to={`/receipts/${ride.assigned_ride_id}`}>Receipt</Link>
+                        </p>
+                      )}
+                      {ride.origin_place_id && ride.destination_place_id && ride.service_type !== 'haulage' && (
+                        <p className="list-item-meta">
+                          <Link className="text-link" to={`/book-ride?area=${ride.service_area_id || ''}&from=${ride.origin_place_id}&to=${ride.destination_place_id}&vehicle=${ride.vehicle_type}&passengers=${ride.passenger_count}`}>
+                            Ride again
+                          </Link>
                         </p>
                       )}
                       {ride.assigned_ride_id && ride.ride_status === 'completed' && (

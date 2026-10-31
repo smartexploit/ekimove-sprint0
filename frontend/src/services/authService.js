@@ -97,8 +97,9 @@ export async function getPaymentPolicy() {
   return apiRequest('/api/v1/policy/payments')
 }
 
-export async function registerPassenger({ phone = '', email = '', full_name, password, accept_policies = false }) {
+export async function registerPassenger({ phone = '', email = '', full_name, password, accept_policies = false, referral_code = '' }) {
   const data = await requestAuth('register', {
+    ...(referral_code.trim() ? { referral_code: referral_code.trim() } : {}),
     ...(phone.trim() ? { phone: phone.trim() } : {}),
     ...(email.trim() ? { email: email.trim() } : {}),
     full_name: full_name.trim(),

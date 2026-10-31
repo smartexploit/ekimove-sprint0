@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useOutletContext } from 'react-router-dom'
-import { ArrowRight, LifeBuoy, MessageCircle, Route, Truck, UserRound, Wallet } from 'lucide-react'
+import { ArrowRight, Gift, LifeBuoy, MessageCircle, Route, Truck, UserRound, Wallet } from 'lucide-react'
 import VehicleIcon from '../../components/ui/VehicleIcon.jsx'
 import useBookingRules from '../../hooks/useBookingRules.js'
 import useSupportUnread from '../../hooks/useSupportUnread.js'
@@ -84,7 +84,7 @@ export default function DashboardPage() {
                 {activeRide.origin_text} → {activeRide.destination_text}
               </p>
               <p className="muted small">
-                {formatNaira(activeRide.quoted_fare)}
+                {formatNaira(activeRide.amount_to_pay ?? activeRide.quoted_fare)}
                 {activeRide.driver_name ? ` · Driver ${activeRide.driver_name}` : ''}
               </p>
             </div>
@@ -122,6 +122,13 @@ export default function DashboardPage() {
             <span className="row small" style={{ gap: 6, fontWeight: 800, color: 'var(--green-800)' }}>
               <MessageCircle size={16} aria-hidden="true" /> {unread > 0 ? 'You have a reply' : 'Start a chat'}
             </span>
+          </Link>
+          <Link className="action-card" to="/invite">
+            <span className="action-icon" style={{ background: 'var(--gold-100)', color: 'var(--gold-700)' }}>
+              <Gift size={22} aria-hidden="true" />
+            </span>
+            <h2>Invite friends, save on rides</h2>
+            <p>Share your code. Friends get money off their first ride, and you get money off your next one.</p>
           </Link>
           <Link className="action-card" to="/profile">
             <span className="avatar" aria-hidden="true">{initials(user.full_name)}</span>

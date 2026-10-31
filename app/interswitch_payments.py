@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from app.promos import payable_amount
 from app.auth import get_current_user
 from app.config import settings
 from app.database import get_db
@@ -102,7 +103,7 @@ def initiate_interswitch(
         reference = f"EKIMOVE-{ride.id}-{uuid4().hex[:16].upper()}"
         payment = Payment(
             ride_id=ride.id,
-            amount=Decimal(str(ride.agreed_fare)).quantize(Decimal("0.01")),
+            amount=payable_amount(db, ride),
             method="interswitch",
             status="pending",
             provider_transaction_ref=reference,

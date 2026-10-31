@@ -131,6 +131,12 @@ def _thread_for(db: Session, request: RideRequest) -> SupportThread | None:
 def accept_quote(request_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
     request = _own_quoted(db, request_id, current_user)
     request.status = "requested"  # now waits for a driver like any booking
+    if request.scheduled_for is not None:
+        from app.app_settings import schedule_lead_minutes
+        from app.scheduling import due_for_dispatch
+
+        if not due_for_dispatch(request, schedule_lead_minutes(db)):
+            request.dispatch_status = "scheduled"
     thread = _thread_for(db, request)
     if thread is not None:
         post_message(db, thread, current_user, f"I accept the quote of ₦{request.quoted_fare:,.0f}.", from_staff=False)

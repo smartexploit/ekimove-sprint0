@@ -34,6 +34,7 @@ DAILY_FIELDS = [
     ("cancelled_trips", "Cancelled trips"),
     ("payments_confirmed", "Payments confirmed"),
     ("payments_amount", "Payments received (NGN)"),
+    ("discounts", "Promo discounts (NGN)"),
     ("refunds_paid", "Refunds paid (NGN)"),
     ("commission", "EkiMove commission (NGN)"),
     ("driver_earnings", "Driver earnings (NGN)"),
@@ -41,7 +42,7 @@ DAILY_FIELDS = [
     ("new_passengers", "New passengers"),
     ("new_drivers", "New drivers"),
 ]
-MONEY = {"completed_fares", "payments_amount", "refunds_paid", "commission", "driver_earnings", "payouts_paid"}
+MONEY = {"completed_fares", "payments_amount", "discounts", "refunds_paid", "commission", "driver_earnings", "payouts_paid"}
 
 
 def _range(start: date | None, end: date | None) -> tuple[date, date, datetime, datetime]:
@@ -97,11 +98,14 @@ def daily_report(db: Session, start: date, end: date, begin: datetime, finish: d
     for (cancelled,) in db.execute(select(Ride.cancelled_at).where(Ride.status == "cancelled",
                                                                    *between(Ride.cancelled_at))):
         bump(cancelled, "cancelled_trips")
-    for confirmed, amount in db.execute(select(Payment.confirmed_at, Payment.amount)
-                                        .where(Payment.status.in_(("confirmed", "refunded")),
-                                               *between(Payment.confirmed_at))):
+    for confirmed, amount, discount in db.execute(
+        select(Payment.confirmed_at, Payment.amount, RideRequest.discount_amount)
+        .join(Ride, Payment.ride_id == Ride.id).join(RideRequest, Ride.request_id == RideRequest.id)
+        .where(Payment.status.in_(("confirmed", "refunded")), *between(Payment.confirmed_at))
+    ):
         bump(confirmed, "payments_confirmed")
         bump(confirmed, "payments_amount", Decimal(amount or 0))
+        bump(confirmed, "discounts", Decimal(discount or 0))
     for refunded, amount in db.execute(select(Payment.refunded_at, Payment.refund_amount)
                                        .where(Payment.refund_status == "paid", *between(Payment.refunded_at))):
         bump(refunded, "refunds_paid", Decimal(amount or 0))
@@ -178,12 +182,14 @@ def _trips(db: Session, begin: datetime, finish: datetime):
     )
     header = ["Trip", "Request", "Assigned", "Completed", "Status", "Service", "Vehicle type", "Pickup",
               "Destination", "Passengers", "Passenger", "Passenger contact", "Driver", "Plate", "Fare (NGN)",
+              "Discount (NGN)",
               "Payment status", "Payment method", "Cancellation fee (NGN)"]
     rows = (
         [ride.id, request.id, _local_text(ride.assigned_at), _local_text(ride.completed_at), ride.status,
          request.service_type, request.vehicle_type, request.origin_text, request.destination_text,
          request.passenger_count, passenger.full_name, passenger.phone or passenger.email or "", driver_name or "",
-         plate or "", f"{Decimal(ride.agreed_fare or 0):.2f}", payment.status if payment else "unpaid",
+         plate or "", f"{Decimal(ride.agreed_fare or 0):.2f}", f"{Decimal(request.discount_amount or 0):.2f}",
+         payment.status if payment else "unpaid",
          payment.method if payment else "", f"{Decimal(ride.cancellation_fee or 0):.2f}"]
         for ride, request, passenger, driver_name, plate, payment in db.execute(query)
     )

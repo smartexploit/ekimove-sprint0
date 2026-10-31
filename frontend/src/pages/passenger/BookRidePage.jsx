@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { CheckCircle2, MapPin, Wallet } from 'lucide-react'
 import AppShell from '../../layouts/AppShell.jsx'
@@ -11,6 +11,11 @@ import { apiRequest } from '../../services/authService.js'
 import { formatNaira, isMotorcycle } from '../../utils/format.js'
 import Select from '../../components/ui/Select.jsx'
 import useBookingRules from '../../hooks/useBookingRules.js'
+import WhenPicker from '../../components/booking/WhenPicker.jsx'
+import PromoField from '../../components/booking/PromoField.jsx'
+import { SavedPlacesBar } from '../../components/booking/SavedPlaces.jsx'
+import { getMyPromos, listSavedPlaces } from '../../services/promoService.js'
+import { formatPickupTime, toApiTime } from '../../utils/schedule.js'
 
 // Cars carry 4 passengers at most; motorcycle limits come from the admin rules.
 const PASSENGER_COUNTS = [1, 2, 3, 4]
@@ -49,6 +54,25 @@ export default function BookRidePage() {
   const [message, setMessage] = useState('')
   const [ride, setRide] = useState(null)
   const [submitting, setSubmitting] = useState(false)
+  const [pickupTime, setPickupTime] = useState(null)
+  const [promo, setPromo] = useState(null)
+  const [saved, setSaved] = useState([])
+  const [giftCodes, setGiftCodes] = useState([])
+
+  useEffect(() => {
+    let active = true
+    Promise.resolve()
+      .then(() => listSavedPlaces())
+      .then((list) => active && Array.isArray(list) && setSaved(list))
+      .catch(() => {})
+    Promise.resolve()
+      .then(() => getMyPromos())
+      .then((data) => active && Array.isArray(data?.codes) && setGiftCodes(data.codes))
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [])
 
   const trip = useTripOptions({
     areaId: form.service_area_id,
@@ -81,6 +105,8 @@ export default function BookRidePage() {
   const selectedFare = fareOptions.find(
     (option) => option.vehicle_type === vehicleType,
   )
+  const discount = promo && selectedFare ? Number(promo.discount) : 0
+  const toPay = selectedFare ? Number(selectedFare.quoted_fare) - discount : null
   const motorcycleSelected = isMotorcycle(vehicleType)
   const passengerChoices = motorcycleSelected
     ? PASSENGER_COUNTS.filter((count) => count <= motorcycleMax)
@@ -184,6 +210,8 @@ export default function BookRidePage() {
           destination_place_id: Number(form.destination_place_id),
           vehicle_type: vehicleType,
           passenger_count: Number(form.passenger_count),
+          ...(pickupTime ? { scheduled_for: toApiTime(pickupTime) } : {}),
+          ...(promo ? { promo_code: promo.code } : {}),
         }),
       })
 
@@ -204,7 +232,10 @@ export default function BookRidePage() {
     )
 
     return (
-      <AppShell title="Request sent" description="We're finding a verified driver for you.">
+      <AppShell title={ride.scheduled_for ? 'Ride booked' : 'Request sent'}
+        description={ride.scheduled_for
+          ? `We'll find your driver shortly before ${formatPickupTime(ride.scheduled_for)}.`
+          : "We're finding a verified driver for you."}>
         <section className="card card-lg stack" aria-live="polite" style={{ maxWidth: 640 }}>
           <div className="row row-between">
             <div className="row" style={{ gap: 10 }}>
@@ -238,6 +269,13 @@ export default function BookRidePage() {
             <div><dt>Vehicle</dt><dd>{vehicleLabel(ride.vehicle_type)}</dd></div>
             <div><dt>Passengers</dt><dd>{ride.passenger_count}</dd></div>
             <div><dt>Quoted fare</dt><dd>{formatNaira(ride.quoted_fare)}</dd></div>
+            {Number(ride.discount_amount) > 0 && (
+              <>
+                <div><dt>Promo discount</dt><dd>−{formatNaira(ride.discount_amount)}</dd></div>
+                <div><dt>You pay</dt><dd>{formatNaira(ride.amount_to_pay)}</dd></div>
+              </>
+            )}
+            {ride.scheduled_for && <div><dt>Pickup</dt><dd>{formatPickupTime(ride.scheduled_for)}</dd></div>}
           </dl>
 
           <Alert tone="warning">
@@ -358,9 +396,16 @@ export default function BookRidePage() {
               </label>
             </div>
 
+            <SavedPlacesBar saved={saved} places={places} originId={form.origin_place_id}
+              destinationId={form.destination_place_id}
+              onPick={(name, id) => updateField({ target: { name, value: id } })}
+              onSaved={(item) => setSaved((list) => [...list.filter((x) => x.id !== item.id), item])} />
+
             {samePlace && (
               <Alert tone="warning">Pickup and destination need to be different places.</Alert>
             )}
+
+            <WhenPicker value={pickupTime} onChange={setPickupTime} leadMinutes={rules.schedule_lead_minutes || 20} />
 
             <label className="field">
               <span className="field-label">Passengers</span>
@@ -429,6 +474,9 @@ export default function BookRidePage() {
               ))}
             </fieldset>
 
+            <PromoField fare={selectedFare ? selectedFare.quoted_fare : null} applied={promo} onChange={setPromo}
+              suggestions={giftCodes} />
+
             <p className="row muted small" style={{ flexWrap: 'nowrap', alignItems: 'flex-start' }}>
               <Wallet size={18} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />
               You'll pay after a driver is assigned, by bank transfer or
@@ -438,7 +486,8 @@ export default function BookRidePage() {
             <div className="bottom-bar">
               <div className="fare-total">
                 <span className="muted small" style={{ fontWeight: 700 }}>Your fare</span>
-                <span className="money">{selectedFare ? formatNaira(selectedFare.quoted_fare) : '—'}</span>
+                {discount > 0 && <span className="fare-was">{formatNaira(selectedFare.quoted_fare)}</span>}
+                <span className="money">{toPay !== null ? formatNaira(toPay) : '—'}</span>
               </div>
               <button
                 className="btn btn-accent btn-lg"
@@ -454,8 +503,8 @@ export default function BookRidePage() {
                 {submitting
                   ? 'Sending request…'
                   : selectedFare
-                    ? `Request ${vehicleLabel(selectedFare.vehicle_type).toLowerCase()}`
-                    : 'Request ride'}
+                    ? `${pickupTime ? 'Book' : 'Request'} ${vehicleLabel(selectedFare.vehicle_type).toLowerCase()}`
+                    : pickupTime ? 'Book ride' : 'Request ride'}
               </button>
             </div>
           </div>

@@ -11,8 +11,8 @@ import { vehicleLabel } from '../../utils/vehicles.js'
 import { TrailViewer, VerificationReview } from '../../components/admin/PersonSafety.jsx'
 
 const STATUS_FILTERS = {
-  passenger: [['all', 'Everyone'], ['active', 'Active'], ['id_pending', 'ID to review'], ['suspended', 'Suspended'], ['removed', 'Removed']],
-  driver: [['all', 'Everyone'], ['approved', 'Approved'], ['pending', 'Awaiting review'], ['suspended', 'Suspended'], ['removed', 'Removed']],
+  passenger: [['all', 'Everyone'], ['active', 'Active'], ['id_pending', 'ID to review'], ['deletion', 'Deletion requested'], ['suspended', 'Suspended'], ['removed', 'Removed']],
+  driver: [['all', 'Everyone'], ['approved', 'Approved'], ['pending', 'Awaiting review'], ['deletion', 'Deletion requested'], ['suspended', 'Suspended'], ['removed', 'Removed']],
 }
 
 const ACTIONS = {
@@ -107,6 +107,13 @@ function PersonDetail({ id, onClose, onChanged }) {
               <div><dt>Emergency contact</dt><dd>{person.emergency_contact.name} · {person.emergency_contact.phone}</dd></div>
             )}
             {person.suspension_reason && <div><dt>Reason</dt><dd>{person.suspension_reason}</dd></div>}
+            {person.deletion_requested_at && (
+              <div>
+                <dt>Deletion</dt>
+                <dd>Asked {formatShortDate(person.deletion_requested_at)}{person.deletion_reason ? ` · ${person.deletion_reason}` : ''}.
+                  Settle refunds or earnings, then use Remove account.</dd>
+              </div>
+            )}
           </dl>
 
           {driver && (

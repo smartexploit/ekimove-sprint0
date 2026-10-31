@@ -142,6 +142,9 @@ def cancel_ride(
     ride_request.status = "cancelled"
     ride_request.dispatch_status = None
     withdraw_offers(db, ride_request.id)
+    from app.promos import release_code  # avoid an import cycle
+
+    release_code(db, ride_request)
     fee = Decimal(terms["fee"])
     refund = Decimal(terms["refund"])
     if ride is not None:

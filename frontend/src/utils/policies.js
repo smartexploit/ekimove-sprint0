@@ -23,6 +23,11 @@ export const POLICIES = [
         'Loads (big cars, vans and dyna trucks) are priced by a quote agreed with EkiMove support. A quote is only binding once you accept it in the app.',
         'EkiMove offers your request to available drivers but cannot guarantee that a driver will be found or how long it will take.',
       ]],
+      ['Booking ahead, promo and invite codes', [
+        'You can book a ride up to 7 days ahead. EkiMove starts looking for a driver shortly before your pickup time but cannot guarantee one will be available.',
+        'Promo and invite codes give money off the fare shown in the app. They have no cash value, can’t be swapped or sold, and may have limits and end dates. A code used on a booking that is cancelled before payment can be used again.',
+        'We may cancel codes or invite rewards that are misused, for example through fake or duplicate accounts.',
+      ]],
       ['Payment', [
         'EkiMove is cashless. Pay only through the methods shown in the app (bank transfer to the account shown in the app, or card through our payment partners). Never pay a driver directly or in cash.',
         'A trip starts only after its payment is confirmed. A screenshot is not proof of payment.',
@@ -52,7 +57,8 @@ export const POLICIES = [
     sections: [
       ['What we collect', [
         'Account details: your name, the phone number and/or email you sign in with, whether you have confirmed them with a code, and your password (stored only in a scrambled, one-way form).',
-        'Trip details: pickups, destinations, times, fares, vehicle, ratings, cancellations, and messages with Support.',
+        'Trip details: pickups, destinations, booked pickup times, fares and discounts, vehicle, ratings, cancellations, messages between you and your driver in the trip chat, and messages with Support.',
+        'Places you save (such as Home or Work) and who invited you to EkiMove, if anyone.',
         'Payment records: amounts, methods and references. We do not store card numbers; card payments are handled by our payment partners.',
         'Identity checks: passengers who verify their ID give the ID type, number and a photo of it. Drivers give a face photo and vehicle details.',
         'Location: drivers share their phone’s location while they are online, so we can offer them nearby trips and show passengers their driver approaching. During a trip we keep the driver’s route (the trip’s GPS trail). Passengers’ phones do not share GPS location with EkiMove.',
@@ -73,7 +79,7 @@ export const POLICIES = [
         'Authorities, when the law requires it or to protect someone’s safety.',
       ]],
       ['How long we keep it', [
-        'We keep account, trip, payment and safety records for as long as your account is open and afterwards for as long as needed for safety, legal and accounting purposes. If an account is removed, we erase the name, phone number and sign-in but keep trip and payment records in anonymised form.',
+        'You can download a copy of your data or ask us to delete your account from your profile at any time. We keep account, trip, payment and safety records for as long as your account is open and afterwards for as long as needed for safety, legal and accounting purposes. If an account is removed, we erase the name, phone number and sign-in but keep trip and payment records in anonymised form.',
       ]],
       ['Your rights', [
         'Under the Nigeria Data Protection Act 2023 you can ask to see, correct or delete your data, object to some uses, or ask for a copy. Some records must be kept for legal reasons.',

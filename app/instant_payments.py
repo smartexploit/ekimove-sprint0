@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_user, require_super_admin
 from app.config import settings
 from app.database import get_db
+from app.promos import payable_amount
 from app.models import (
     AuditLog,
     BankDeposit,
@@ -261,10 +262,11 @@ def find_payment_for_deposit(db: Session, deposit: BankDeposit) -> Payment | Non
         .order_by(Ride.id)
     ).all()
     for ride, payment in rows:
-        if Decimal(ride.agreed_fare).quantize(Decimal("0.01")) != deposit.amount:
+        if payable_amount(db, ride) != deposit.amount:
             continue
         if payment is None:
-            payment = Payment(ride_id=ride.id, amount=ride.agreed_fare, method="bank_transfer", status="pending")
+            payment = Payment(ride_id=ride.id, amount=payable_amount(db, ride), method="bank_transfer",
+                              status="pending")
             db.add(payment)
             db.flush()
             return payment
@@ -427,14 +429,15 @@ def admin_match_deposit(
         raise HTTPException(status_code=409, detail="This deposit came from a different passenger's account.")
     if ride.status not in PAYABLE_RIDE_STATUSES:
         raise HTTPException(status_code=409, detail="Only rides waiting for pickup can be paid this way.")
-    if Decimal(ride.agreed_fare).quantize(Decimal("0.01")) != deposit.amount:
+    if payable_amount(db, ride) != deposit.amount:
         raise HTTPException(
             status_code=409,
             detail="The deposit amount differs from the fare. Refund it and ask the passenger to send the exact fare.",
         )
     payment = db.scalar(select(Payment).where(Payment.ride_id == ride.id))
     if payment is None:
-        payment = Payment(ride_id=ride.id, amount=ride.agreed_fare, method="bank_transfer", status="pending")
+        payment = Payment(ride_id=ride.id, amount=payable_amount(db, ride), method="bank_transfer",
+                          status="pending")
         db.add(payment)
         db.flush()
     elif payment.status not in MATCHABLE_PAYMENT_STATUSES:

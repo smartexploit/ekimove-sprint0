@@ -19,7 +19,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.codes import contact_status
@@ -39,6 +39,9 @@ from app.models import (
     Incident,
     PassengerVerification,
     Payment,
+    PromoCode,
+    PushSubscription,
+    SavedPlace,
     Ride,
     RideRequest,
     SupportMessage,
@@ -100,6 +103,8 @@ def profile_result(db: Session, user: User) -> dict:
         "email": user.email,
         "contact": contact_status(db, user),
         "must_change_password": bool(user.must_change_password),
+        "deletion_requested_at": _iso(user.deletion_requested_at),
+        "deletion_reason": user.deletion_reason,
         "role": user.role,
         "status": account_status(user),
         "joined_at": _iso(user.created_at),
@@ -234,7 +239,8 @@ def _person_row(db: Session, user: User) -> dict:
 @router.get("/admin/people")
 def admin_list_people(
     role: Literal["passenger", "driver"] = Query("passenger"),
-    status: Literal["all", "active", "suspended", "removed", "approved", "pending", "id_pending"] = Query("all"),
+    status: Literal["all", "active", "suspended", "removed", "approved", "pending", "id_pending",
+                    "deletion"] = Query("all"),
     q: str | None = Query(default=None, max_length=80),
     db: Session = Depends(get_db),
     _admin: User = Depends(require_super_admin),
@@ -246,6 +252,8 @@ def admin_list_people(
         query = query.where(User.is_active.is_(False), User.removed_at.is_(None))
     elif status == "removed":
         query = query.where(User.removed_at.is_not(None))
+    elif status == "deletion":
+        query = query.where(User.deletion_requested_at.is_not(None))
     elif status == "id_pending":
         query = query.join(PassengerVerification, PassengerVerification.user_id == User.id) \
             .where(PassengerVerification.status == "pending")
@@ -384,6 +392,14 @@ def admin_remove(user_id: int, payload: AccountAction, db: Session = Depends(get
     user.phone = f"removed-{user.id}-{original[-4:]}"[:32]
     user.phone_verified_at = None
     user.email_verified_at = None
+    user.emergency_contact_name = None
+    user.emergency_contact_phone = None
+    user.referral_code = None
+    user.deletion_reason = None
+    # Personal shortcuts and devices go too.
+    db.execute(delete(SavedPlace).where(SavedPlace.user_id == user.id))
+    db.execute(delete(PushSubscription).where(PushSubscription.user_id == user.id))
+    db.execute(update(PromoCode).where(PromoCode.owner_user_id == user.id).values(is_active=False))
     _take_driver_offline(db, user)
     db.add(AuditLog(actor_user_id=admin.id, action="account.removed", entity_type="user",
                     entity_id=str(user.id), details=f"{payload.reason} (contact ending {original[-4:]})"))

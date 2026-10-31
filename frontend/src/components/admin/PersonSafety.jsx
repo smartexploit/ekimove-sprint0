@@ -127,6 +127,21 @@ export function TrailViewer({ rideId, onClose }) {
           </dl>
           {trail.trail.length < 2 && <p className="muted small">No GPS trail was recorded for this trip.</p>}
           <LazyMap markers={markers} trail={trail.trail} height={280} label={`GPS trail of trip ${rideId}`} />
+          {trail.messages?.length > 0 && (
+            <details>
+              <summary className="small" style={{ cursor: 'pointer', fontWeight: 700 }}>
+                Trip chat ({trail.messages.length})
+              </summary>
+              <ul className="plain-list small" style={{ marginTop: 8 }}>
+                {trail.messages.map((message) => (
+                  <li key={message.id}>
+                    {formatDateTime(message.created_at)} · <strong>{message.from === 'driver' ? 'Driver' : 'Passenger'}:</strong>{' '}
+                    {message.body}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
         </>
       )}
     </div>

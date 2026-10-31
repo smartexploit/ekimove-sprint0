@@ -9,6 +9,7 @@ export default function BookingRulesCard() {
   const [enabled, setEnabled] = useState(true)
   const [requireId, setRequireId] = useState(false)
   const [requireContact, setRequireContact] = useState(true)
+  const [lead, setLead] = useState('20')
   const [fee, setFee] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -23,6 +24,7 @@ export default function BookingRulesCard() {
         setEnabled(data.motorcycle_second_passenger_enabled)
         setRequireId(Boolean(data.require_verified_passengers))
         setRequireContact(data.require_contact_verification !== false)
+        setLead(String(data.schedule_lead_minutes || 20))
         setFee(String(data.motorcycle_second_passenger_fee))
       })
       .catch((err) => active && setError(err.message || 'Could not load booking rules.'))
@@ -35,6 +37,10 @@ export default function BookingRulesCard() {
     event.preventDefault()
     const amount = Number(fee)
     if (!Number.isInteger(amount) || amount < 0) return setError('Enter the extra charge in whole naira.')
+    const leadMinutes = Number(lead)
+    if (!Number.isInteger(leadMinutes) || leadMinutes < 5 || leadMinutes > 120) {
+      return setError('Start looking for drivers 5 to 120 minutes before a booked pickup.')
+    }
     setBusy(true)
     setError('')
     setNotice('')
@@ -44,6 +50,7 @@ export default function BookingRulesCard() {
         motorcycle_second_passenger_fee: amount,
         require_verified_passengers: requireId,
         require_contact_verification: requireContact,
+        schedule_lead_minutes: leadMinutes,
       })
       setRules(data)
       setNotice('Saved. New bookings use these rules straight away.')
@@ -79,6 +86,11 @@ export default function BookingRulesCard() {
               Used on every motorcycle route, unless that route's own “extra passenger” amount is set
               above ₦0, which then applies instead.
             </span>
+          </label>
+          <label className="field">
+            <span className="field-label">Rides booked for later: start finding a driver (minutes before pickup)</span>
+            <input className="input" inputMode="numeric" value={lead}
+              onChange={(event) => setLead(event.target.value.replace(/[^\d]/g, '').slice(0, 3))} />
           </label>
           <label className="check-row">
             <input type="checkbox" checked={requireId} onChange={(event) => setRequireId(event.target.checked)} />

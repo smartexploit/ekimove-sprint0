@@ -24,6 +24,14 @@ class User(Base):
     email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Set after a super-admin resets the password: choose a new one first.
     must_change_password: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+    # Invite code this person shares, who invited them, and when the
+    # person who invited them was rewarded (after their first paid trip).
+    referral_code: Mapped[str | None] = mapped_column(String(16), unique=True, index=True, nullable=True)
+    referred_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    referral_rewarded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # The person asked for their account to be deleted (data rights).
+    deletion_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    deletion_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Set by a super-admin. Suspended accounts can't sign in; removed
     # accounts are anonymised but their trips and payments are kept.
     suspended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -120,6 +128,10 @@ class RideRequest(Base):
     # Automatic dispatch: "searching" (no driver free yet), "offering",
     # or "manual" (needs an admin). None once assigned or never dispatched.
     dispatch_status: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
+    # Promo or invite discount taken off what the passenger pays. The
+    # driver still earns on the full fare; EkiMove covers the discount.
+    discount_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"),
+                                                     server_default="0", nullable=False)
     dispatch_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
 
 
@@ -143,6 +155,9 @@ class Ride(Base):
     pickup_pin: Mapped[str | None] = mapped_column(String(4), nullable=True)
     arrived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     share_token: Mapped[str | None] = mapped_column(String(48), nullable=True, unique=True, index=True)
+    # When each side last read the trip chat.
+    passenger_chat_read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    driver_chat_read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Payment(Base):
@@ -592,3 +607,74 @@ class PushSubscription(Base):
     user_agent: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class SavedPlace(Base):
+    """A passenger's shortcut to a place they use often (Home, Work…)."""
+
+    __tablename__ = "saved_places"
+    __table_args__ = (UniqueConstraint("user_id", "label", name="uq_saved_places_user_label"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    label: Mapped[str] = mapped_column(String(40))
+    place_id: Mapped[int] = mapped_column(ForeignKey("places.id", ondelete="CASCADE"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PromoCode(Base):
+    """A discount code. Admin codes are for everyone; personal codes
+    (invite rewards) can only be used by their owner."""
+
+    __tablename__ = "promo_codes"
+    __table_args__ = (
+        CheckConstraint("kind IN ('amount', 'percent')", name="ck_promo_codes_kind"),
+        CheckConstraint("source IN ('admin', 'referral')", name="ck_promo_codes_source"),
+        CheckConstraint("value > 0", name="ck_promo_codes_value_positive"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    description: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    kind: Mapped[str] = mapped_column(String(8))
+    value: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    max_discount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    min_fare: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    max_uses: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    per_user_limit: Mapped[int] = mapped_column(Integer, default=1, server_default="1", nullable=False)
+    first_ride_only: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
+    source: Mapped[str] = mapped_column(String(12), default="admin", server_default="admin", nullable=False)
+    owner_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PromoRedemption(Base):
+    """A code used on one booking. Released if the booking is cancelled
+    before it was paid, so the code can be used again."""
+
+    __tablename__ = "promo_redemptions"
+    __table_args__ = (CheckConstraint("status IN ('active', 'released')", name="ck_promo_redemptions_status"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    promo_id: Mapped[int] = mapped_column(ForeignKey("promo_codes.id", ondelete="RESTRICT"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    ride_request_id: Mapped[int] = mapped_column(ForeignKey("ride_requests.id", ondelete="CASCADE"), unique=True)
+    discount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    status: Mapped[str] = mapped_column(String(12), default="active", server_default="active", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class TripMessage(Base):
+    """A chat message between a passenger and their driver during a trip."""
+
+    __tablename__ = "trip_messages"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ride_id: Mapped[int] = mapped_column(ForeignKey("rides.id", ondelete="CASCADE"), index=True)
+    sender_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    body: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

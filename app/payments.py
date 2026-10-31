@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.promos import payable_amount
 from app.auth import get_current_user, require_super_admin
 from app.database import get_db
 from app.models import AuditLog, Payment, Ride, RideRequest, User
@@ -105,7 +106,7 @@ def initiate_payment(
 
     payment = Payment(
         ride_id=ride.id,
-        amount=Decimal(str(ride.agreed_fare)),
+        amount=payable_amount(db, ride),
         method="bank_transfer",
         status="pending",
     )

@@ -11,6 +11,7 @@ import { vehicleLabel } from '../../utils/vehicles.js'
 import { EmergencyContactCard, VerificationCard } from '../../components/account/SafetyCards.jsx'
 import ContactCard from '../../components/account/ContactCard.jsx'
 import NotificationsCard from '../../components/account/NotificationsCard.jsx'
+import DataRightsCard from '../../components/account/DataRightsCard.jsx'
 
 function DetailsForm({ profile, onSaved }) {
   const [form, setForm] = useState({ full_name: profile.full_name })
@@ -210,6 +211,8 @@ export default function ProfilePage() {
                 {profile.policies?.accepted_at ? ` (accepted ${formatShortDate(profile.policies.accepted_at)})` : ''}.
               </p>
             </section>
+            <DataRightsCard profile={profile}
+              onChanged={(status) => setProfile((current) => ({ ...current, ...status }))} />
             {user?.role === 'passenger' && (
               <Link className="card row" to="/my-rides" style={{ gap: 10, textDecoration: 'none', color: 'inherit' }}>
                 <span className="instant-icon" aria-hidden="true"><UserRound size={20} /></span>

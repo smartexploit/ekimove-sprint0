@@ -328,6 +328,8 @@ def trip_receipt(ride_id: int, current_user: User = Depends(get_current_user), d
         "currency": "NGN",
         "fare": str(Decimal(ride.agreed_fare).quantize(Decimal("0.01"))),
         "paid": paid,
+        "discount": str(Decimal(request.discount_amount or 0).quantize(Decimal("0.01"))),
+        "amount_paid": str(Decimal(payment.amount).quantize(Decimal("0.01"))) if paid else None,
         "payment_method": payment.method if payment else None,
         "payment_reference": (payment.transfer_reference or payment.provider_transaction_ref) if payment else None,
         "cancellation_fee": str(ride.cancellation_fee) if ride.cancellation_fee is not None else None,

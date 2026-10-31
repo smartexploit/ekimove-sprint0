@@ -4586,3 +4586,332 @@ def test_csv_cells_cannot_run_as_formulas():
     assert _safe("@cmd") == "'@cmd"
     assert _safe("-1500.00") == "-1500.00"
     assert _safe("Ado-Ekiti") == "Ado-Ekiti"
+
+
+# ---------------------------------------------------------------------------
+# Phase 6: book for later, saved places, promos, invites, trip chat, data rights
+# ---------------------------------------------------------------------------
+
+from app.models import PromoCode, PromoRedemption, SavedPlace, TripMessage
+
+
+def later(minutes):
+    return (datetime.now(timezone.utc) + timedelta(minutes=minutes)).isoformat()
+
+
+def make_promo(client, admin, **fields):
+    body = {"code": "EKSU500", "kind": "amount", "value": "500", **fields}
+    response = client.post("/api/v1/admin/promos", json=body, headers=admin)
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def test_book_for_later_waits_then_dispatches(client, quiet_messaging_and_push):
+    passenger = login(client, *PASSENGER_LOGIN)
+    driver = login(client, *DRIVER_LOGIN)
+    too_soon = client.post("/api/v1/ride-requests", json=ride_payload(scheduled_for=later(10)), headers=passenger)
+    assert too_soon.status_code == 422 and "30 minutes" in too_soon.json()["detail"]
+    too_far = client.post("/api/v1/ride-requests", json=ride_payload(scheduled_for=later(60 * 24 * 8)),
+                          headers=passenger)
+    assert too_far.status_code == 422
+    created = client.post("/api/v1/ride-requests", json=ride_payload(scheduled_for=later(120)), headers=passenger)
+    assert created.status_code == 201, created.text
+    request_id = created.json()["id"]
+    assert created.json()["scheduled_for"]
+    # Not offered to drivers yet.
+    assert client.get("/api/v1/driver/offers/current", headers=driver).json()["offer"] is None
+    mine = next(r for r in client.get("/api/v1/ride-requests/my-rides", headers=passenger).json()
+                if r["id"] == request_id)
+    assert mine["dispatch_status"] == "scheduled" and mine["scheduled_for"]
+    pending = client.get("/api/v1/admin/ride-requests/pending", headers=_login_as_super_admin(client)).json()
+    assert next(p for p in pending if p["id"] == request_id)["scheduled_for"]
+    # Pickup gets close: the search starts and the passenger is told.
+    subscribe(client, passenger)
+    with session_for(client) as db:
+        db.get(RideRequest, request_id).scheduled_for = datetime.now(timezone.utc) + timedelta(minutes=15)
+        db.commit()
+    offer = client.get("/api/v1/driver/offers/current", headers=driver).json()["offer"]
+    assert offer is not None and offer["request_id"] == request_id
+    titles = [json.loads(p["payload"])["title"] for p in quiet_messaging_and_push]
+    assert "Finding your driver" in titles
+
+
+def test_schedule_lead_time_is_an_admin_setting(client):
+    admin = _login_as_super_admin(client)
+    saved = client.put("/api/v1/admin/settings", json={"schedule_lead_minutes": 45}, headers=admin)
+    assert saved.status_code == 200 and saved.json()["schedule_lead_minutes"] == 45
+    assert client.put("/api/v1/admin/settings", json={"schedule_lead_minutes": 2}, headers=admin).status_code == 422
+    passenger = login(client, *PASSENGER_LOGIN)
+    driver = login(client, *DRIVER_LOGIN)
+    client.post("/api/v1/ride-requests", json=ride_payload(scheduled_for=later(40)), headers=passenger)
+    assert client.get("/api/v1/driver/offers/current", headers=driver).json()["offer"] is not None
+
+
+def test_saved_places(client):
+    ids = _seed_place_route(client)
+    passenger = login(client, *PASSENGER_LOGIN)
+    home = client.post("/api/v1/me/saved-places", json={"label": "Home", "place_id": ids["origin_id"]},
+                       headers=passenger)
+    assert home.status_code == 201, home.text
+    assert home.json()["place_name"] == "Test Pickup Point" and home.json()["service_area_id"] == ids["area_id"]
+    moved = client.post("/api/v1/me/saved-places", json={"label": "Home", "place_id": ids["destination_id"]},
+                        headers=passenger)
+    assert moved.json()["id"] == home.json()["id"] and moved.json()["place_id"] == ids["destination_id"]
+    hidden = client.post("/api/v1/me/saved-places", json={"label": "Work", "place_id": ids["hidden_id"]},
+                         headers=passenger)
+    assert hidden.status_code == 422
+    listed = client.get("/api/v1/me/saved-places", headers=passenger).json()
+    assert [p["label"] for p in listed] == ["Home"]
+    other = login(client, "08000000002", "Second-Test-Password-2!")
+    assert client.delete(f"/api/v1/me/saved-places/{home.json()['id']}", headers=other).status_code == 404
+    assert client.delete(f"/api/v1/me/saved-places/{home.json()['id']}", headers=passenger).status_code == 200
+    assert client.get("/api/v1/me/saved-places", headers=passenger).json() == []
+
+
+def test_my_rides_give_what_ride_again_needs(client):
+    ids = _seed_place_route(client)
+    passenger = login(client, *PASSENGER_LOGIN)
+    created = client.post("/api/v1/ride-requests", headers=passenger, json={
+        "origin_place_id": ids["origin_id"], "destination_place_id": ids["destination_id"],
+        "vehicle_type": "standard", "passenger_count": 1})
+    assert created.status_code == 201, created.text
+    mine = client.get("/api/v1/ride-requests/my-rides", headers=passenger).json()[0]
+    assert (mine["origin_place_id"], mine["destination_place_id"], mine["service_area_id"]) == \
+        (ids["origin_id"], ids["destination_id"], ids["area_id"])
+
+
+def test_promo_code_discounts_what_the_passenger_pays(client, no_paystack):
+    admin = _login_as_super_admin(client)
+    make_promo(client, admin, description="EKSU welcome")
+    passenger = login(client, *PASSENGER_LOGIN)
+    check = client.post("/api/v1/promos/check", json={"code": " eksu500 ", "fare": "2000"}, headers=passenger)
+    assert check.json() == {"code": "EKSU500", "description": "EKSU welcome", "discount": "500.00",
+                            "payable": "1500.00"}
+    created = client.post("/api/v1/ride-requests", json=ride_payload(promo_code="eksu500"), headers=passenger)
+    assert created.status_code == 201, created.text
+    assert created.json()["discount_amount"] == "500.00" and created.json()["amount_to_pay"] == "1500.00"
+    request_id = created.json()["id"]
+    # Used once per person by default.
+    again = client.post("/api/v1/ride-requests", json=ride_payload(promo_code="EKSU500"), headers=passenger)
+    assert again.status_code == 422 and again.json()["detail"] == "You've already used this code."
+
+    driver = login(client, *DRIVER_LOGIN)
+    offer = current_offer(client, driver)
+    assert offer["request_id"] == request_id
+    client.post(f"/api/v1/driver/offers/{offer['id']}/accept", headers=driver)
+    ride_id = get_ride_id_from_request(client, request_id, passenger)
+    payment = client.post(f"/api/v1/payments/rides/{ride_id}/initiate", headers=passenger).json()
+    assert payment["amount"] == "1500.00"
+    mine = next(r for r in client.get("/api/v1/ride-requests/my-rides", headers=passenger).json()
+                if r["id"] == request_id)
+    assert mine["amount_to_pay"] == "1500.00" and mine["quoted_fare"] == "2000.00"
+    _confirm_payment(client, passenger, admin, ride_id)
+    for status_value in ("driver_arriving", "in_progress", "completed"):
+        body = {"status": status_value}
+        if status_value == "in_progress":
+            body["pickup_pin"] = ride_pin(client, ride_id)
+        assert client.patch(f"/api/v1/driver/rides/{ride_id}/status", json=body, headers=driver).status_code == 200
+    # The driver still earns on the full fare.
+    earnings = client.get("/api/v1/driver/earnings", headers=driver).json()
+    assert earnings["balance"] == "1800.00"
+    receipt = client.get(f"/api/v1/rides/{ride_id}/receipt", headers=passenger).json()
+    assert receipt["fare"] == "2000.00" and receipt["discount"] == "500.00" and receipt["amount_paid"] == "1500.00"
+    report = client.get("/api/v1/admin/reports/summary", headers=admin).json()["totals"]
+    assert report["discounts"] == "500.00" and report["payments_amount"] == "1500.00"
+    promos = client.get("/api/v1/admin/promos", headers=admin).json()
+    assert promos["codes"][0]["uses"] == 1 and promos["codes"][0]["total_discount"] == "500.00"
+
+
+def test_promo_rules(client):
+    admin = _login_as_super_admin(client)
+    passenger = login(client, *PASSENGER_LOGIN)
+
+    def check(code, fare="2000"):
+        return client.post("/api/v1/promos/check", json={"code": code, "fare": fare}, headers=passenger)
+
+    make_promo(client, admin, code="HALF", kind="percent", value="50", max_discount="600")
+    assert check("HALF").json()["discount"] == "600.00"
+    assert check("HALF", "800").json()["discount"] == "400.00"
+    make_promo(client, admin, code="BIG", value="5000")
+    assert check("BIG", "800").json()["payable"] == "100.00"  # never below N100
+    make_promo(client, admin, code="MIN3K", min_fare="3000")
+    assert "₦3,000 or more" in check("MIN3K").json()["detail"]
+    make_promo(client, admin, code="OLD", ends_at=later(-60), starts_at=later(-120))
+    assert check("OLD").json()["detail"] == "This code has expired."
+    make_promo(client, admin, code="SOON", starts_at=later(60))
+    assert check("SOON").json()["detail"] == "This code isn't active yet."
+    paused = make_promo(client, admin, code="PAUSED")
+    client.patch(f"/api/v1/admin/promos/{paused['id']}", json={"is_active": False}, headers=admin)
+    assert check("PAUSED").json()["detail"] == "This code isn't valid."
+    assert check("NOPE").json()["detail"] == "This code isn't valid."
+    make_promo(client, admin, code="ONE", max_uses=1)
+    client.post("/api/v1/ride-requests", json=ride_payload(promo_code="ONE"), headers=passenger)
+    other = login(client, "08000000002", "Second-Test-Password-2!")
+    used_up = client.post("/api/v1/promos/check", json={"code": "ONE", "fare": "2000"}, headers=other)
+    assert used_up.json()["detail"] == "This code has been fully used."
+    # Admin validation.
+    for bad in ({"code": "X"}, {"code": "TOOMUCH", "kind": "percent", "value": "150"},
+                {"code": "WELCOME-ABC"}):
+        response = client.post("/api/v1/admin/promos", json={"kind": "amount", "value": "100", **bad}, headers=admin)
+        assert response.status_code == 422, bad
+    assert client.post("/api/v1/admin/promos", json={"code": "half", "kind": "amount", "value": "1"},
+                       headers=admin).status_code == 409
+    assert client.get("/api/v1/admin/promos", headers=passenger).status_code == 403
+
+
+def test_first_ride_only_and_bad_code_blocks_booking(client, no_paystack):
+    admin = _login_as_super_admin(client)
+    make_promo(client, admin, code="FIRST", first_ride_only=True)
+    complete_paid_ride(client)
+    passenger = login(client, *PASSENGER_LOGIN)
+    response = client.post("/api/v1/ride-requests", json=ride_payload(promo_code="FIRST"), headers=passenger)
+    assert response.status_code == 422 and "first ride" in response.json()["detail"]
+    with session_for(client) as db:
+        assert db.scalar(select(RideRequest).where(RideRequest.discount_amount > 0)) is None
+
+
+def test_cancelling_before_payment_gives_the_code_back(client):
+    admin = _login_as_super_admin(client)
+    make_promo(client, admin, code="ONCE")
+    passenger = login(client, *PASSENGER_LOGIN)
+    request_id = client.post("/api/v1/ride-requests", json=ride_payload(promo_code="ONCE"),
+                             headers=passenger).json()["id"]
+    cancelled = client.post(f"/api/v1/ride-requests/{request_id}/cancel", json={"reason": "Changed plans"},
+                            headers=passenger)
+    assert cancelled.status_code == 200, cancelled.text
+    with session_for(client) as db:
+        assert db.scalars(select(PromoRedemption)).one().status == "released"
+    again = client.post("/api/v1/ride-requests", json=ride_payload(promo_code="ONCE"), headers=passenger)
+    assert again.status_code == 201, again.text
+
+
+def test_invites_reward_both_people(client, no_paystack, quiet_messaging_and_push):
+    inviter = login(client, *PASSENGER_LOGIN)
+    mine = client.get("/api/v1/me/promos", headers=inviter).json()
+    code = mine["invite"]["code"]
+    assert mine["invite"]["link_path"] == f"/register?ref={code}" and code.startswith("TEST")
+    assert mine["invite"]["referral_new_user_amount"] == 300 and mine["codes"] == []
+    assert client.get("/api/v1/me/promos", headers=inviter).json()["invite"]["code"] == code  # stable
+    subscribe(client, inviter)
+
+    bad = register(client, phone="08077770001", referral_code="NOPE1234")
+    assert bad.status_code == 422 and "invite code" in bad.json()["detail"]
+    joined = register(client, phone="08077770001", referral_code=code.lower())
+    assert joined.status_code == 201, joined.text
+    friend = {"Authorization": f"Bearer {joined.json()['access_token']}"}
+    gift = client.get("/api/v1/me/promos", headers=friend).json()["codes"]
+    assert len(gift) == 1 and gift[0]["code"].startswith("WELCOME-") and gift[0]["value"] == "300.00"
+    # Someone else can't use it.
+    stolen = client.post("/api/v1/promos/check", json={"code": gift[0]["code"], "fare": "2000"}, headers=inviter)
+    assert stolen.status_code == 422
+
+    # The friend's first trip, with their gift, completes: the inviter is thanked.
+    request_id = client.post("/api/v1/ride-requests", json=ride_payload(promo_code=gift[0]["code"]),
+                             headers=friend).json()["id"]
+    driver = login(client, *DRIVER_LOGIN)
+    offer = current_offer(client, driver)
+    client.post(f"/api/v1/driver/offers/{offer['id']}/accept", headers=driver)
+    ride_id = get_ride_id_from_request(client, request_id, friend)
+    _confirm_payment(client, friend, _login_as_super_admin(client), ride_id)
+    for status_value in ("driver_arriving", "in_progress", "completed"):
+        body = {"status": status_value}
+        if status_value == "in_progress":
+            body["pickup_pin"] = ride_pin(client, ride_id)
+        client.patch(f"/api/v1/driver/rides/{ride_id}/status", json=body, headers=driver)
+    thanks = client.get("/api/v1/me/promos", headers=inviter).json()
+    assert thanks["invite"]["invited"] == 1 and thanks["invite"]["completed_first_ride"] == 1
+    assert [c["code"][:7] for c in thanks["codes"]] == ["THANKS-"]
+    assert any(json.loads(p["payload"])["title"] == "₦300 off your next ride" for p in quiet_messaging_and_push)
+    assert client.get("/api/v1/me/promos", headers=friend).json()["codes"] == []
+
+
+def test_invites_can_be_switched_off(client):
+    admin = _login_as_super_admin(client)
+    code = client.get("/api/v1/me/promos", headers=login(client, *PASSENGER_LOGIN)).json()["invite"]["code"]
+    client.put("/api/v1/admin/settings", json={"referral_enabled": False}, headers=admin)
+    joined = register(client, phone="08077770002", referral_code=code)
+    assert joined.status_code == 201
+    headers = {"Authorization": f"Bearer {joined.json()['access_token']}"}
+    assert client.get("/api/v1/me/promos", headers=headers).json()["codes"] == []
+
+
+def test_trip_chat_between_passenger_and_driver(client, quiet_messaging_and_push):
+    passenger, admin, request_id = create_assigned_ride(client)
+    ride_id = get_ride_id_from_request(client, request_id, passenger)
+    driver = login(client, *DRIVER_LOGIN)
+    subscribe(client, driver, "https://fcm.googleapis.com/fcm/send/driver-chat")
+    sent = client.post(f"/api/v1/rides/{ride_id}/messages", json={"body": "I'm at the main gate, blue shirt"},
+                       headers=passenger)
+    assert sent.status_code == 201, sent.text
+    assert sent.json()["messages"][0]["mine"] is True
+    pushed = [json.loads(p["payload"]) for p in quiet_messaging_and_push if "driver-chat" in p["endpoint"]]
+    assert pushed[-1]["title"] == "Test: new message" and pushed[-1]["url"] == "/driver/trips"
+    trips = client.get("/api/v1/driver/rides", headers=driver).json()
+    assert next(t for t in trips if t["id"] == ride_id)["chat_unread"] == 1
+    read = client.get(f"/api/v1/rides/{ride_id}/messages", headers=driver).json()
+    assert read["open"] is True and read["messages"][0] == {**read["messages"][0], "from": "passenger", "mine": False}
+    assert next(t for t in client.get("/api/v1/driver/rides", headers=driver).json()
+                if t["id"] == ride_id)["chat_unread"] == 0
+    client.post(f"/api/v1/rides/{ride_id}/messages", json={"body": "Coming in 2 minutes"}, headers=driver)
+    mine = next(r for r in client.get("/api/v1/ride-requests/my-rides", headers=passenger).json()
+                if r["id"] == request_id)
+    assert mine["chat_unread"] == 1
+    # Strangers can't read it; admins see it in the trip record.
+    other = login(client, "08000000002", "Second-Test-Password-2!")
+    assert client.get(f"/api/v1/rides/{ride_id}/messages", headers=other).status_code == 404
+    trail = client.get(f"/api/v1/admin/rides/{ride_id}/trail", headers=admin).json()
+    assert [m["body"] for m in trail["messages"]] == ["I'm at the main gate, blue shirt", "Coming in 2 minutes"]
+    assert client.post(f"/api/v1/rides/{ride_id}/messages", json={"body": ""}, headers=passenger).status_code == 422
+    # Closed once the trip ends.
+    with session_for(client) as db:
+        db.get(Ride, ride_id).status = "completed"
+        db.commit()
+    closed = client.post(f"/api/v1/rides/{ride_id}/messages", json={"body": "Thanks"}, headers=passenger)
+    assert closed.status_code == 409
+    assert client.get(f"/api/v1/rides/{ride_id}/messages", headers=passenger).json()["open"] is False
+
+
+def test_download_my_data(client, no_paystack):
+    driver_headers, admin, ride_id, _ = complete_paid_ride(client)
+    passenger = login(client, *PASSENGER_LOGIN)
+    response = client.get("/api/v1/me/export", headers=passenger)
+    assert response.status_code == 200
+    assert "attachment" in response.headers["content-disposition"]
+    data = response.json()
+    assert data["account"]["phone"] == "08000000001"
+    assert [t["id"] for t in data["trips"]] == [ride_id]
+    assert data["payments"][0]["status"] == "confirmed"
+    assert "password_hash" not in json.dumps(data)
+    as_driver = client.get("/api/v1/me/export", headers=driver_headers).json()
+    assert as_driver["driver"]["vehicles"][0]["plate_number"] == "EKM-TEST-001"
+    assert as_driver["driver"]["earnings"][0]["kind"] == "trip"
+
+
+def test_account_deletion_request(client):
+    passenger = login(client, *PASSENGER_LOGIN)
+    admin = _login_as_super_admin(client)
+    wrong = client.post("/api/v1/me/deletion-request", json={"password": "nope"}, headers=passenger)
+    assert wrong.status_code == 400
+    asked = client.post("/api/v1/me/deletion-request", json={"password": "Passenger-Test-Password-1!",
+                                                             "reason": "Moving abroad"}, headers=passenger)
+    assert asked.status_code == 200 and asked.json()["deletion_requested_at"]
+    assert client.post("/api/v1/me/deletion-request", json={"password": "Passenger-Test-Password-1!"},
+                       headers=passenger).status_code == 409
+    assert client.get("/api/v1/me", headers=passenger).json()["deletion_reason"] == "Moving abroad"
+    threads = client.get("/api/v1/support/threads", headers=passenger).json()
+    assert threads[0]["subject"] == "Please delete my account"
+    queue = client.get("/api/v1/admin/people", params={"status": "deletion"}, headers=admin).json()
+    assert [p["id"] for p in queue] == [1]
+    assert client.delete("/api/v1/me/deletion-request", headers=passenger).json()["deletion_requested_at"] is None
+    assert client.get("/api/v1/admin/people", params={"status": "deletion"}, headers=admin).json() == []
+    client.post("/api/v1/me/deletion-request", json={"password": "Passenger-Test-Password-1!"}, headers=passenger)
+    client.post("/api/v1/me/saved-places", json={"label": "Home", "place_id": _seed_place_route(client)["origin_id"]},
+                headers=passenger)
+    removed = client.post("/api/v1/admin/people/1/remove", json={"reason": "Asked to delete"}, headers=admin)
+    assert removed.status_code == 200
+    with session_for(client) as db:
+        assert db.scalars(select(SavedPlace)).all() == []
+        user = db.get(User, 1)
+        assert user.full_name == "Removed account" and user.email is None
+    assert client.post("/api/v1/me/deletion-request", json={"password": "x"},
+                       headers=admin).status_code == 409

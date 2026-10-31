@@ -15,6 +15,7 @@ import DriverEarningsPage from './pages/driver/DriverEarningsPage.jsx'
 import ProtectedRoute from './routes/ProtectedRoute.jsx'
 import OfflineBanner from './components/pwa/OfflineBanner.jsx'
 import HaulagePage from './pages/passenger/HaulagePage.jsx'
+import InvitePage from './pages/passenger/InvitePage.jsx'
 import ProfilePage from './pages/account/ProfilePage.jsx'
 import SupportPage from './pages/account/SupportPage.jsx'
 import ReceiptPage from './pages/account/ReceiptPage.jsx'
@@ -34,6 +35,7 @@ const AdminMapPage = lazy(() => import('./pages/admin/AdminMapPage.jsx'))
 const AdminEarningsPage = lazy(() => import('./pages/admin/AdminEarningsPage.jsx'))
 const AdminIncidentsPage = lazy(() => import('./pages/admin/AdminIncidentsPage.jsx'))
 const AdminReportsPage = lazy(() => import('./pages/admin/AdminReportsPage.jsx'))
+const AdminPromosPage = lazy(() => import('./pages/admin/AdminPromosPage.jsx'))
 const AdminLocationsPage = lazy(() => import('./pages/admin/AdminLocationsPage.jsx'))
 
 const loading = (
@@ -63,6 +65,7 @@ export default function App() {
           <Route path="/my-rides" element={<MyRidesPage />} />
           <Route path="/payments" element={<PaymentsPage />} />
           <Route path="/move-a-load" element={<HaulagePage />} />
+          <Route path="/invite" element={<InvitePage />} />
         </Route>
 
         <Route element={<ProtectedRoute requiredRole="super_admin" />}>
@@ -75,6 +78,7 @@ export default function App() {
           <Route path="/admin/payments" element={<AdminPaymentsPage />} />
           <Route path="/admin/earnings" element={<AdminEarningsPage />} />
           <Route path="/admin/reports" element={<AdminReportsPage />} />
+          <Route path="/admin/promos" element={<AdminPromosPage />} />
           <Route path="/admin/incidents" element={<AdminIncidentsPage />} />
           <Route path="/admin/locations" element={<AdminLocationsPage />} />
           <Route path="/admin/drivers" element={<AdminDriverVerificationPage />} />

@@ -280,7 +280,7 @@ export default function PaymentsPage() {
     await runAction(getRidePayment)
   }
 
-  const amountDue = currentPayment?.amount ?? selectedRide?.quoted_fare ?? null
+  const amountDue = currentPayment?.amount ?? selectedRide?.amount_to_pay ?? selectedRide?.quoted_fare ?? null
   const needsReference =
     !instantOn &&
     currentPayment &&
