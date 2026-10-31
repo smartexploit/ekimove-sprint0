@@ -172,6 +172,78 @@ class BankDeposit(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class DriverPayoutAccount(Base):
+    """Where a driver's earnings are paid."""
+
+    __tablename__ = "driver_payout_accounts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    driver_id: Mapped[int] = mapped_column(ForeignKey("drivers.id", ondelete="RESTRICT"), unique=True, index=True)
+    bank_code: Mapped[str] = mapped_column(String(20))
+    bank_name: Mapped[str] = mapped_column(String(120))
+    account_number: Mapped[str] = mapped_column(String(20))
+    account_name: Mapped[str] = mapped_column(String(160))
+    # True when the account name was confirmed with the bank via Paystack.
+    verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    recipient_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class DriverPayout(Base):
+    """One transfer of a driver's balance to their bank account."""
+
+    __tablename__ = "driver_payouts"
+    __table_args__ = (
+        CheckConstraint("status IN ('queued', 'processing', 'paid', 'failed')", name="ck_driver_payouts_status"),
+        CheckConstraint("amount > 0", name="ck_driver_payouts_amount_positive"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    driver_id: Mapped[int] = mapped_column(ForeignKey("drivers.id", ondelete="RESTRICT"), index=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    # "paystack" (automatic transfer) or "manual" (sent by staff).
+    method: Mapped[str] = mapped_column(String(16), default="manual", nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="queued", nullable=False, index=True)
+    reference: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    transfer_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    bank_reference: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class EarningEntry(Base):
+    """Driver earnings ledger. A driver's balance is the sum of amounts.
+
+    trip / cancellation_fee: credit of the fare (or fee) minus commission.
+    payout: debit when a payout is created; payout_reversal: credit back
+    if that payout fails.
+    """
+
+    __tablename__ = "earning_entries"
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('trip', 'cancellation_fee', 'payout', 'payout_reversal', 'adjustment')",
+            name="ck_earning_entries_kind",
+        ),
+        UniqueConstraint("ride_id", "kind", name="uq_earning_entries_ride_kind"),
+        UniqueConstraint("payout_id", "kind", name="uq_earning_entries_payout_kind"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    driver_id: Mapped[int] = mapped_column(ForeignKey("drivers.id", ondelete="RESTRICT"), index=True)
+    kind: Mapped[str] = mapped_column(String(24), index=True)
+    ride_id: Mapped[int | None] = mapped_column(ForeignKey("rides.id", ondelete="RESTRICT"), nullable=True, index=True)
+    payout_id: Mapped[int | None] = mapped_column(ForeignKey("driver_payouts.id", ondelete="RESTRICT"), nullable=True, index=True)
+    gross: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"))
+    commission: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"))
+    commission_percent: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
 class Rating(Base):
     __tablename__ = "ratings"
     __table_args__ = (CheckConstraint("score BETWEEN 1 AND 5", name="ck_ratings_score_range"),)

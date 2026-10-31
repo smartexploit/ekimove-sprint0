@@ -1,6 +1,7 @@
 import { NavLink, useNavigate, useOutletContext } from 'react-router-dom'
 import {
   AlertTriangle,
+  Banknote,
   MapPin,
   Route,
   ShieldCheck,
@@ -12,6 +13,7 @@ import { logoutPassenger } from '../services/authService.js'
 const NAV = [
   ['/admin/dispatch', 'Dispatch', Route],
   ['/admin/payments', 'Payments', Wallet],
+  ['/admin/earnings', 'Earnings', Banknote],
   ['/admin/incidents', 'Incidents', AlertTriangle],
   ['/admin/drivers', 'Driver verification', ShieldCheck],
   ['/admin/locations', 'Places & fares', MapPin],

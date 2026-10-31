@@ -69,7 +69,18 @@ function CurrentTrip({ ride, busy, onAdvance }) {
       <dl className="kv">
         <div><dt>Vehicle</dt><dd>{vehicleLabel(ride.vehicle_type)}</dd></div>
         <div><dt>Passengers</dt><dd>{ride.passenger_count}</dd></div>
-        <div><dt>Agreed fare</dt><dd style={{ color: 'var(--green-800)' }}>{formatNaira(ride.agreed_fare, { decimals: 0 })}</dd></div>
+        <div><dt>Agreed fare</dt><dd>{formatNaira(ride.agreed_fare, { decimals: 0 })}</dd></div>
+        {ride.earning && (
+          <div>
+            <dt>You earn</dt>
+            <dd style={{ color: 'var(--green-800)' }}>
+              {formatNaira(ride.earning.earning, { decimals: 0 })}
+              <span className="muted small" style={{ fontWeight: 600 }}>
+                {' '}after {formatNaira(ride.earning.commission, { decimals: 0 })} commission
+              </span>
+            </dd>
+          </div>
+        )}
       </dl>
 
       {stepIndex !== -1 && (
@@ -234,7 +245,9 @@ export default function DriverTripsPage() {
                         </p>
                         <p className="list-item-meta">
                           Trip #{ride.id} · {formatShortDate(ride.completed_at || ride.created_at)} ·{' '}
-                          {formatNaira(ride.agreed_fare, { decimals: 0 })}
+                          {ride.earning?.credited
+                            ? `You earned ${formatNaira(ride.earning.earning, { decimals: 0 })}`
+                            : formatNaira(ride.agreed_fare, { decimals: 0 })}
                         </p>
                       </div>
                       <StatusBadge status={ride.status} kind="driverTrip" />

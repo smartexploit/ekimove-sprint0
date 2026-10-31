@@ -23,6 +23,7 @@ const NAV = {
   ],
   driver: [
     ['/driver/trips', 'Trips', Route],
+    ['/driver/earnings', 'Earnings', Wallet],
     ['/driver/status', 'My status', BadgeCheck],
   ],
 }

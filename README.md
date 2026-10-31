@@ -101,6 +101,16 @@ Passengers pay by bank transfer into a **personal EkiMove account number** (a Pa
 
 **To go live:** EkiMove needs a registered business on Paystack with dedicated virtual accounts enabled (some business types must validate the customer's BVN first; Paystack's default limit is 1,000 accounts). Set `PAYSTACK_SECRET_KEY` on the API and add the webhook URL in the Paystack dashboard. Until then the app keeps the existing manual bank-transfer and Interswitch flows. Refunds are recorded in the app but sent by hand from the bank for now.
 
+## Driver earnings and payouts
+EkiMove keeps `COMMISSION_PERCENT` (10% by default) of every fare; the driver keeps the rest.
+
+- **When drivers earn:** completing a paid trip credits the driver's balance with the fare minus commission. A kept cancellation fee is split the same way. Each entry records the fare, the commission and the rate used, so changing the rate later doesn't rewrite history.
+- **Drivers** see their balance, today and this week, an itemised list ("₦600 − ₦60 EkiMove = +₦540") and their payouts on *Earnings*, and add the bank account to be paid into. With Paystack configured, the account name is confirmed with the bank.
+- **Admins** see fares, EkiMove's commission, what's owed and what's been paid on *Admin → Earnings*, and can press **Pay drivers now**.
+- **Payouts:** every balance of at least `PAYOUT_MINIMUM` is paid out. The debit is saved before any money moves. With `PAYSTACK_TRANSFERS_ENABLED=true`, Paystack Transfers sends it to verified accounts and the `transfer.success` / `transfer.failed` / `transfer.reversed` webhooks (same URL as above) settle it. Otherwise the payout waits for staff to send it from the bank and mark it sent. A failed or reversed payout returns the money to the driver's balance.
+- **Daily schedule:** create a Render **Cron Job** (e.g. schedule `0 17 * * *`, 6 pm in Lagos) with command `curl -fsS -X POST -H "X-Cron-Token: $PAYOUT_CRON_TOKEN" https://ekimove-api.onrender.com/api/v1/internal/payouts/run`, and set the same `PAYOUT_CRON_TOKEN` on the API.
+- Before automatic transfers: turn off the transfer OTP in the Paystack dashboard, keep the Paystack balance funded, and confirm VAT on commission with an accountant. Trips completed before this release have no earnings entries.
+
 ## Atọ́nà assistant
 Atọ́nà is EkiMove's chat guide, available to everyone on the homepage and on every passenger and driver screen. It chats naturally in English or Nigerian Pidgin, and answers EkiMove questions from live data through tools instead of guessing:
 

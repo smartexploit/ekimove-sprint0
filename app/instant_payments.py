@@ -279,6 +279,11 @@ async def paystack_webhook(request: Request, db: Session = Depends(get_db)) -> d
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid JSON.") from None
 
+    if str(event.get("event") or "").startswith("transfer."):
+        from app.earnings import handle_transfer_event  # avoid an import cycle
+
+        return handle_transfer_event(db, event)
+
     data = event.get("data") or {}
     if event.get("event") != "charge.success" or data.get("channel") != "dedicated_nuban":
         return {"status": "ignored"}

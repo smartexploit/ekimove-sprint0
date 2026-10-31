@@ -2565,3 +2565,108 @@ button:disabled {
 .cancel-panel dd {
   color: var(--ink);
 }
+
+/* Driver earnings */
+.earn-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 22px;
+  border-radius: 24px;
+  background: var(--green-800);
+  color: var(--white);
+}
+
+.earn-hero-label {
+  color: var(--green-200);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.earn-hero-amount {
+  font-family: var(--font-display);
+  font-size: clamp(36px, 10vw, 48px);
+  font-weight: 800;
+  line-height: 1.05;
+  color: var(--gold-500);
+  font-variant-numeric: tabular-nums;
+}
+
+.earn-hero-note {
+  color: var(--green-200);
+  font-size: 14px;
+}
+
+.earn-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.earn-tiles > div {
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.08);
+  min-width: 0;
+}
+
+.earn-tile-label {
+  color: var(--green-200);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.earn-tile-value {
+  font-size: 18px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.ledger-amount {
+  flex-shrink: 0;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-700);
+}
+
+.ledger-amount.is-credit {
+  color: var(--green-800);
+}
+
+/* Admin earnings tiles */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(200px, 100%), 1fr));
+  gap: 12px;
+}
+
+.stat {
+  padding: 16px 18px;
+  border-radius: 18px;
+  background: var(--white);
+  box-shadow: inset 0 0 0 1px var(--line);
+  min-width: 0;
+}
+
+.stat-label {
+  color: var(--ink-500);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.stat-value {
+  margin-top: 4px;
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--green-800);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.stat-note {
+  margin-top: 2px;
+  color: var(--ink-500);
+  font-size: 13px;
+}

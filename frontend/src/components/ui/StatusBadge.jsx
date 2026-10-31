@@ -25,6 +25,12 @@ const STATUS = {
     rejected: ['Rejected', 'red'],
     refunded: ['Refunded', 'neutral'],
   },
+  payout: {
+    queued: ['Waiting to send', 'gold'],
+    processing: ['Sending', 'bright'],
+    paid: ['Paid', 'green'],
+    failed: ['Failed', 'red'],
+  },
   verification: {
     pending: ['Under review', 'gold'],
     approved: ['Approved', 'green'],

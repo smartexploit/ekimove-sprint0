@@ -10,10 +10,12 @@ import AdminDispatchPage from './pages/admin/AdminDispatchPage.jsx'
 import DriverApplicationPage from './pages/driver/DriverApplicationPage.jsx'
 import DriverStatusPage from './pages/driver/DriverStatusPage.jsx'
 import DriverTripsPage from './pages/driver/DriverTripsPage.jsx'
+import DriverEarningsPage from './pages/driver/DriverEarningsPage.jsx'
 import ProtectedRoute from './routes/ProtectedRoute.jsx'
 import OfflineBanner from './components/pwa/OfflineBanner.jsx'
 import AdminDriverVerificationPage from './pages/admin/AdminDriverVerificationPage.jsx'
 import AdminPaymentsPage from './pages/admin/AdminPaymentsPage.jsx'
+import AdminEarningsPage from './pages/admin/AdminEarningsPage.jsx'
 import AdminIncidentsPage from './pages/admin/AdminIncidentsPage.jsx'
 
 import AdminLocationsPage from './pages/admin/AdminLocationsPage.jsx'
@@ -38,6 +40,7 @@ export default function App() {
         <Route element={<ProtectedRoute requiredRole="super_admin" />}>
           <Route path="/admin/dispatch" element={<AdminDispatchPage />} />
           <Route path="/admin/payments" element={<AdminPaymentsPage />} />
+          <Route path="/admin/earnings" element={<AdminEarningsPage />} />
           <Route path="/admin/incidents" element={<AdminIncidentsPage />} />
           <Route path="/admin/locations" element={<AdminLocationsPage />} />
           <Route path="/admin/drivers" element={<AdminDriverVerificationPage />} />
@@ -46,6 +49,7 @@ export default function App() {
         <Route element={<ProtectedRoute requiredRole="driver" />}>
           <Route path="/driver/status" element={<DriverStatusPage />} />
           <Route path="/driver/trips" element={<DriverTripsPage />} />
+          <Route path="/driver/earnings" element={<DriverEarningsPage />} />
         </Route>
         <Route path="/profile" element={<Navigate to="/dashboard" replace />} />
         <Route path="/driver" element={<Navigate to="/driver/apply" replace />} />

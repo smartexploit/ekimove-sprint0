@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_user
 from app.config import settings
 from app.database import get_db
+from app.earnings import record_cancellation_earning
 from app.models import AuditLog, Payment, Ride, RideRequest, User
 
 router = APIRouter(prefix="/api/v1", tags=["cancellations"])
@@ -146,6 +147,9 @@ def cancel_ride(
         if payment is not None and terms["paid"] and refund > 0:
             payment.refund_amount = refund
             payment.refund_status = "due"
+        if terms["paid"] and fee > 0:
+            # The kept fee goes to the driver, minus commission.
+            record_cancellation_earning(db, ride, fee)
 
     reason = (payload.reason if payload else None) or "No reason given"
     db.add(

@@ -2734,6 +2734,8 @@ class FakePaystack:
         self.calls = []
         self.transactions = {}
         self.fail_dedicated = False
+        self.transfers = []
+        self.transfer_status = "pending"
 
     def __call__(self, method, url, json=None, headers=None, timeout=None):
         self.calls.append((method, url, json))
@@ -2747,6 +2749,17 @@ class FakePaystack:
             return _FakeResponse(200, {"status": True, "data": {
                 "account_number": "9930000001", "account_name": "EKIMOVE/TEST PASSENGER",
                 "bank": {"name": "Wema Bank"}, "active": True}})
+        if path.startswith("/bank/resolve"):
+            if "account_number=0000000000" in path:
+                return _FakeResponse(422, {"status": False, "message": "Could not resolve account name"})
+            return _FakeResponse(200, {"status": True, "data": {"account_name": "TUNDE AJAYI", "account_number": "0123456789"}})
+        if path.startswith("/bank?"):
+            return _FakeResponse(200, {"status": True, "data": [{"code": "058", "name": "Guaranty Trust Bank", "active": True}]})
+        if path == "/transferrecipient":
+            return _FakeResponse(200, {"status": True, "data": {"recipient_code": "RCP_test1"}})
+        if path == "/transfer":
+            self.transfers.append(json)
+            return _FakeResponse(200, {"status": True, "data": {"status": self.transfer_status, "transfer_code": "TRF_test1"}})
         if path.startswith("/transaction/verify/"):
             reference = path.rsplit("/", 1)[1]
             if reference not in self.transactions:
@@ -3076,3 +3089,246 @@ def test_manual_confirmation_after_cancel_owes_a_full_refund(client):
     payment = client.get(f"/api/v1/payments/rides/{ride_id}", headers=passenger_headers).json()
     assert payment["refund_status"] == "due"
     assert payment["refund_amount"] == payment["amount"]
+
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: driver earnings, commission and payouts
+# ---------------------------------------------------------------------------
+
+DRIVER_LOGIN = ("08000000006", "Driver-Test-Password-5!")
+
+
+def _confirm_payment(client, passenger_headers, admin_headers, ride_id):
+    client.post(f"/api/v1/payments/rides/{ride_id}/initiate", headers=passenger_headers)
+    client.post(f"/api/v1/payments/rides/{ride_id}/submit-transfer",
+                json={"transfer_reference": f"BANK-{ride_id}"}, headers=passenger_headers)
+    payment = client.get(f"/api/v1/payments/rides/{ride_id}", headers=passenger_headers).json()
+    response = client.post(f"/api/v1/admin/payments/{payment['id']}/reconcile",
+                           json={"decision": "confirm", "reason": "Seen on statement"}, headers=admin_headers)
+    assert response.status_code == 200, response.text
+
+
+def complete_paid_ride(client):
+    passenger_headers, admin_headers, request_id = create_assigned_ride(client)
+    ride_id = get_ride_id_from_request(client, request_id, passenger_headers)
+    fare = _ride_fare(client, passenger_headers, request_id)
+    _confirm_payment(client, passenger_headers, admin_headers, ride_id)
+    driver_headers = login(client, *DRIVER_LOGIN)
+    for status_value in ("driver_arriving", "in_progress", "completed"):
+        response = client.patch(f"/api/v1/driver/rides/{ride_id}/status", json={"status": status_value},
+                                headers=driver_headers)
+        assert response.status_code == 200, response.text
+    return driver_headers, admin_headers, ride_id, fare
+
+
+def _set_manual_account(client, driver_headers):
+    response = client.put("/api/v1/driver/payout-account", headers=driver_headers, json={
+        "bank_code": "058", "account_number": "0123456789", "account_name": "Tunde Ajayi"})
+    assert response.status_code == 200, response.text
+    return response.json()["account"]
+
+
+@pytest.fixture
+def no_paystack(monkeypatch):
+    monkeypatch.setattr(settings, "paystack_secret_key", None)
+    monkeypatch.setattr(settings, "paystack_transfers_enabled", False)
+    monkeypatch.setattr(settings, "commission_percent", 10.0)
+    monkeypatch.setattr(settings, "payout_minimum", 500)
+
+
+def test_completed_trip_credits_fare_minus_ten_percent(client, no_paystack):
+    driver_headers, _, ride_id, fare = complete_paid_ride(client)
+    earnings = client.get("/api/v1/driver/earnings", headers=driver_headers).json()
+    commission = (fare * Decimal("0.10")).quantize(Decimal("0.01"))
+    assert earnings["commission_percent"] == "10.0"
+    assert earnings["balance"] == f"{fare - commission:.2f}"
+    assert earnings["today"] == earnings["balance"] == earnings["this_week"] == earnings["lifetime"]
+    assert earnings["trips_completed"] == 1
+    entry = earnings["entries"][0]
+    assert (entry["kind"], entry["ride_id"]) == ("trip", ride_id)
+    assert entry["fare"] == f"{fare:.2f}" and entry["commission"] == f"{commission:.2f}"
+    assert entry["route"] == "Central Market gate → North Estate entrance"
+
+    trips = client.get("/api/v1/driver/rides", headers=driver_headers).json()
+    trip = next(t for t in trips if t["id"] == ride_id)
+    assert trip["earning"] == {"fare": f"{fare:.2f}", "commission": f"{commission:.2f}",
+                               "earning": f"{fare - commission:.2f}", "credited": True}
+
+
+def test_commission_rate_is_a_setting(client, no_paystack, monkeypatch):
+    monkeypatch.setattr(settings, "commission_percent", 15.0)
+    driver_headers, admin_headers, _, fare = complete_paid_ride(client)
+    commission = (fare * Decimal("0.15")).quantize(Decimal("0.01"))
+    summary = client.get("/api/v1/admin/earnings/summary", headers=admin_headers).json()
+    assert summary["commission"] == f"{commission:.2f}"
+    assert summary["fares"] == f"{fare:.2f}"
+    assert summary["driver_earnings"] == f"{fare - commission:.2f}"
+    assert summary["owed_to_drivers"] == f"{fare - commission:.2f}"
+
+
+def test_unfinished_trip_shows_projected_earning(client, no_paystack):
+    passenger_headers, _, request_id = create_assigned_ride(client)
+    ride_id = get_ride_id_from_request(client, request_id, passenger_headers)
+    driver_headers = login(client, *DRIVER_LOGIN)
+    trip = next(t for t in client.get("/api/v1/driver/rides", headers=driver_headers).json() if t["id"] == ride_id)
+    assert trip["earning"]["credited"] is False
+    assert Decimal(trip["earning"]["earning"]) == Decimal(trip["agreed_fare"]) * Decimal("0.9")
+    assert client.get("/api/v1/driver/earnings", headers=driver_headers).json()["balance"] == "0.00"
+
+
+def test_kept_cancellation_fee_goes_to_the_driver(client, no_paystack, monkeypatch):
+    monkeypatch.setattr(settings, "cancellation_fee_car", 500)
+    passenger_headers, admin_headers, request_id = create_assigned_ride(client)
+    ride_id = get_ride_id_from_request(client, request_id, passenger_headers)
+    _confirm_payment(client, passenger_headers, admin_headers, ride_id)
+    with session_for(client) as db:
+        db.get(Ride, ride_id).assigned_at = datetime.now(timezone.utc) - timedelta(minutes=10)
+        db.commit()
+    assert client.post(f"/api/v1/ride-requests/{request_id}/cancel", headers=passenger_headers).status_code == 200
+    earnings = client.get("/api/v1/driver/earnings", headers=login(client, *DRIVER_LOGIN)).json()
+    assert earnings["balance"] == "450.00"
+    assert earnings["entries"][0]["kind"] == "cancellation_fee"
+
+
+def test_free_cancellation_pays_the_driver_nothing(client, no_paystack):
+    passenger_headers, _, request_id = create_assigned_ride(client)
+    client.post(f"/api/v1/ride-requests/{request_id}/cancel", headers=passenger_headers)
+    earnings = client.get("/api/v1/driver/earnings", headers=login(client, *DRIVER_LOGIN)).json()
+    assert earnings["balance"] == "0.00" and earnings["entries"] == []
+
+
+def test_payout_account_validation_without_paystack(client, no_paystack):
+    driver_headers = login(client, *DRIVER_LOGIN)
+    bad = client.put("/api/v1/driver/payout-account", headers=driver_headers,
+                     json={"bank_code": "058", "account_number": "12345", "account_name": "Tunde"})
+    assert bad.status_code == 422
+    no_name = client.put("/api/v1/driver/payout-account", headers=driver_headers,
+                         json={"bank_code": "058", "account_number": "0123456789"})
+    assert no_name.status_code == 422
+    account = _set_manual_account(client, driver_headers)
+    assert account == {"bank_code": "058", "bank_name": "Guaranty Trust Bank", "account_number": "0123456789",
+                       "account_name": "Tunde Ajayi", "verified": False}
+    masked = client.get("/api/v1/driver/earnings", headers=driver_headers).json()["payout_account"]
+    assert masked["account_number"] == "••••6789"
+    banks = client.get("/api/v1/banks", headers=driver_headers).json()
+    assert {"code": "058", "name": "Guaranty Trust Bank"} in banks
+
+
+def test_only_drivers_have_earnings(client, no_paystack):
+    passenger = login(client, "08000000001", "Passenger-Test-Password-1!")
+    assert client.get("/api/v1/driver/earnings", headers=passenger).status_code == 403
+    assert client.put("/api/v1/driver/payout-account", headers=passenger,
+                      json={"bank_code": "058", "account_number": "0123456789", "account_name": "X Y"}).status_code == 403
+    assert client.get("/api/v1/admin/earnings/summary", headers=passenger).status_code == 403
+    assert client.post("/api/v1/admin/payouts/run", headers=passenger).status_code == 403
+
+
+def test_manual_payout_run_then_mark_paid(client, no_paystack):
+    driver_headers, admin_headers, _, fare = complete_paid_ride(client)
+    _set_manual_account(client, driver_headers)
+    net = fare - (fare * Decimal("0.10")).quantize(Decimal("0.01"))
+
+    summary = client.post("/api/v1/admin/payouts/run", headers=admin_headers).json()
+    assert summary["automatic"] is False
+    assert (summary["created"], summary["queued"], summary["total"]) == (1, 1, f"{net:.2f}")
+    assert client.get("/api/v1/driver/earnings", headers=driver_headers).json()["balance"] == "0.00"
+
+    # A second run finds nothing more to pay.
+    assert client.post("/api/v1/admin/payouts/run", headers=admin_headers).json()["created"] == 0
+
+    payouts = client.get("/api/v1/admin/payouts", headers=admin_headers).json()
+    assert len(payouts) == 1
+    payout = payouts[0]
+    assert payout["status"] == "queued" and payout["amount"] == f"{net:.2f}"
+    assert payout["payout_account"]["account_number"] == "0123456789"  # staff need the full number
+    report = client.get("/api/v1/admin/earnings/summary", headers=admin_headers).json()
+    assert report["in_flight"] == f"{net:.2f}" and report["owed_to_drivers"] == "0.00"
+
+    paid = client.post(f"/api/v1/admin/payouts/{payout['id']}/mark-paid",
+                       json={"bank_reference": "GTB-OUT-1"}, headers=admin_headers)
+    assert paid.status_code == 200 and paid.json()["status"] == "paid"
+    assert client.post(f"/api/v1/admin/payouts/{payout['id']}/mark-paid",
+                       json={"bank_reference": "again"}, headers=admin_headers).status_code == 409
+    driver_view = client.get("/api/v1/driver/earnings", headers=driver_headers).json()
+    assert driver_view["payouts"][0]["status"] == "paid"
+    assert driver_view["payouts"][0]["bank_reference"] == "GTB-OUT-1"
+    assert client.get("/api/v1/admin/earnings/summary", headers=admin_headers).json()["paid_out"] == f"{net:.2f}"
+
+
+def test_failed_payout_returns_money_to_balance(client, no_paystack):
+    driver_headers, admin_headers, _, _ = complete_paid_ride(client)
+    _set_manual_account(client, driver_headers)
+    before = client.get("/api/v1/driver/earnings", headers=driver_headers).json()["balance"]
+    client.post("/api/v1/admin/payouts/run", headers=admin_headers)
+    payout = client.get("/api/v1/admin/payouts", headers=admin_headers).json()[0]
+    failed = client.post(f"/api/v1/admin/payouts/{payout['id']}/mark-failed",
+                         json={"reason": "Account closed"}, headers=admin_headers)
+    assert failed.status_code == 200 and failed.json()["status"] == "failed"
+    assert client.get("/api/v1/driver/earnings", headers=driver_headers).json()["balance"] == before
+    assert client.post(f"/api/v1/admin/payouts/{payout['id']}/mark-failed",
+                       json={"reason": "again"}, headers=admin_headers).status_code == 409
+
+
+def test_payout_run_skips_small_balances_and_missing_accounts(client, no_paystack, monkeypatch):
+    driver_headers, admin_headers, _, _ = complete_paid_ride(client)
+    summary = client.post("/api/v1/admin/payouts/run", headers=admin_headers).json()
+    assert (summary["created"], summary["skipped_no_account"]) == (0, 1)
+    _set_manual_account(client, driver_headers)
+    monkeypatch.setattr(settings, "payout_minimum", 1_000_000)
+    assert client.post("/api/v1/admin/payouts/run", headers=admin_headers).json()["created"] == 0
+
+
+def test_automatic_payout_with_paystack_transfers(client, paystack, monkeypatch):
+    monkeypatch.setattr(settings, "paystack_transfers_enabled", True)
+    monkeypatch.setattr(settings, "commission_percent", 10.0)
+    monkeypatch.setattr(settings, "payout_minimum", 500)
+    driver_headers, admin_headers, _, fare = complete_paid_ride(client)
+    net = fare - (fare * Decimal("0.10")).quantize(Decimal("0.01"))
+
+    wrong = client.put("/api/v1/driver/payout-account", headers=driver_headers,
+                       json={"bank_code": "058", "account_number": "0000000000"})
+    assert wrong.status_code == 422
+    account = client.put("/api/v1/driver/payout-account", headers=driver_headers,
+                         json={"bank_code": "058", "account_number": "0123456789", "account_name": "ignored"}).json()
+    assert account["account"]["verified"] is True
+    assert account["account"]["account_name"] == "TUNDE AJAYI"  # the bank's name, not the typed one
+
+    summary = client.post("/api/v1/admin/payouts/run", headers=admin_headers).json()
+    assert summary["automatic"] is True and summary["processing"] == 1
+    transfer = paystack.transfers[0]
+    assert transfer["amount"] == int(net * 100) and transfer["recipient"] == "RCP_test1"
+    reference = transfer["reference"]
+    assert 16 <= len(reference) <= 50
+
+    # Paystack confirms the transfer by webhook.
+    assert _signed_webhook(client, {"event": "transfer.success", "data": {"reference": reference}}).json() == {"status": "paid"}
+    payout = client.get("/api/v1/driver/earnings", headers=driver_headers).json()["payouts"][0]
+    assert payout["status"] == "paid" and payout["method"] == "paystack"
+
+
+def test_reversed_transfer_credits_the_driver_back(client, paystack, monkeypatch):
+    monkeypatch.setattr(settings, "paystack_transfers_enabled", True)
+    monkeypatch.setattr(settings, "payout_minimum", 500)
+    paystack.transfer_status = "success"
+    driver_headers, admin_headers, _, _ = complete_paid_ride(client)
+    client.put("/api/v1/driver/payout-account", headers=driver_headers,
+               json={"bank_code": "058", "account_number": "0123456789"})
+    before = client.get("/api/v1/driver/earnings", headers=driver_headers).json()["balance"]
+    assert client.post("/api/v1/admin/payouts/run", headers=admin_headers).json()["paid"] == 1
+    reference = paystack.transfers[0]["reference"]
+    response = _signed_webhook(client, {"event": "transfer.reversed", "data": {"reference": reference}})
+    assert response.json() == {"status": "failed"}
+    assert client.get("/api/v1/driver/earnings", headers=driver_headers).json()["balance"] == before
+    # Replays don't double-credit.
+    _signed_webhook(client, {"event": "transfer.reversed", "data": {"reference": reference}})
+    assert client.get("/api/v1/driver/earnings", headers=driver_headers).json()["balance"] == before
+
+
+def test_scheduled_payout_endpoint_needs_its_token(client, no_paystack, monkeypatch):
+    monkeypatch.setattr(settings, "payout_cron_token", None)
+    assert client.post("/api/v1/internal/payouts/run").status_code == 404
+    monkeypatch.setattr(settings, "payout_cron_token", "cron-secret-123")
+    assert client.post("/api/v1/internal/payouts/run", headers={"X-Cron-Token": "wrong"}).status_code == 401
+    ok = client.post("/api/v1/internal/payouts/run", headers={"X-Cron-Token": "cron-secret-123"})
+    assert ok.status_code == 200 and ok.json()["created"] == 0

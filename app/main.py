@@ -6,6 +6,7 @@ from app.payments import router as payments_router
 from app.interswitch_payments import router as interswitch_payments_router
 from app.instant_payments import instant_transfers_enabled, router as instant_payments_router
 from app.cancellations import router as cancellations_router
+from app.earnings import record_trip_earning, ride_earning_preview, router as earnings_router
 from decimal import Decimal, ROUND_HALF_UP
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -50,6 +51,7 @@ app.include_router(payments_router)
 app.include_router(interswitch_payments_router)
 app.include_router(instant_payments_router)
 app.include_router(cancellations_router)
+app.include_router(earnings_router)
 
 class LoginRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
@@ -1380,6 +1382,7 @@ def list_driver_rides(
             "vehicle_type": request.vehicle_type,
             "passenger_count": request.passenger_count,
             "created_at": request.created_at.isoformat() if request.created_at else None,
+            "earning": ride_earning_preview(db, ride),
         }
         for ride, request in rows
     ]
@@ -1454,6 +1457,8 @@ def update_driver_ride_status(
         ride.started_at = now
     elif payload.status == "completed":
         ride.completed_at = now
+        # Credit the driver: fare minus EkiMove's commission.
+        record_trip_earning(db, ride)
 
     db.add(
         AuditLog(

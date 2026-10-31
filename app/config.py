@@ -98,6 +98,27 @@ class Settings(BaseSettings):
     cancellation_fee_motorcycle: int = 200
     cancellation_fee_car: int = 500
 
+    # Driver earnings. EkiMove keeps this percentage of every fare (and of
+    # cancellation fees); the rest is credited to the driver's balance.
+    commission_percent: float = 10.0
+    # Balances below this are carried to the next payout run.
+    payout_minimum: int = 500
+    # Send payouts automatically with Paystack Transfers (needs
+    # PAYSTACK_SECRET_KEY and transfers enabled, with OTP turned off, on the
+    # Paystack account). When off, payouts are queued for staff to send.
+    paystack_transfers_enabled: bool = False
+    # Secret for the scheduled daily payout job (Render Cron Job). The
+    # internal endpoint is disabled while this is empty.
+    payout_cron_token: str | None = None
+
+    @field_validator("payout_cron_token", mode="before")
+    @classmethod
+    def clean_payout_cron_token(cls, value):
+        if value is None:
+            return None
+        cleaned = str(value).strip()
+        return cleaned or None
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
