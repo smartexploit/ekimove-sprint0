@@ -1,7 +1,7 @@
 ﻿from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -35,6 +35,12 @@ class Driver(Base):
     verification_status: Mapped[str] = mapped_column(String(24), default="pending", nullable=False, index=True)
     is_online: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Last location shared from the driver's phone while online (for
+    # offering trips to the nearest driver), and when they went online.
+    last_latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    last_longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    location_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    online_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Vehicle(Base):
@@ -100,6 +106,10 @@ class RideRequest(Base):
     scheduled_for: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     quote_terms: Mapped[str | None] = mapped_column(Text, nullable=True)
     quoted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Automatic dispatch: "searching" (no driver free yet), "offering",
+    # or "manual" (needs an admin). None once assigned or never dispatched.
+    dispatch_status: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
+    dispatch_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
 
 
 class Ride(Base):
@@ -254,6 +264,33 @@ class EarningEntry(Base):
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class RideOffer(Base):
+    """A request offered to one driver, who may accept or decline in time."""
+
+    __tablename__ = "ride_offers"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'accepted', 'declined', 'expired', 'withdrawn')",
+            name="ck_ride_offers_status",
+        ),
+        # At most one live offer per request and per driver, enforced by
+        # the database so two app servers can never double-offer.
+        Index("uq_ride_offers_pending_request", "request_id", unique=True,
+              sqlite_where=text("status = 'pending'"), postgresql_where=text("status = 'pending'")),
+        Index("uq_ride_offers_pending_driver", "driver_id", unique=True,
+              sqlite_where=text("status = 'pending'"), postgresql_where=text("status = 'pending'")),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    request_id: Mapped[int] = mapped_column(ForeignKey("ride_requests.id", ondelete="RESTRICT"), index=True)
+    driver_id: Mapped[int] = mapped_column(ForeignKey("drivers.id", ondelete="RESTRICT"), index=True)
+    status: Mapped[str] = mapped_column(String(16), default="pending", nullable=False, index=True)
+    distance_m: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    offered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class AppSetting(Base):

@@ -3599,3 +3599,218 @@ def test_haulage_quote_can_be_declined_or_cancelled_free(client):
     bad = client.post("/api/v1/haulage-requests", headers=passenger, json={**body, "vehicle_type": "plane"})
     assert bad.status_code == 422
     assert client.post("/api/v1/haulage-requests", headers=admin, json=body).status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: automatic dispatch (offer, accept/decline, cascade, admin fallback)
+# ---------------------------------------------------------------------------
+
+import app.dispatch as dispatch_module
+from app.models import RideOffer
+
+SECOND_DRIVER_LOGIN = ("08000000010", "Driver-Two-Password-10!")
+
+
+@pytest.fixture(autouse=True)
+def dispatch_runs_every_call(monkeypatch):
+    monkeypatch.setattr(dispatch_module, "MIN_SECONDS_BETWEEN_RUNS", 0)
+
+
+def add_second_driver(client, online=True, vehicle_type="standard", capacity=4):
+    with session_for(client) as db:
+        db.add(User(id=10, phone="08000000010", full_name="Kemi Adeyemi", role="driver", is_active=True,
+                    password_hash=hash_password(SECOND_DRIVER_LOGIN[1])))
+        db.flush()
+        db.add(Driver(id=2, user_id=10, verification_status="approved", is_online=online))
+        db.flush()
+        db.add(Vehicle(id=20, driver_id=2, vehicle_type=vehicle_type, plate_number="EKM-TWO-002",
+                       capacity=capacity, is_approved=True))
+        db.commit()
+
+
+def new_request(client, headers=None, **overrides):
+    headers = headers or login(client, *PASSENGER_LOGIN)
+    response = client.post("/api/v1/ride-requests", json=ride_payload(**overrides), headers=headers)
+    assert response.status_code == 201, response.text
+    return headers, response.json()["id"]
+
+
+def current_offer(client, driver_headers):
+    response = client.get("/api/v1/driver/offers/current", headers=driver_headers)
+    assert response.status_code == 200, response.text
+    return response.json()["offer"]
+
+
+def expire_offers(client):
+    with session_for(client) as db:
+        for offer in db.query(RideOffer).filter(RideOffer.status == "pending").all():
+            offer.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        db.commit()
+
+
+def test_new_request_is_offered_and_driver_accepts(client):
+    passenger, request_id = new_request(client)
+    driver = login(client, *DRIVER_LOGIN)
+    offer = current_offer(client, driver)
+    assert offer["request_id"] == request_id
+    assert 0 < offer["seconds_left"] <= 30
+    assert Decimal(offer["earning"]) == Decimal(offer["fare"]) * Decimal("0.9")
+    assert offer["origin_text"] == "Central Market gate"
+
+    accepted = client.post(f"/api/v1/driver/offers/{offer['id']}/accept", headers=driver)
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["plate_number"] == "EKM-TEST-001"
+    mine = next(r for r in client.get("/api/v1/ride-requests/my-rides", headers=passenger).json() if r["id"] == request_id)
+    assert mine["ride_status"] == "assigned" and mine["driver_name"] == "Test D."
+    assert mine["dispatch_status"] is None
+    assert current_offer(client, driver) is None
+    # The trip now shows on the driver's list.
+    assert any(t["id"] == accepted.json()["ride_id"] for t in client.get("/api/v1/driver/rides", headers=driver).json())
+
+
+def test_decline_moves_the_request_to_the_next_driver(client):
+    add_second_driver(client)
+    _, request_id = new_request(client)
+    first = login(client, *DRIVER_LOGIN)
+    second = login(client, *SECOND_DRIVER_LOGIN)
+    # Both have been idle forever, so the order is stable but either may be first.
+    offers = {"first": current_offer(client, first), "second": current_offer(client, second)}
+    holder, other = ("first", "second") if offers["first"] else ("second", "first")
+    headers = {"first": first, "second": second}
+    assert offers[other] is None  # one driver at a time
+    assert client.post(f"/api/v1/driver/offers/{offers[holder]['id']}/decline", headers=headers[holder]).status_code == 200
+    next_offer = current_offer(client, headers[other])
+    assert next_offer and next_offer["request_id"] == request_id
+    # The driver who declined isn't asked again.
+    assert current_offer(client, headers[holder]) is None
+
+
+def test_unanswered_offers_cascade_then_go_to_the_admin(client):
+    admin = login(client, *ADMIN_LOGIN)
+    client.put("/api/v1/admin/settings", json={"dispatch_max_offers": 2}, headers=admin)
+    add_second_driver(client)
+    _, request_id = new_request(client)
+    first, second = login(client, *DRIVER_LOGIN), login(client, *SECOND_DRIVER_LOGIN)
+    holder = first if current_offer(client, first) else second
+    expire_offers(client)
+    other = second if holder is first else first
+    assert current_offer(client, holder) is None
+    assert current_offer(client, other)["request_id"] == request_id
+    expire_offers(client)
+    current_offer(client, other)  # runs dispatch
+    pending = client.get("/api/v1/admin/ride-requests/pending", headers=admin).json()
+    job = next(p for p in pending if p["id"] == request_id)
+    assert job["dispatch_status"] == "manual"
+    assert job["dispatch_attempts"] == 2 and job["declined_or_missed"] == 2
+    assert job["current_offer"] is None
+    # The admin can still assign by hand.
+    assigned = client.post(f"/api/v1/admin/ride-requests/{request_id}/assign", json={"driver_id": 1}, headers=admin)
+    assert assigned.status_code == 201
+
+
+def test_accepting_too_late_is_refused(client):
+    new_request(client)
+    driver = login(client, *DRIVER_LOGIN)
+    offer = current_offer(client, driver)
+    expire_offers(client)
+    response = client.post(f"/api/v1/driver/offers/{offer['id']}/accept", headers=driver)
+    assert response.status_code == 409 and "no longer available" in response.json()["detail"]
+
+
+def test_nearest_driver_gets_the_offer(client):
+    ids = _seed_place_route(client)
+    add_second_driver(client)
+    with session_for(client) as db:
+        pickup = db.get(Place, ids["origin_id"])
+        pickup.latitude, pickup.longitude = 7.6230, 5.2210  # Ado-Ekiti
+        db.commit()
+    first, second = login(client, *DRIVER_LOGIN), login(client, *SECOND_DRIVER_LOGIN)
+    # Driver 1 is ~5 km away, driver 2 is ~300 m away.
+    assert client.post("/api/v1/driver/location", json={"latitude": 7.6680, "longitude": 5.2210}, headers=first).status_code == 200
+    client.post("/api/v1/driver/location", json={"latitude": 7.6257, "longitude": 5.2210}, headers=second)
+    passenger = login(client, *PASSENGER_LOGIN)
+    created = client.post("/api/v1/ride-requests", headers=passenger, json={
+        "origin_place_id": ids["origin_id"], "destination_place_id": ids["destination_id"],
+        "vehicle_type": "standard", "passenger_count": 1})
+    assert created.status_code == 201, created.text
+    offer = current_offer(client, second)
+    assert offer is not None and 250 <= offer["distance_m"] <= 350
+    assert current_offer(client, first) is None
+
+
+def test_busy_and_offline_drivers_are_skipped(client):
+    passenger_headers, admin, request_id = create_assigned_ride(client)  # driver 1 is now busy
+    _, second_request = new_request(client)
+    assert current_offer(client, login(client, *DRIVER_LOGIN)) is None
+    pending = client.get("/api/v1/admin/ride-requests/pending", headers=admin).json()
+    assert next(p for p in pending if p["id"] == second_request)["dispatch_status"] == "searching"
+    # A driver coming online picks it up.
+    add_second_driver(client, online=False)
+    second = login(client, *SECOND_DRIVER_LOGIN)
+    client.patch("/api/v1/driver-applications/me/online", json={"is_online": True}, headers=second)
+    offer = current_offer(client, second)
+    assert offer["request_id"] == second_request
+    # Going offline hands it on (nobody left, so it waits again).
+    client.patch("/api/v1/driver-applications/me/online", json={"is_online": False}, headers=second)
+    with session_for(client) as db:
+        assert db.get(RideOffer, offer["id"]).status == "declined"
+
+
+def test_one_offer_per_driver_at_a_time(client):
+    new_request(client)
+    headers = login(client, *PASSENGER_LOGIN)
+    _, second_request = new_request(client, headers=headers)
+    with session_for(client) as db:
+        assert db.query(RideOffer).filter(RideOffer.status == "pending").count() == 1
+        assert db.get(RideRequest, second_request).dispatch_status == "searching"
+
+
+def test_cancel_or_manual_assign_withdraws_the_offer(client):
+    passenger, request_id = new_request(client)
+    driver = login(client, *DRIVER_LOGIN)
+    offer = current_offer(client, driver)
+    client.post(f"/api/v1/ride-requests/{request_id}/cancel", headers=passenger)
+    assert current_offer(client, driver) is None
+    with session_for(client) as db:
+        assert db.get(RideOffer, offer["id"]).status == "withdrawn"
+
+    _, request_two = new_request(client, headers=passenger)
+    offer_two = current_offer(client, driver)
+    admin = login(client, *ADMIN_LOGIN)
+    client.post(f"/api/v1/admin/ride-requests/{request_two}/assign", json={"driver_id": 1}, headers=admin)
+    with session_for(client) as db:
+        assert db.get(RideOffer, offer_two["id"]).status == "withdrawn"
+    assert client.post(f"/api/v1/driver/offers/{offer_two['id']}/accept", headers=driver).status_code == 409
+
+
+def test_auto_dispatch_can_be_switched_off(client):
+    admin = login(client, *ADMIN_LOGIN)
+    rules = client.put("/api/v1/admin/settings", json={"auto_dispatch_enabled": False,
+                                                       "dispatch_offer_seconds": 45}, headers=admin).json()
+    assert rules["auto_dispatch_enabled"] is False and rules["dispatch_offer_seconds"] == 45
+    new_request(client)
+    assert current_offer(client, login(client, *DRIVER_LOGIN)) is None
+    assert client.put("/api/v1/admin/settings", json={"dispatch_offer_seconds": 5}, headers=admin).status_code == 422
+
+
+def test_offers_are_private_to_their_driver(client):
+    add_second_driver(client)
+    new_request(client)
+    first, second = login(client, *DRIVER_LOGIN), login(client, *SECOND_DRIVER_LOGIN)
+    offer, holder, other = None, None, None
+    for mine, theirs in ((first, second), (second, first)):
+        found = current_offer(client, mine)
+        if found:
+            offer, holder, other = found, mine, theirs
+    assert client.post(f"/api/v1/driver/offers/{offer['id']}/accept", headers=other).status_code == 404
+    passenger = login(client, *PASSENGER_LOGIN)
+    assert client.get("/api/v1/driver/offers/current", headers=passenger).status_code == 403
+    assert client.post("/api/v1/driver/location", json={"latitude": 95, "longitude": 0}, headers=holder).status_code == 422
+
+
+def test_scheduled_dispatch_endpoint_needs_its_token(client, monkeypatch):
+    monkeypatch.setattr(settings, "payout_cron_token", None)
+    assert client.post("/api/v1/internal/dispatch/run").status_code == 404
+    monkeypatch.setattr(settings, "payout_cron_token", "cron-secret-123")
+    assert client.post("/api/v1/internal/dispatch/run", headers={"X-Cron-Token": "nope"}).status_code == 401
+    assert client.post("/api/v1/internal/dispatch/run", headers={"X-Cron-Token": "cron-secret-123"}).json() == {"ok": True}

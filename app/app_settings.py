@@ -34,6 +34,9 @@ DEFAULT_PASSENGER_LIMIT = 4
 DEFAULTS = {
     "motorcycle_second_passenger_enabled": "true",
     "motorcycle_second_passenger_fee": "200",
+    "auto_dispatch_enabled": "true",
+    "dispatch_offer_seconds": "30",
+    "dispatch_max_offers": "5",
 }
 
 
@@ -95,11 +98,20 @@ class SettingsUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     motorcycle_second_passenger_enabled: bool | None = None
     motorcycle_second_passenger_fee: int | None = Field(default=None, ge=0, le=100_000)
+    auto_dispatch_enabled: bool | None = None
+    dispatch_offer_seconds: int | None = Field(default=None, ge=15, le=120)
+    dispatch_max_offers: int | None = Field(default=None, ge=1, le=20)
+
+
+def all_settings(db: Session) -> dict:
+    from app.dispatch import dispatch_rules  # avoid an import cycle
+
+    return {**booking_rules(db), **dispatch_rules(db)}
 
 
 @router.get("/admin/settings")
 def admin_get_settings(db: Session = Depends(get_db), _admin: User = Depends(require_super_admin)) -> dict:
-    return booking_rules(db)
+    return all_settings(db)
 
 
 @router.put("/admin/settings")
@@ -113,6 +125,12 @@ def admin_update_settings(
         changes["motorcycle_second_passenger_enabled"] = "true" if payload.motorcycle_second_passenger_enabled else "false"
     if payload.motorcycle_second_passenger_fee is not None:
         changes["motorcycle_second_passenger_fee"] = str(payload.motorcycle_second_passenger_fee)
+    if payload.auto_dispatch_enabled is not None:
+        changes["auto_dispatch_enabled"] = "true" if payload.auto_dispatch_enabled else "false"
+    if payload.dispatch_offer_seconds is not None:
+        changes["dispatch_offer_seconds"] = str(payload.dispatch_offer_seconds)
+    if payload.dispatch_max_offers is not None:
+        changes["dispatch_max_offers"] = str(payload.dispatch_max_offers)
     if not changes:
         raise HTTPException(status_code=422, detail="Nothing to change.")
     for key, value in changes.items():
@@ -125,4 +143,4 @@ def admin_update_settings(
     db.add(AuditLog(actor_user_id=admin.id, action="settings.updated", entity_type="app_settings",
                     entity_id="booking", details=", ".join(f"{k}={v}" for k, v in changes.items())))
     db.commit()
-    return booking_rules(db)
+    return all_settings(db)

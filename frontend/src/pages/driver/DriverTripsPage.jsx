@@ -6,6 +6,7 @@ import Alert from '../../components/ui/Alert.jsx'
 import StatusBadge from '../../components/ui/StatusBadge.jsx'
 import SOSButton from '../../components/SOSButton.jsx'
 import ProfileStrip from '../../components/ProfileStrip.jsx'
+import { TRIPS_CHANGED_EVENT } from '../../services/dispatchService.js'
 import { apiRequest } from '../../services/authService.js'
 import { formatNaira, formatShortDate } from '../../utils/format.js'
 import { vehicleLabel } from '../../utils/vehicles.js'
@@ -149,9 +150,12 @@ export default function DriverTripsPage() {
 
     fetchRides()
     const intervalId = window.setInterval(fetchRides, 15000)
+    // Reload at once when the driver accepts an offer.
+    window.addEventListener(TRIPS_CHANGED_EVENT, fetchRides)
     return () => {
       cancelled = true
       window.clearInterval(intervalId)
+      window.removeEventListener(TRIPS_CHANGED_EVENT, fetchRides)
     }
   }, [refreshKey])
 

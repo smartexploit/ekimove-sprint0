@@ -3172,3 +3172,130 @@ button:disabled {
     font-size: 20px;
   }
 }
+
+/* Driver trip offers */
+.offer-card {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 18px;
+  border-radius: 22px;
+  background: var(--green-900, #0a3a2c);
+  color: var(--white);
+  box-shadow: 0 0 0 3px var(--gold-500), 0 14px 34px rgba(16, 32, 26, 0.3);
+  animation: offer-in 0.25s ease-out;
+}
+
+@keyframes offer-in {
+  from { transform: translateY(-6px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .offer-card { animation: none; }
+}
+
+.offer-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--gold-500);
+  font-weight: 800;
+}
+
+.offer-timer {
+  min-width: 52px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  font-weight: 800;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.offer-timer.is-urgent {
+  background: var(--laterite-600);
+}
+
+.offer-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.15);
+  overflow: hidden;
+}
+
+.offer-bar span {
+  display: block;
+  height: 100%;
+  background: var(--gold-500);
+  transition: width 1s linear;
+}
+
+.offer-route {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.offer-meta {
+  color: var(--green-200);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.offer-money {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.offer-label {
+  color: var(--green-200);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.offer-earning {
+  font-size: 30px;
+  font-weight: 800;
+  color: var(--gold-500);
+  font-variant-numeric: tabular-nums;
+}
+
+.offer-actions {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 10px;
+}
+
+.location-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--gold-100);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.location-note.is-on {
+  background: var(--green-50);
+  color: var(--green-800);
+}
+
+.dispatch-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  max-width: 220px;
+}

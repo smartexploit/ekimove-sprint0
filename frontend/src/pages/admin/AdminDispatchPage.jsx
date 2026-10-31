@@ -5,6 +5,38 @@ import Alert from '../../components/ui/Alert.jsx'
 import { apiRequest } from '../../services/authService.js'
 import { formatNaira } from '../../utils/format.js'
 import { vehicleLabel } from '../../utils/vehicles.js'
+import AutoDispatchCard from '../../components/admin/AutoDispatchCard.jsx'
+
+function waited(seconds) {
+  if (seconds < 60) return `${seconds}s`
+  return `${Math.floor(seconds / 60)} min`
+}
+
+function DispatchState({ request }) {
+  const offer = request.current_offer
+  if (offer) {
+    return (
+      <p className="small dispatch-state">
+        <span className="badge badge-bright">Offered</span> to {offer.driver_name} · {offer.seconds_left}s left
+      </p>
+    )
+  }
+  if (request.dispatch_status === 'manual') {
+    return (
+      <p className="small dispatch-state">
+        <span className="badge badge-red">Needs you</span> No driver accepted after {request.dispatch_attempts} tries
+      </p>
+    )
+  }
+  if (request.dispatch_status === 'searching') {
+    return (
+      <p className="small dispatch-state">
+        <span className="badge badge-gold">Searching</span> No free driver yet · waiting {waited(request.waiting_seconds)}
+      </p>
+    )
+  }
+  return <p className="small dispatch-state muted">Waiting {waited(request.waiting_seconds)}</p>
+}
 
 export default function AdminDispatchPage() {
   const [requests, setRequests] = useState([])
@@ -16,20 +48,30 @@ export default function AdminDispatchPage() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
 
-  const loadRequests = useCallback(async () => {
-    setError('')
-    setLoading(true)
+  const loadRequests = useCallback(async (silent = false) => {
+    if (!silent) {
+      setError('')
+      setLoading(true)
+    }
     try {
       const data = await apiRequest('/api/v1/admin/ride-requests/pending')
       setRequests(Array.isArray(data) ? data : [])
-      setDriversByRequest({})
-      setSelectedDrivers({})
+      if (!silent) {
+        setDriversByRequest({})
+        setSelectedDrivers({})
+      }
     } catch (err) {
-      setError(err.message || 'Could not load pending ride requests.')
+      if (!silent) setError(err.message || 'Could not load pending ride requests.')
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }, [])
+
+  // Keep the automatic-offer status fresh without disturbing a selection.
+  useEffect(() => {
+    const timer = window.setInterval(() => loadRequests(true), 5000)
+    return () => window.clearInterval(timer)
+  }, [loadRequests])
 
   useEffect(() => {
     let cancelled = false
@@ -99,12 +141,13 @@ export default function AdminDispatchPage() {
       title="Ride dispatch"
       description="Only approved, online drivers with a suitable approved vehicle are listed."
       actions={
-        <button type="button" className="btn btn-sm" onClick={loadRequests} disabled={loading}>
+        <button type="button" className="btn btn-sm" onClick={() => loadRequests()} disabled={loading}>
           <RefreshCw size={16} aria-hidden="true" /> {loading ? 'Refreshing…' : 'Refresh queue'}
         </button>
       }
     >
       <div className="stack">
+        <AutoDispatchCard />
         <Alert tone="error">{error}</Alert>
         <Alert tone="success">{notice}</Alert>
 
@@ -149,6 +192,7 @@ export default function AdminDispatchPage() {
                         <td>
                           <p style={{ fontWeight: 800 }}>#{request.id}</p>
                           <p className="muted small">{request.passenger_name}</p>
+                          <DispatchState request={request} />
                         </td>
                         <td style={{ fontWeight: 700 }}>
                           {request.origin_text} → {request.destination_text}

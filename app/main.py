@@ -9,6 +9,7 @@ from app.cancellations import router as cancellations_router
 from app.accounts import router as accounts_router
 from app.support import router as support_router
 from app.haulage import router as haulage_router
+from app.dispatch import advance_dispatch, assign_driver, dispatch_summary, router as dispatch_router, withdraw_offers
 from app.app_settings import booking_rules, is_motorcycle, max_passengers, quote_amount, router as app_settings_router, seats_needed
 from app.earnings import record_trip_earning, ride_earning_preview, router as earnings_router
 from decimal import Decimal, ROUND_HALF_UP
@@ -60,6 +61,7 @@ app.include_router(app_settings_router)
 app.include_router(accounts_router)
 app.include_router(support_router)
 app.include_router(haulage_router)
+app.include_router(dispatch_router)
 
 class LoginRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
@@ -332,6 +334,7 @@ def admin_list_pending_ride_requests(
     _admin: User = Depends(require_super_admin),
 ) -> list[dict[str, object]]:
     """List unassigned requests for the admin dispatch queue."""
+    advance_dispatch(db)
     rows = db.execute(
         select(RideRequest, User)
         .join(User, RideRequest.passenger_user_id == User.id)
@@ -351,6 +354,7 @@ def admin_list_pending_ride_requests(
             "currency": "NGN",
             "service_type": request.service_type,
             "load_description": request.load_description,
+            **dispatch_summary(db, request),
             "status": request.status,
             "created_at": request.created_at.isoformat() if request.created_at else None,
         }
@@ -418,9 +422,12 @@ def assign_ride_request(
     request_id: int,
     payload: RideAssignment,
     db: Session = Depends(get_db),
-    _admin: User = Depends(require_super_admin),
+    admin: User = Depends(require_super_admin),
 ) -> dict[str, object]:
-    """Assign a requested booking to an approved, online driver."""
+    """Assign a requested booking to an approved, online driver by hand.
+
+    Overrides automatic dispatch: any live offer for the request is withdrawn.
+    """
     ride_request = db.get(RideRequest, request_id)
     if ride_request is None:
         raise HTTPException(status_code=404, detail="Ride request not found")
@@ -435,45 +442,8 @@ def assign_ride_request(
     if driver is None:
         raise HTTPException(status_code=404, detail="Driver not found")
 
-    if driver.verification_status != "approved" or not driver.is_online:
-        raise HTTPException(
-            status_code=409,
-            detail="Driver must be approved and online",
-        )
-
-    driver_user = db.get(User, driver.user_id)
-    if driver_user is None or not driver_user.is_active:
-        raise HTTPException(
-            status_code=409,
-            detail="Driver account is not active",
-        )
-
-    vehicle = db.scalar(
-        select(Vehicle)
-        .where(
-            Vehicle.driver_id == driver.id,
-            Vehicle.is_approved.is_(True),
-            Vehicle.vehicle_type == ride_request.vehicle_type,
-            Vehicle.capacity >= seats_needed(ride_request.vehicle_type, ride_request.passenger_count),
-        )
-        .order_by(Vehicle.id)
-    )
-    if vehicle is None:
-        raise HTTPException(
-            status_code=409,
-            detail="Driver has no approved matching vehicle with sufficient capacity",
-        )
-
-    ride = Ride(
-        request_id=ride_request.id,
-        driver_id=driver.id,
-        status="assigned",
-        agreed_fare=Decimal(ride_request.quoted_fare),
-        assigned_at=datetime.now(timezone.utc),
-    )
-    ride_request.status = "assigned"
-    db.add(ride)
-
+    ride, vehicle = assign_driver(db, ride_request, driver, admin.id, "by an admin")
+    withdraw_offers(db, ride_request.id)
     try:
         db.commit()
         db.refresh(ride)
@@ -934,6 +904,7 @@ def list_my_ride_requests(
             detail="Only passenger accounts can view passenger ride history",
         )
 
+    advance_dispatch(db)
     requests = db.scalars(
         select(RideRequest)
         .where(RideRequest.passenger_user_id == current_user.id)
@@ -998,6 +969,7 @@ def list_my_ride_requests(
             "created_at": ride_request.created_at,
             "service_type": ride_request.service_type,
             "load_description": ride_request.load_description,
+            "dispatch_status": ride_request.dispatch_status,
             "quote_terms": ride_request.quote_terms,
             "assigned_ride_id": (
                 assigned_rides[ride_request.id]["id"]
@@ -1206,6 +1178,10 @@ def create_ride_request(
             status_code=500,
             detail="Unable to save ride request",
         ) from exc
+
+    # Offer it to the best-placed driver straight away.
+    advance_dispatch(db, force=True)
+    db.refresh(request)
 
     return RideRequestCreated(
         id=request.id,

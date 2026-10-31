@@ -89,7 +89,12 @@ function LiveRide({ ride, onChanged }) {
         </div>
       ) : ['quote_requested', 'quoted'].includes(status) ? null : (
         <p className="small" style={{ color: 'var(--green-200)' }}>
-          We're matching you with a verified driver. This page updates on its own.
+          {ride.dispatch_status === 'offering'
+            ? 'Offering your trip to a nearby verified driver…'
+            : ride.dispatch_status === 'manual'
+              ? 'Our team is finding you a driver. You can also cancel for free.'
+              : 'Looking for a free verified driver near you…'}{' '}
+          This page updates on its own.
         </p>
       )}
 

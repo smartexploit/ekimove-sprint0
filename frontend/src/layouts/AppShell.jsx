@@ -9,6 +9,7 @@ import {
   Wallet,
 } from 'lucide-react'
 import useSupportUnread from '../hooks/useSupportUnread.js'
+import OfferWatcher from '../components/driver/OfferWatcher.jsx'
 import Logo from '../components/brand/Logo.jsx'
 import AtonaFloatingAssistant from '../components/AtonaFloatingAssistant.jsx'
 import AtonaHeaderButton from '../components/atona/AtonaHeaderButton.jsx'
@@ -106,6 +107,7 @@ export default function AppShell({
 
       <main className="app-main" id="main">
         <div className="container">
+          {role === 'driver' && <OfferWatcher />}
           {!hideHead && (title || actions) && (
             <div className="page-head">
               <div>

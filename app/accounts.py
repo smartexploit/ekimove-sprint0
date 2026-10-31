@@ -287,6 +287,9 @@ def _active_trip(db: Session, user: User) -> bool:
 def _take_driver_offline(db: Session, user: User) -> None:
     driver = db.scalar(select(Driver).where(Driver.user_id == user.id))
     if driver is not None:
+        from app.dispatch import driver_went_offline  # avoid an import cycle
+
+        driver_went_offline(db, driver)
         driver.is_online = False
 
 

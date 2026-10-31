@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 import os
 from pathlib import Path
 
@@ -209,6 +210,12 @@ def set_my_driver_online_status(
                 detail="At least one approved vehicle is required to go online",
             )
 
+    if is_online and not driver.is_online:
+        driver.online_since = datetime.now(timezone.utc)
+    if not is_online:
+        from app.dispatch import driver_went_offline  # avoid an import cycle
+
+        driver_went_offline(db, driver)
     driver.is_online = is_online
     db.commit()
     db.refresh(driver)

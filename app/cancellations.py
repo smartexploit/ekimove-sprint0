@@ -23,6 +23,7 @@ from app.auth import get_current_user
 from app.config import settings
 from app.database import get_db
 from app.earnings import record_cancellation_earning
+from app.dispatch import withdraw_offers
 from app.models import AuditLog, Payment, Ride, RideRequest, User
 
 router = APIRouter(prefix="/api/v1", tags=["cancellations"])
@@ -139,6 +140,8 @@ def cancel_ride(
         raise HTTPException(status_code=409, detail=terms["message"])
 
     ride_request.status = "cancelled"
+    ride_request.dispatch_status = None
+    withdraw_offers(db, ride_request.id)
     fee = Decimal(terms["fee"])
     refund = Decimal(terms["refund"])
     if ride is not None:

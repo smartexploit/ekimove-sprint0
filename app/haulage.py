@@ -22,6 +22,7 @@ from app.auth import get_current_user, require_super_admin
 from app.database import get_db
 from app.models import AuditLog, RideRequest, SupportThread, User
 from app.support import open_thread, post_message
+from app.dispatch import advance_dispatch
 
 router = APIRouter(prefix="/api/v1", tags=["haulage"])
 
@@ -132,6 +133,8 @@ def accept_quote(request_id: int, current_user: User = Depends(get_current_user)
     db.add(AuditLog(actor_user_id=current_user.id, action="haulage.quote_accepted", entity_type="ride_request",
                     entity_id=str(request.id), details=f"NGN {request.quoted_fare}"))
     db.commit()
+    advance_dispatch(db, force=True)
+    db.refresh(request)
     return haulage_result(db, request)
 
 
