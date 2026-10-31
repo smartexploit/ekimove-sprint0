@@ -1,18 +1,27 @@
-﻿
-import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { Eye, EyeOff } from 'lucide-react'
+﻿import { useState } from 'react'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   loginPassenger,
   getCurrentUser,
 } from '../../services/authService.js'
-import AppPage from '../../layouts/AppPage.jsx'
+import AuthLayout from '../../layouts/AuthLayout.jsx'
+import Alert from '../../components/ui/Alert.jsx'
+import PasswordInput from '../../components/ui/PasswordInput.jsx'
+import { homePathForRole } from '../../utils/roles.js'
+
+/** Only follow internal passenger paths saved by the route guard. */
+function safeReturnPath(value) {
+  if (typeof value !== 'string') return null
+  if (!value.startsWith('/') || value.startsWith('//')) return null
+  return value
+}
 
 export default function LoginPage() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const returnTo = safeReturnPath(location.state?.from)
   const [phone, setPhone] = useState('')
   const [password, setPassword] = useState('')
-  const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -24,15 +33,13 @@ export default function LoginPage() {
     try {
       await loginPassenger({ phone, password })
       const user = await getCurrentUser()
+      const home = homePathForRole(user.role)
+      const destination =
+        returnTo && user.role === 'passenger' && !returnTo.startsWith('/admin') && !returnTo.startsWith('/driver')
+          ? returnTo
+          : home
 
-      navigate(
-        user.role === 'super_admin'
-          ? '/admin/dispatch'
-          : user.role === 'driver'
-            ? '/driver/status'
-            : '/dashboard',
-        { replace: true },
-      )
+      navigate(destination, { replace: true })
     } catch (err) {
       setError(err.message || 'Sign-in failed. Please try again.')
     } finally {
@@ -41,77 +48,67 @@ export default function LoginPage() {
   }
 
   return (
-    <AppPage
-      eyebrow="WELCOME BACK"
-      title="Good to have you back."
-      description="Your next journey around Ekiti starts here. Sign in to continue."
-      sectionTitle="Sign in to your account"
-      sectionText="Enter the phone number and password associated with your EkiMove account."
+    <AuthLayout
+      title="Welcome back."
+      intro="Your next journey around Ekiti starts here."
+      heading="Sign in"
+      subheading="Use the phone number and password on your EkiMove account."
     >
-      <form className="auth-form login-form" onSubmit={submit}>
-        <div className="auth-field">
-          <label htmlFor="login-phone">Phone number</label>
+      {returnTo && (
+        <Alert tone="info">Sign in to continue with your trip.</Alert>
+      )}
+
+      <form className="form" onSubmit={submit}>
+        <label className="field" htmlFor="login-phone">
+          <span className="field-label">Phone number</span>
           <input
             id="login-phone"
+            className="input"
             name="phone"
             type="tel"
+            inputMode="tel"
             autoComplete="tel"
             value={phone}
             onChange={(event) => setPhone(event.target.value)}
             minLength={7}
             maxLength={32}
-            placeholder="Enter your phone number"
+            placeholder="e.g. 0803 000 0000"
+            required
+          />
+        </label>
+
+        <div className="field">
+          <label className="field-label" htmlFor="login-password">
+            Password
+          </label>
+          <PasswordInput
+            id="login-password"
+            name="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            maxLength={256}
+            placeholder="Your password"
             required
           />
         </div>
 
-        <div className="auth-field">
-          <label htmlFor="login-password">Password</label>
+        <Alert tone="error">{error}</Alert>
 
-          <div className="auth-password-wrapper">
-            <input
-              id="login-password"
-              name="password"
-              type={showPassword ? 'text' : 'password'}
-              autoComplete="current-password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              maxLength={256}
-              placeholder="Enter your password"
-              required
-            />
-
-            <button
-              type="button"
-              className="auth-password-toggle"
-              onClick={() => setShowPassword((current) => !current)}
-              aria-label={showPassword ? 'Hide password' : 'Show password'}
-              aria-pressed={showPassword}
-            >
-              {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-            </button>
-          </div>
-        </div>
-
-        {error && (
-          <p className="auth-error" role="alert">
-            {error}
-          </p>
-        )}
-
-        <button
-          className="auth-submit"
-          type="submit"
-          disabled={loading}
-        >
-          {loading ? 'Signing in…' : 'Sign in to EkiMove'}
+        <button className="btn btn-primary btn-lg btn-block" type="submit" disabled={loading}>
+          {loading ? 'Signing in…' : 'Sign in'}
         </button>
-
-        <p className="auth-switch">
-          New to EkiMove?{' '}
-          <Link to="/register">Create an account</Link>
-        </p>
       </form>
-    </AppPage>
+
+      <p className="auth-switch">
+        New to EkiMove?{' '}
+        <Link to="/register" state={location.state}>
+          Create an account
+        </Link>
+      </p>
+      <p className="auth-switch">
+        Want to drive? <Link to="/driver/apply">Apply here</Link>
+      </p>
+    </AuthLayout>
   )
 }

@@ -1,106 +1,76 @@
-﻿import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
-import AppPage from '../../layouts/AppPage.jsx'
-import { apiRequest } from '../../services/authService.js'
+﻿import { useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
+import { CheckCircle2, MapPin, Wallet } from 'lucide-react'
+import AppShell from '../../layouts/AppShell.jsx'
+import Alert from '../../components/ui/Alert.jsx'
+import StatusBadge from '../../components/ui/StatusBadge.jsx'
+import VehicleIcon from '../../components/ui/VehicleIcon.jsx'
+import { vehicleBlurb, vehicleLabel } from '../../utils/vehicles.js'
 import AtonaFloatingAssistant from '../../components/AtonaFloatingAssistant.jsx'
+import useTripOptions from '../../hooks/useTripOptions.js'
+import { apiRequest } from '../../services/authService.js'
+import { formatNaira, isMotorcycle } from '../../utils/format.js'
+
+const PASSENGER_COUNTS = [1, 2, 3, 4, 5, 6, 7, 8]
+
+function idParam(value) {
+  return value && /^\d+$/.test(value) ? value : ''
+}
+
+/** Prefill from a trip planned on the homepage (?area=&from=&to=&passengers=&vehicle=). */
+function initialForm(searchParams) {
+  const passengers = Number(searchParams.get('passengers'))
+  const vehicle = (searchParams.get('vehicle') || '').slice(0, 32)
+  const from = idParam(searchParams.get('from'))
+  const to = idParam(searchParams.get('to'))
+
+  return {
+    service_area_id: idParam(searchParams.get('area')),
+    origin_place_id: from,
+    destination_place_id: to,
+    origin_text: '',
+    destination_text: '',
+    vehicle_type: /^[a-z_]+$/i.test(vehicle) ? vehicle : '',
+    passenger_count:
+      isMotorcycle(vehicle) ? '1'
+        : Number.isInteger(passengers) && passengers >= 1 && passengers <= 8
+          ? String(passengers)
+          : '1',
+  }
+}
 
 export default function BookRidePage() {
-  const [areas, setAreas] = useState([])
-  // Fetched places and fares are stored with the selection they were loaded
-  // for, so stale results and loading state are derived during render instead
-  // of being reset synchronously inside effects.
-  const [placesResult, setPlacesResult] = useState({ key: '', items: [] })
-  const [fareResult, setFareResult] = useState({ key: '', items: [] })
-  const [loadingAreas, setLoadingAreas] = useState(true)
+  const [searchParams] = useSearchParams()
+  const [form, setForm] = useState(() => initialForm(searchParams))
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [ride, setRide] = useState(null)
   const [submitting, setSubmitting] = useState(false)
 
-  const [form, setForm] = useState({
-    service_area_id: '',
-    origin_place_id: '',
-    destination_place_id: '',
-    origin_text: '',
-    destination_text: '',
-    vehicle_type: '',
-    passenger_count: '1',
+  const trip = useTripOptions({
+    areaId: form.service_area_id,
+    originId: form.origin_place_id,
+    destinationId: form.destination_place_id,
+    passengerCount: form.passenger_count,
   })
+  const {
+    areas,
+    places,
+    fareOptions,
+    loadingAreas,
+    loadingPlaces,
+    loadingFares: loadingFareOptions,
+  } = trip
+  const areaId = trip.effectiveAreaId
+  const areaName = areas.find((area) => String(area.id) === areaId)?.name
+  const loadError = trip.areasError || trip.placesError || trip.faresError
 
-  useEffect(() => {
-    let active = true
-
-    apiRequest('/api/v1/locations/areas')
-      .then((data) => {
-        if (active) setAreas(data)
-      })
-      .catch((err) => {
-        if (active) setError(err.message)
-      })
-      .finally(() => {
-        if (active) setLoadingAreas(false)
-      })
-
-    return () => { active = false }
-  }, [])
-
-  const placesKey = form.service_area_id
-  const places = placesKey && placesResult.key === placesKey
-    ? placesResult.items
-    : []
-  const loadingPlaces = Boolean(placesKey) && placesResult.key !== placesKey
-
-  const routeSelected = Boolean(
-    form.origin_place_id &&
-    form.destination_place_id &&
-    form.origin_place_id !== form.destination_place_id,
+  const samePlace =
+    form.origin_place_id && form.origin_place_id === form.destination_place_id
+  const selectedFare = fareOptions.find(
+    (option) => option.vehicle_type === form.vehicle_type,
   )
-  const fareKey = routeSelected
-    ? `${form.origin_place_id}|${form.destination_place_id}|${form.passenger_count}`
-    : ''
-  const fareOptions = fareKey && fareResult.key === fareKey
-    ? fareResult.items
-    : []
-  const loadingFareOptions = Boolean(fareKey) && fareResult.key !== fareKey
-
-  useEffect(() => {
-    if (!placesKey) return undefined
-    let active = true
-
-    apiRequest(
-      `/api/v1/locations/places?service_area_id=${encodeURIComponent(placesKey)}`,
-    )
-      .then((data) => {
-        if (active) setPlacesResult({ key: placesKey, items: data })
-      })
-      .catch((err) => {
-        if (!active) return
-        setPlacesResult({ key: placesKey, items: [] })
-        setError(err.message)
-      })
-
-    return () => { active = false }
-  }, [placesKey])
-
-  useEffect(() => {
-    if (!fareKey) return undefined
-    let active = true
-    const [originPlaceId, destinationPlaceId, passengerCount] = fareKey.split('|')
-
-    apiRequest(
-      `/api/v1/place-fare-options?origin_place_id=${encodeURIComponent(originPlaceId)}&destination_place_id=${encodeURIComponent(destinationPlaceId)}&passenger_count=${encodeURIComponent(passengerCount)}`,
-    )
-      .then((options) => {
-        if (active) setFareResult({ key: fareKey, items: options })
-      })
-      .catch((err) => {
-        if (!active) return
-        setFareResult({ key: fareKey, items: [] })
-        setError(err.message)
-      })
-
-    return () => { active = false }
-  }, [fareKey])
+  const motorcycleSelected = isMotorcycle(form.vehicle_type)
 
   function applyAtonaBooking(booking) {
     setForm((current) => ({
@@ -114,7 +84,7 @@ export default function BookRidePage() {
     }))
     setError('')
     setMessage(
-      'Atọ́nà added your trip details. Select the service area, pickup place and destination place to continue.',
+      'Atọ́nà added your trip details. Choose the matching pickup and destination places to see fares.',
     )
     setRide(null)
   }
@@ -149,10 +119,7 @@ export default function BookRidePage() {
         next.vehicle_type = ''
       }
 
-      if (
-        name === 'vehicle_type' &&
-        ['motorcycle', 'motorbike'].includes(value.toLowerCase())
-      ) {
+      if (name === 'vehicle_type' && isMotorcycle(value)) {
         next.passenger_count = '1'
       }
 
@@ -170,24 +137,18 @@ export default function BookRidePage() {
     setMessage('')
     setRide(null)
 
-    if (
-      !form.service_area_id ||
-      !form.origin_place_id ||
-      !form.destination_place_id
-    ) {
-      setError('Choose a service area, pickup place and destination place.')
+    if (!areaId || !form.origin_place_id || !form.destination_place_id) {
+      setError('Choose a pickup place and a destination.')
       return
     }
 
-    if (form.origin_place_id === form.destination_place_id) {
+    if (samePlace) {
       setError('Choose different pickup and destination places.')
       return
     }
 
-    if (!fareOptions.some(
-      (option) => option.vehicle_type === form.vehicle_type,
-    )) {
-      setError('Choose a vehicle with an active fare for this exact route.')
+    if (!selectedFare) {
+      setError('Choose a vehicle with a fare for this exact route.')
       return
     }
 
@@ -205,19 +166,12 @@ export default function BookRidePage() {
       })
 
       setRide(result)
-      setMessage(
-        'Your ride request has been submitted. It is requested, not yet confirmed.',
-      )
     } catch (err) {
       setError(err.message)
     } finally {
       setSubmitting(false)
     }
   }
-
-  const motorcycleSelected = ['motorcycle', 'motorbike'].includes(
-    form.vehicle_type.toLowerCase(),
-  )
 
   if (ride) {
     const originPlace = places.find(
@@ -228,224 +182,262 @@ export default function BookRidePage() {
     )
 
     return (
-      <AppPage
-        eyebrow="RIDE REQUEST"
-        title="Your request has been submitted"
-        description="Your ride request is recorded. You can review its details below."
-        sectionTitle="Request confirmation"
-        sectionText="Your ride is requested and is waiting for confirmation. Do not make a payment based on this screen alone."
-      >
-        <section className="ride-result" aria-live="polite">
-          <h3>Request received</h3>
-          <p>Request number: <strong>#{ride.id}</strong></p>
-          <p>Status: <strong>{ride.status || 'requested'}</strong></p>
-          <p>Pickup place: <strong>{originPlace?.name || ride.origin_text || form.origin_text || 'Selected pickup'}</strong></p>
-          <p>Destination place: <strong>{destinationPlace?.name || ride.destination_text || form.destination_text || 'Selected destination'}</strong></p>
-          <p>Vehicle: <strong>{ride.vehicle_type}</strong></p>
-          <p>Passengers: <strong>{ride.passenger_count}</strong></p>
-          <p>
-            Quoted fare:{' '}
-            <strong>
-              {ride.currency || 'NGN'}{' '}
-              {Number(ride.quoted_fare).toLocaleString('en-NG', {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })}
-            </strong>
-          </p>
-          <p>Payment method: <strong>Bank transfer only</strong></p>
-          <p>
-            Neither the ride nor the payment is confirmed yet. A payment
-            screenshot alone does not confirm payment.
-          </p>
-          <div className="app-page-actions">
-            <Link to="/my-rides">View My Rides</Link>
-            <Link to="/dashboard">Return to Dashboard</Link>
+      <AppShell title="Request sent" description="We're finding a verified driver for you.">
+        <section className="card card-lg stack" aria-live="polite" style={{ maxWidth: 640 }}>
+          <div className="row row-between">
+            <div className="row" style={{ gap: 10 }}>
+              <CheckCircle2 size={28} color="#2E8B63" aria-hidden="true" />
+              <h2 className="card-title">Request #{ride.id}</h2>
+            </div>
+            <StatusBadge status={ride.status || 'requested'} />
+          </div>
+
+          <div className="route">
+            <div className="route-rail" aria-hidden="true">
+              <span className="route-dot" />
+              <span className="route-line" />
+              <span className="route-end" />
+            </div>
+            <div>
+              <p className="route-label">Pickup</p>
+              <p className="route-value">
+                {originPlace?.name || ride.origin_text || form.origin_text || 'Selected pickup'}
+              </p>
+            </div>
+            <div>
+              <p className="route-label">Destination</p>
+              <p className="route-value">
+                {destinationPlace?.name || ride.destination_text || form.destination_text || 'Selected destination'}
+              </p>
+            </div>
+          </div>
+
+          <dl className="kv">
+            <div><dt>Vehicle</dt><dd>{vehicleLabel(ride.vehicle_type)}</dd></div>
+            <div><dt>Passengers</dt><dd>{ride.passenger_count}</dd></div>
+            <div><dt>Quoted fare</dt><dd>{formatNaira(ride.quoted_fare)}</dd></div>
+          </dl>
+
+          <Alert tone="warning">
+            Your ride isn't confirmed yet, and nothing has been paid. You'll pay
+            by bank transfer or Interswitch once a driver is assigned. A payment
+            screenshot alone doesn't confirm payment.
+          </Alert>
+
+          <div className="row">
+            <Link className="btn btn-primary" to="/my-rides">
+              Follow this ride
+            </Link>
+            <Link className="btn" to="/dashboard">
+              Back to home
+            </Link>
           </div>
         </section>
-      </AppPage>
+      </AppShell>
     )
   }
 
   return (
-    <AppPage
-      eyebrow="RIDE BOOKING"
-      title="Plan your journey"
-      description="Choose your pickup and destination to see available vehicles and fares."
-      sectionTitle="Ride details"
-      sectionText="The server calculates the fare using an active fare for your exact route. Submitting a request does not confirm a ride."
+    <AppShell
+      className="has-bottom-bar"
+      title="Book a ride"
+      description="Choose your route to see the approved fares for it."
+      actions={
+        areaName && areas.length === 1 ? (
+          <span className="badge badge-green">
+            <MapPin size={14} aria-hidden="true" /> {areaName}
+          </span>
+        ) : null
+      }
     >
       {loadingAreas ? (
-        <p role="status">Loading active service areas…</p>
+        <div className="loading-block" role="status">
+          <span className="spinner" aria-hidden="true" /> Loading service areas…
+        </div>
       ) : (
-        <form className="passenger-booking-form" onSubmit={handleSubmit}>
-          {error && (
-            <p className="portal-alert portal-alert-error" role="alert">
-              {error}
-            </p>
-          )}
+        <form className="passenger-booking-form two-col" onSubmit={handleSubmit}>
+          <div className="stack">
+            <Alert tone="error">{error || loadError}</Alert>
+            <Alert tone="success">{message}</Alert>
 
-          {message && (
-            <p className="portal-alert portal-alert-success" role="status">
-              {message}
-            </p>
-          )}
+            {areas.length === 0 && (
+              <Alert tone="warning">
+                Booking isn't open in any service area yet. Please check back soon.
+              </Alert>
+            )}
 
-          <label>
-            Service area
-            <select
-              name="service_area_id"
-              value={form.service_area_id}
-              onChange={updateField}
-              required
-            >
-              <option value="">Choose service area</option>
-              {areas.map((area) => (
-                <option key={area.id} value={String(area.id)}>
-                  {area.name}
-                </option>
-              ))}
-            </select>
-          </label>
+            {areas.length > 1 && (
+              <label className="field">
+                <span className="field-label">Service area</span>
+                <select
+                  className="select"
+                  name="service_area_id"
+                  value={form.service_area_id}
+                  onChange={updateField}
+                  required
+                >
+                  <option value="">Choose service area</option>
+                  {areas.map((area) => (
+                    <option key={area.id} value={String(area.id)}>
+                      {area.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
 
-          <label>
-            Pickup place
-            <select
-              name="origin_place_id"
-              value={form.origin_place_id}
-              onChange={updateField}
-              disabled={!form.service_area_id || loadingPlaces}
-              required
-            >
-              <option value="">
-                {loadingPlaces ? 'Loading places…' : 'Choose pickup place'}
-              </option>
-              {places.map((place) => (
-                <option key={place.id} value={String(place.id)}>
-                  {place.name}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label>
-            Destination place
-            <select
-              name="destination_place_id"
-              value={form.destination_place_id}
-              onChange={updateField}
-              disabled={!form.service_area_id || loadingPlaces}
-              required
-            >
-              <option value="">Choose destination place</option>
-              {places.map((place) => (
-                <option key={place.id} value={String(place.id)}>
-                  {place.name}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label>
-            Vehicle type and quoted fare
-            <select
-              name="vehicle_type"
-              value={form.vehicle_type}
-              onChange={updateField}
-              disabled={
-                loadingFareOptions ||
-                !form.origin_place_id ||
-                !form.destination_place_id ||
-                form.origin_place_id === form.destination_place_id ||
-                fareOptions.length === 0
-              }
-              required
-            >
-              <option value="">
-                {loadingFareOptions
-                  ? 'Loading route fares…'
-                  : 'Choose an available vehicle'}
-              </option>
-              {fareOptions.map((option) => (
-                <option key={option.fare_id} value={option.vehicle_type}>
-                  {option.vehicle_type.charAt(0).toUpperCase() +
-                    option.vehicle_type.slice(1)}{' '}
-                  — ₦{Number(option.quoted_fare).toLocaleString('en-NG', {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
-                </option>
-              ))}
-            </select>
-            <span className="field-hint">
-              Only vehicles with an active fare for this exact route are shown.
-            </span>
-          </label>
-
-          <label>
-            Number of passengers
-            <select
-              name="passenger_count"
-              value={form.passenger_count}
-              onChange={updateField}
-            >
-              {(motorcycleSelected ? [1] : [1, 2, 3, 4, 5, 6, 7, 8]).map(
-                (count) => (
-                  <option key={count} value={String(count)}>
-                    {count}
+            <div className="card route">
+              <div className="route-rail" aria-hidden="true">
+                <span className="route-dot" />
+                <span className="route-line" />
+                <span className="route-end" />
+              </div>
+              <label className="field">
+                <span className="field-label">Pickup</span>
+                <select
+                  className="select"
+                  name="origin_place_id"
+                  value={form.origin_place_id}
+                  onChange={updateField}
+                  disabled={!areaId || loadingPlaces}
+                  required
+                >
+                  <option value="">
+                    {loadingPlaces ? 'Loading places…' : 'Choose pickup'}
                   </option>
-                ),
+                  {places.map((place) => (
+                    <option key={place.id} value={String(place.id)}>
+                      {place.name}
+                    </option>
+                  ))}
+                </select>
+                {form.origin_text && !form.origin_place_id && (
+                  <span className="field-hint">You said: “{form.origin_text}”</span>
+                )}
+              </label>
+              <label className="field">
+                <span className="field-label">Destination</span>
+                <select
+                  className="select"
+                  name="destination_place_id"
+                  value={form.destination_place_id}
+                  onChange={updateField}
+                  disabled={!areaId || loadingPlaces}
+                  required
+                >
+                  <option value="">Choose destination</option>
+                  {places.map((place) => (
+                    <option key={place.id} value={String(place.id)}>
+                      {place.name}
+                    </option>
+                  ))}
+                </select>
+                {form.destination_text && !form.destination_place_id && (
+                  <span className="field-hint">You said: “{form.destination_text}”</span>
+                )}
+              </label>
+            </div>
+
+            {samePlace && (
+              <Alert tone="warning">Pickup and destination need to be different places.</Alert>
+            )}
+
+            <label className="field">
+              <span className="field-label">Passengers</span>
+              <select
+                className="select"
+                name="passenger_count"
+                value={form.passenger_count}
+                onChange={updateField}
+                aria-describedby={motorcycleSelected ? 'passenger-hint' : undefined}
+              >
+                {(motorcycleSelected ? [1] : PASSENGER_COUNTS).map((count) => (
+                  <option key={count} value={String(count)}>
+                    {count} {count === 1 ? 'passenger' : 'passengers'}
+                  </option>
+                ))}
+              </select>
+              {motorcycleSelected && (
+                <span className="field-hint" id="passenger-hint">
+                  Motorcycle rides carry one passenger.
+                </span>
               )}
-            </select>
-            {motorcycleSelected && (
-              <span className="field-hint">
-                Motorcycle bookings are limited to one passenger.
-              </span>
-            )}
-          </label>
+            </label>
+          </div>
 
-          <p className="transfer-policy-inline">
-            Payment policy: bank transfer only. Cash is not supported.
-          </p>
+          <div className="stack">
+            <fieldset className="choice-list" disabled={!trip.routeSelected}>
+              <legend className="choice-legend">
+                {loadingFareOptions ? 'Checking fares…' : 'Choose a ride'}
+              </legend>
 
-          {!loadingFareOptions &&
-            form.origin_place_id &&
-            form.destination_place_id &&
-            form.origin_place_id !== form.destination_place_id &&
-            fareOptions.length === 0 && (
-              <p className="field-hint" role="status">
-                No active fare is configured for this exact route and
-                passenger count.
-              </p>
-            )}
+              {!trip.routeSelected && (
+                <p className="card muted small">
+                  Pick your pickup and destination to see the vehicles and fares
+                  for that route.
+                </p>
+              )}
 
-          {areas.length === 0 && (
-            <p className="field-hint" role="status">
-              No active service areas are available. Booking requires an active
-              area, places and configured route fares.
+              {trip.routeSelected && !loadingFareOptions && fareOptions.length === 0 && (
+                <p className="card muted small" role="status">
+                  No fare is set for this exact route and passenger count yet.
+                </p>
+              )}
+
+              {fareOptions.map((option) => (
+                <label className="choice" key={option.fare_id}>
+                  <input
+                    type="radio"
+                    name="vehicle_type"
+                    value={option.vehicle_type}
+                    checked={form.vehicle_type === option.vehicle_type}
+                    onChange={updateField}
+                  />
+                  <span className={`choice-icon ${isMotorcycle(option.vehicle_type) ? '' : 'choice-icon-warm'}`}>
+                    <VehicleIcon type={option.vehicle_type} />
+                  </span>
+                  <span className="choice-body">
+                    <span className="choice-title">{vehicleLabel(option.vehicle_type)}</span>
+                    <span className="choice-sub">{vehicleBlurb(option.vehicle_type)}</span>
+                  </span>
+                  <span className="choice-price">{formatNaira(option.quoted_fare, { decimals: 0 })}</span>
+                </label>
+              ))}
+            </fieldset>
+
+            <p className="row muted small" style={{ flexWrap: 'nowrap', alignItems: 'flex-start' }}>
+              <Wallet size={18} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />
+              You'll pay after a driver is assigned, by bank transfer or
+              Interswitch. Cash isn't accepted.
             </p>
-          )}
 
-          <button
-            className="submit-button"
-            type="submit"
-            disabled={
-              submitting ||
-              loadingPlaces ||
-              loadingFareOptions ||
-              !form.origin_place_id ||
-              !form.destination_place_id ||
-              form.origin_place_id === form.destination_place_id ||
-              !fareOptions.some(
-                (option) => option.vehicle_type === form.vehicle_type,
-              )
-            }
-          >
-            {submitting ? 'Submitting request…' : 'Submit ride request'}
-          </button>
+            <div className="bottom-bar">
+              <div className="fare-total">
+                <span className="muted small" style={{ fontWeight: 700 }}>Your fare</span>
+                <span className="money">{selectedFare ? formatNaira(selectedFare.quoted_fare) : '—'}</span>
+              </div>
+              <button
+                className="btn btn-accent btn-lg"
+                type="submit"
+                disabled={
+                  submitting ||
+                  loadingPlaces ||
+                  loadingFareOptions ||
+                  !trip.routeSelected ||
+                  !selectedFare
+                }
+              >
+                {submitting
+                  ? 'Sending request…'
+                  : selectedFare
+                    ? `Request ${vehicleLabel(selectedFare.vehicle_type).toLowerCase()}`
+                    : 'Request ride'}
+              </button>
+            </div>
+          </div>
         </form>
       )}
       <AtonaFloatingAssistant onApplyBooking={applyAtonaBooking} />
-    </AppPage>
+    </AppShell>
   )
 }

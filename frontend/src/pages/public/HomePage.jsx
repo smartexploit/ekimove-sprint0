@@ -1,674 +1,407 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   ArrowRight,
-  Bike,
-  CarFront,
-  Check,
-  ChevronDown,
-  Clock3,
-  CreditCard,
-  MapPin,
-  Menu,
-  Navigation,
-  ShieldCheck,
-  X,
-} from "lucide-react";
+  BadgeCheck,
+  Siren,
+  Tag,
+  UserRoundCheck,
+  Wallet,
+} from 'lucide-react'
+import Hills from '../../components/brand/Hills.jsx'
+import Alert from '../../components/ui/Alert.jsx'
+import VehicleIcon from '../../components/ui/VehicleIcon.jsx'
+import { vehicleBlurb, vehicleLabel } from '../../utils/vehicles.js'
+import AtonaFloatingAssistant from '../../components/AtonaFloatingAssistant.jsx'
+import useTripOptions from '../../hooks/useTripOptions.js'
+import { PublicFooter, PublicHeader } from '../../layouts/PublicChrome.jsx'
+import { formatNaira, isMotorcycle } from '../../utils/format.js'
 
-import "./HomePage.css";
-// import "../../components/AtonaFloatingAssistant";
-import AtonaFloatingAssistant from "../../components/AtonaFloatingAssistant";
+function TripPlanner() {
+  const navigate = useNavigate()
+  const [trip, setTrip] = useState({
+    area: '',
+    from: '',
+    to: '',
+    passengers: '1',
+    vehicle: '',
+  })
 
-const API_BASE_URL = "/api/v1";
+  const tripOptions = useTripOptions({
+    areaId: trip.area,
+    originId: trip.from,
+    destinationId: trip.to,
+    passengerCount: trip.passengers,
+  })
+  // During the pilot there is one live area, which the hook preselects.
+  const areaId = tripOptions.effectiveAreaId
 
-const FALLBACK_ZONES = [
-  { id: "ado-ekiti", name: "Ado-Ekiti" },
-  { id: "ilawe-ekiti", name: "Ilawe-Ekiti" },
-  { id: "ikere-ekiti", name: "Ikere-Ekiti" },
-  { id: "aromoko-ekiti", name: "Aromoko-Ekiti" },
-  { id: "igede-ekiti", name: "Igede-Ekiti" },
-];
+  const sameplace = trip.from && trip.from === trip.to
+  const selectedFare = tripOptions.fareOptions.find(
+    (option) => option.vehicle_type === trip.vehicle,
+  )
 
-function getZoneName(zone) {
-  if (typeof zone === "string") return zone;
+  function update(name, value) {
+    setTrip((current) => {
+      const next = { ...current, [name]: value }
+      if (name === 'area') {
+        next.from = ''
+        next.to = ''
+        next.vehicle = ''
+      }
+      if (['from', 'to', 'passengers'].includes(name)) next.vehicle = ''
+      if (name === 'vehicle' && isMotorcycle(value)) next.passengers = '1'
+      return next
+    })
+  }
+
+  function submit(event) {
+    event.preventDefault()
+    const params = new URLSearchParams()
+    if (areaId) params.set('area', areaId)
+    if (trip.from) params.set('from', trip.from)
+    if (trip.to) params.set('to', trip.to)
+    params.set('passengers', trip.passengers)
+    if (trip.vehicle) params.set('vehicle', trip.vehicle)
+    navigate(`/book-ride?${params.toString()}`)
+  }
+
+  if (!tripOptions.loadingAreas && tripOptions.areas.length === 0) {
+    return (
+      <div className="planner" id="plan">
+        <h2 className="planner-title">Booking opens soon</h2>
+        <p className="muted">
+          We're finishing route and fare setup for our first service area.
+          Create an account now and you'll be ready to ride on day one.
+        </p>
+        <Link className="btn btn-accent btn-lg" to="/register">
+          Create your account
+        </Link>
+      </div>
+    )
+  }
 
   return (
-    zone?.name ||
-    zone?.zone_name ||
-    zone?.title ||
-    zone?.label ||
-    ""
-  );
-}
+    <form className="planner" id="plan" onSubmit={submit} aria-labelledby="planner-title">
+      <h2 className="planner-title" id="planner-title">
+        Where are you headed?
+      </h2>
 
-function SectionHeading({ eyebrow, title, description, light = false }) {
-  return (
-    <div className={`ek-section-heading ${light ? "is-light" : ""}`}>
-      {eyebrow && <span className="ek-eyebrow">{eyebrow}</span>}
-      <h2>{title}</h2>
-      {description && <p>{description}</p>}
-    </div>
-  );
+      {tripOptions.areas.length > 1 && (
+        <label className="field">
+          <span className="field-label">Service area</span>
+          <select
+            className="select"
+            value={trip.area}
+            onChange={(event) => update('area', event.target.value)}
+          >
+            <option value="">Choose your town</option>
+            {tripOptions.areas.map((area) => (
+              <option key={area.id} value={String(area.id)}>
+                {area.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+
+      <div className="route">
+        <div className="route-rail" aria-hidden="true">
+          <span className="route-dot" />
+          <span className="route-line" />
+          <span className="route-end" />
+        </div>
+        <label className="field">
+          <span className="field-label">Pickup</span>
+          <select
+            className="select"
+            value={trip.from}
+            onChange={(event) => update('from', event.target.value)}
+            disabled={!areaId || tripOptions.loadingPlaces}
+          >
+            <option value="">
+              {tripOptions.loadingAreas || tripOptions.loadingPlaces
+                ? 'Loading places…'
+                : 'Choose pickup'}
+            </option>
+            {tripOptions.places.map((place) => (
+              <option key={place.id} value={String(place.id)}>
+                {place.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span className="field-label">Destination</span>
+          <select
+            className="select"
+            value={trip.to}
+            onChange={(event) => update('to', event.target.value)}
+            disabled={!areaId || tripOptions.loadingPlaces}
+          >
+            <option value="">Choose destination</option>
+            {tripOptions.places.map((place) => (
+              <option key={place.id} value={String(place.id)}>
+                {place.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      {sameplace && (
+        <Alert tone="warning">Pickup and destination need to be different places.</Alert>
+      )}
+
+      {tripOptions.routeSelected && (
+        <fieldset className="choice-list">
+          <legend className="choice-legend">
+            {tripOptions.loadingFares ? 'Checking fares…' : 'Fares for this route'}
+          </legend>
+          {!tripOptions.loadingFares && tripOptions.fareOptions.length === 0 && (
+            <p className="muted small">
+              No fare is set for this exact route yet. Try a nearby pickup or
+              destination.
+            </p>
+          )}
+          {tripOptions.fareOptions.map((option) => (
+            <label className="choice" key={option.fare_id}>
+              <input
+                type="radio"
+                name="planner-vehicle"
+                value={option.vehicle_type}
+                checked={trip.vehicle === option.vehicle_type}
+                onChange={(event) => update('vehicle', event.target.value)}
+              />
+              <span className={`choice-icon ${isMotorcycle(option.vehicle_type) ? '' : 'choice-icon-warm'}`}>
+                <VehicleIcon type={option.vehicle_type} />
+              </span>
+              <span className="choice-body">
+                <span className="choice-title">{vehicleLabel(option.vehicle_type)}</span>
+                <span className="choice-sub">{vehicleBlurb(option.vehicle_type)}</span>
+              </span>
+              <span className="choice-price">{formatNaira(option.quoted_fare, { decimals: 0 })}</span>
+            </label>
+          ))}
+        </fieldset>
+      )}
+
+      <button
+        type="submit"
+        className="btn btn-accent btn-lg"
+        disabled={!tripOptions.routeSelected}
+      >
+        {selectedFare
+          ? `Continue · ${formatNaira(selectedFare.quoted_fare, { decimals: 0 })}`
+          : 'Continue to book'}
+        <ArrowRight size={20} aria-hidden="true" />
+      </button>
+      <p className="muted small" style={{ textAlign: 'center' }}>
+        Fares come from EkiMove's approved route prices. You'll sign in to confirm.
+      </p>
+    </form>
+  )
 }
 
 export default function HomePage() {
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [zones, setZones] = useState(FALLBACK_ZONES);
-  const [paymentPolicy, setPaymentPolicy] = useState(null);
-  const [loadingZones, setLoadingZones] = useState(true);
-
-  const [rideType, setRideType] = useState("bike");
-  const [pickup, setPickup] = useState("");
-  const [destination, setDestination] = useState("");
-  const [rideMessage, setRideMessage] = useState("");
-  const [formError, setFormError] = useState("");
-
-  useEffect(() => {
-    let active = true;
-
-    async function loadPageData() {
-      try {
-        const [zonesResponse, paymentResponse] = await Promise.allSettled([
-          fetch(`${API_BASE_URL}/zones`),
-          fetch(`${API_BASE_URL}/policy/payments`),
-        ]);
-
-        if (!active) return;
-
-        if (
-          zonesResponse.status === "fulfilled" &&
-          zonesResponse.value.ok
-        ) {
-          const zonesData = await zonesResponse.value.json();
-
-          const receivedZones = Array.isArray(zonesData)
-            ? zonesData
-            : zonesData?.zones || zonesData?.data || [];
-
-          if (receivedZones.length > 0) {
-            setZones(receivedZones);
-          }
-        }
-
-        if (
-          paymentResponse.status === "fulfilled" &&
-          paymentResponse.value.ok
-        ) {
-          const paymentData = await paymentResponse.value.json();
-          setPaymentPolicy(paymentData);
-        }
-      } catch (error) {
-        console.error("Unable to load EkiMove page data:", error);
-      } finally {
-        if (active) setLoadingZones(false);
-      }
-    }
-
-    loadPageData();
-
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  const scrollToBooking = () => {
-    document.getElementById("booking")?.scrollIntoView({
-      behavior: "smooth",
-      block: "start",
-    });
-
-    setMobileMenuOpen(false);
-  };
-
-  const closeMobileMenu = () => setMobileMenuOpen(false);
-
-  const handleRideSubmit = (event) => {
-    event.preventDefault();
-    setFormError("");
-    setRideMessage("");
-
-    if (!pickup || !destination) {
-      setFormError("Please select both your pickup and destination.");
-      return;
-    }
-
-    if (pickup === destination) {
-      setFormError("Your pickup and destination cannot be the same.");
-      return;
-    }
-
-    setRideMessage(
-      `Your ${rideType === "bike" ? "bike" : "car"} ride details are ready. Ride booking will be available once the booking service is connected.`
-    );
-  };
-
-  const zoneOptions = zones
-    .map((zone) => ({
-      value: getZoneName(zone),
-      label: getZoneName(zone),
-    }))
-    .filter((zone) => zone.value);
-
-  const paymentDescription =
-    paymentPolicy?.description ||
-    paymentPolicy?.message ||
-    paymentPolicy?.policy ||
-    "Payment options and ride pricing will be communicated clearly before your journey.";
-
   return (
-    <div className="ek-page">
-      {/* Navigation */}
-      <header className="ek-header">
-        <div className="ek-container ek-nav">
-          <a
-            className="ek-brand"
-            href="#home"
-            onClick={closeMobileMenu}
-            aria-label="EkiMove home"
-          >
-            <span className="ek-brand-mark">E</span>
-            <span>EkiMove<span className="ek-brand-period">.</span></span>
-          </a>
+    <div>
+      <a className="skip-link" href="#plan">
+        Skip to trip planner
+      </a>
 
-          <button
-            type="button"
-            className="ek-mobile-menu-toggle"
-            aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
-            aria-expanded={mobileMenuOpen}
-            onClick={() => setMobileMenuOpen((open) => !open)}
-          >
-            {mobileMenuOpen ? <X size={23} /> : <Menu size={23} />}
-          </button>
-
-        
-<nav className={`ek-nav-links ${mobileMenuOpen ? "is-open" : ""}`}>
-  <a href="#home" onClick={closeMobileMenu}>Home</a>
-  <a href="#services" onClick={closeMobileMenu}>Services</a>
-  <a href="#how-it-works" onClick={closeMobileMenu}>How it works</a>
-  <a href="#about" onClick={closeMobileMenu}>About us</a>
-
-  <Link
-    to="/login"
-    className="ek-nav-auth-link"
-    onClick={closeMobileMenu}
-  >
-    Sign in
-  </Link>
-
-  <Link
-    to="/register"
-    className="ek-button ek-button-lime ek-nav-cta"
-    onClick={closeMobileMenu}
-  >
-    Create account <ArrowRight size={17} />
-  </Link>
-
-  <button
-    type="button"
-    className="ek-button ek-button-dark"
-    onClick={scrollToBooking}
-  >
-    Find a ride <ArrowRight size={17} />
-  </button>
-</nav>
-
+      <section className="hero">
+        <PublicHeader dark />
+        <div className="container hero-inner">
+          <div className="hero-copy">
+            <p className="eyebrow hero-eyebrow">Now piloting in Ado-Ekiti</p>
+            <h1 className="display hero-title">
+              Move around Ekiti, <em>the easy way.</em>
+            </h1>
+            <p className="hero-lead">
+              Book a motorcycle or car for everyday trips. Your fare is set
+              before you book, every driver is verified, and payment is always
+              cashless.
+            </p>
+            <div className="row">
+              <a className="btn btn-lg" href="#plan">
+                Plan a trip <ArrowRight size={20} aria-hidden="true" />
+              </a>
+              <Link className="btn btn-lg btn-on-dark" to="/driver/apply">
+                Drive with EkiMove
+              </Link>
+            </div>
+          </div>
+          <TripPlanner />
         </div>
-      </header>
+        <Hills base="#F2F5F1" />
+      </section>
 
       <main>
-        {/* Full-width hero */}
-        <section className="ek-hero-banner" id="home">
-          <img
-            className="ek-hero-banner-image"
-            src="/images/ekimove-local-rides.jpg"
-            alt="Local motorcycle and car transport for everyday journeys in Ekiti"
-            fetchPriority="high"
-          />
-
-          <div className="ek-hero-banner-overlay" />
-
-          <div className="ek-container ek-hero-banner-content">
-            <span className="ek-hero-badge">
-              <span className="ek-status-dot" />
-              YOUR JOURNEY. YOUR EKITI.
+        <section className="container grid grid-auto trust-strip" aria-label="Why EkiMove">
+          <div className="trust-item">
+            <span className="trust-icon" style={{ background: 'var(--green-100)', color: 'var(--green-800)' }}>
+              <BadgeCheck size={24} aria-hidden="true" />
             </span>
-
-            <h1>
-              Getting around Ekiti,
-              <br />
-              <span>made easier.</span>
-            </h1>
-
-            <p>
-              EkiMove is building a simpler way to move around Ekiti State.
-              Find a ride for your everyday journeys, choose between a bike
-              or a car, and plan your trip from pickup to destination.
-            </p>
-
-            <div className="ek-hero-banner-actions">
-              <button
-                type="button"
-                className="ek-button ek-button-lime"
-                onClick={scrollToBooking}
-              >
-                Find a ride <ArrowRight size={19} />
-              </button>
-
-              <a href="#about" className="ek-hero-learn-more">
-                Discover EkiMove <ArrowRight size={18} />
-              </a>
-            </div>
-
-            <div className="ek-hero-banner-details">
-              <div>
-                <Bike size={21} />
-                <span>Bike rides</span>
-              </div>
-
-              <span className="ek-hero-detail-divider" />
-
-              <div>
-                <CarFront size={21} />
-                <span>Car rides</span>
-              </div>
-
-              <span className="ek-hero-detail-divider" />
-
-              <div>
-                <MapPin size={21} />
-                <span>Made for Ekiti</span>
-              </div>
+            <div>
+              <h3>Verified drivers</h3>
+              <p>Drivers and vehicles are reviewed and approved by EkiMove before their first ride.</p>
             </div>
           </div>
-
-          <div className="ek-hero-banner-bottom">
-            <span>LOCAL TRANSPORT, A BETTER EXPERIENCE.</span>
-            <span>EKITI STATE, NIGERIA</span>
+          <div className="trust-item">
+            <span className="trust-icon" style={{ background: 'var(--gold-100)', color: 'var(--gold-700)' }}>
+              <Tag size={24} aria-hidden="true" />
+            </span>
+            <div>
+              <h3>Fare before you book</h3>
+              <p>You see the price for your exact route first. No haggling at the roadside.</p>
+            </div>
           </div>
-        </section>
-
-        {/* Booking form */}
-        <section className="ek-booking-section" id="booking">
-          <div className="ek-container">
-            <div className="ek-booking-card">
-              <div className="ek-booking-intro">
-                <span className="ek-eyebrow">PLAN YOUR JOURNEY</span>
-                <h2>Where are you headed?</h2>
-                <p>
-                  Start with your pickup point, destination, and preferred
-                  ride type.
-                </p>
-              </div>
-
-              <form className="ek-booking-form" onSubmit={handleRideSubmit}>
-                <div className="ek-ride-type">
-                  <button
-                    type="button"
-                    className={`ek-ride-option ${
-                      rideType === "bike" ? "is-selected" : ""
-                    }`}
-                    onClick={() => setRideType("bike")}
-                    aria-pressed={rideType === "bike"}
-                  >
-                    <Bike size={23} />
-                    <span>
-                      <strong>Bike</strong>
-                      <small>For quick trips</small>
-                    </span>
-                    {rideType === "bike" && <Check size={18} />}
-                  </button>
-
-                  <button
-                    type="button"
-                    className={`ek-ride-option ${
-                      rideType === "car" ? "is-selected" : ""
-                    }`}
-                    onClick={() => setRideType("car")}
-                    aria-pressed={rideType === "car"}
-                  >
-                    <CarFront size={23} />
-                    <span>
-                      <strong>Car</strong>
-                      <small>For extra comfort</small>
-                    </span>
-                    {rideType === "car" && <Check size={18} />}
-                  </button>
-                </div>
-
-                <div className="ek-booking-fields">
-                  <label className="ek-field">
-                    <span>Pickup location</span>
-                    <span className="ek-input-wrap">
-                      <MapPin size={19} />
-                      <select
-                        value={pickup}
-                        onChange={(event) => setPickup(event.target.value)}
-                        required
-                      >
-                        <option value="">Choose pickup</option>
-                        {zoneOptions.map((zone) => (
-                          <option key={zone.value} value={zone.value}>
-                            {zone.label}
-                          </option>
-                        ))}
-                      </select>
-                      <ChevronDown className="ek-select-chevron" size={17} />
-                    </span>
-                  </label>
-
-                  <label className="ek-field">
-                    <span>Destination</span>
-                    <span className="ek-input-wrap">
-                      <Navigation size={19} />
-                      <select
-                        value={destination}
-                        onChange={(event) => setDestination(event.target.value)}
-                        required
-                      >
-                        <option value="">Choose destination</option>
-                        {zoneOptions.map((zone) => (
-                          <option key={zone.value} value={zone.value}>
-                            {zone.label}
-                          </option>
-                        ))}
-                      </select>
-                      <ChevronDown className="ek-select-chevron" size={17} />
-                    </span>
-                  </label>
-
-                  <button
-                    type="submit"
-                    className="ek-button ek-button-lime ek-booking-submit"
-                  >
-                    Continue <ArrowRight size={18} />
-                  </button>
-                </div>
-
-                {loadingZones && (
-                  <p className="ek-form-note">Loading available locations…</p>
-                )}
-
-                {formError && (
-                  <p className="ek-form-message is-error" role="alert">
-                    {formError}
-                  </p>
-                )}
-
-                {rideMessage && (
-                  <p className="ek-form-message is-success" role="status">
-                    {rideMessage}
-                  </p>
-                )}
-              </form>
+          <div className="trust-item">
+            <span className="trust-icon" style={{ background: 'var(--laterite-100)', color: 'var(--laterite-700)' }}>
+              <Wallet size={24} aria-hidden="true" />
+            </span>
+            <div>
+              <h3>Cashless and accountable</h3>
+              <p>Pay by bank transfer or Interswitch. Every payment is verified before it counts.</p>
             </div>
           </div>
         </section>
 
-        {/* Benefits */}
-        <section className="ek-benefits-section">
-          <div className="ek-container ek-benefits-grid">
-            <div className="ek-benefit">
-              <span className="ek-benefit-icon"><MapPin size={23} /></span>
-              <div>
-                <h3>Local by design</h3>
-                <p>Built around the everyday movement needs of Ekiti residents.</p>
-              </div>
+        <section className="section" id="rides">
+          <div className="container">
+            <div className="section-head">
+              <p className="eyebrow">Ride options</p>
+              <h2>A ride for the way you move.</h2>
             </div>
-
-            <div className="ek-benefit">
-              <span className="ek-benefit-icon"><Clock3 size={23} /></span>
-              <div>
-                <h3>Less hassle</h3>
-                <p>A simpler way to plan where you are going and how to get there.</p>
-              </div>
-            </div>
-
-            <div className="ek-benefit">
-              <span className="ek-benefit-icon"><ShieldCheck size={23} /></span>
-              <div>
-                <h3>Clarity first</h3>
-                <p>Clear journey details help you make informed transport choices.</p>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* Services */}
-        <section className="ek-section ek-services-section" id="services">
-          <div className="ek-container">
-            <SectionHeading
-              eyebrow="OUR SERVICES"
-              title="A ride for the way you move."
-              description="Different journeys call for different rides. EkiMove is designed around practical local transport options."
-            />
-
-            <div className="ek-services-grid">
-              <article className="ek-service-card ek-service-bike">
-                <div className="ek-service-copy">
-                  <span className="ek-service-number">01 / BIKE</span>
-                  <h3>Quick trips.<br />Easy movement.</h3>
-                  <p>
-                    For everyday errands, short journeys, and getting around
-                    town without unnecessary stress.
-                  </p>
-                  <button
-                    type="button"
-                    className="ek-text-link"
-                    onClick={scrollToBooking}
-                  >
-                    Explore bike rides <ArrowRight size={18} />
-                  </button>
-                </div>
-
-                <div className="ek-service-visual ek-service-visual-bike">
-                  <Bike size={112} strokeWidth={1.2} />
-                  <span className="ek-service-visual-label">BIKE</span>
-                </div>
-              </article>
-
-              <article className="ek-service-card ek-service-car">
-                <div className="ek-service-copy">
-                  <span className="ek-service-number">02 / CAR</span>
-                  <h3>More room.<br />More comfort.</h3>
-                  <p>
-                    An alternative for when you need a car for your journey
-                    around the city and beyond.
-                  </p>
-                  <button
-                    type="button"
-                    className="ek-text-link"
-                    onClick={scrollToBooking}
-                  >
-                    Explore car rides <ArrowRight size={18} />
-                  </button>
-                </div>
-
-                <div className="ek-service-visual ek-service-visual-car">
-                  <CarFront size={112} strokeWidth={1.2} />
-                  <span className="ek-service-visual-label">CAR</span>
-                </div>
-              </article>
-            </div>
-          </div>
-        </section>
-
-        {/* How it works */}
-        <section
-          className="ek-section ek-how-section"
-          id="how-it-works"
-        >
-          <div className="ek-container">
-            <SectionHeading
-              eyebrow="HOW IT WORKS"
-              title="Your journey, in three steps."
-              description="The goal is to make planning a local trip feel straightforward from the very beginning."
-            />
-
-            <div className="ek-steps-grid">
-              <article className="ek-step-card">
-                <span className="ek-step-number">01</span>
-                <span className="ek-step-icon"><MapPin size={25} /></span>
-                <h3>Choose your locations</h3>
-                <p>
-                  Select where your journey starts and where you want to go.
-                </p>
-              </article>
-
-              <article className="ek-step-card">
-                <span className="ek-step-number">02</span>
-                <span className="ek-step-icon"><Bike size={25} /></span>
-                <h3>Select your ride</h3>
-                <p>
-                  Choose a bike or car based on your journey and preferences.
-                </p>
-              </article>
-
-              <article className="ek-step-card">
-                <span className="ek-step-number">03</span>
-                <span className="ek-step-icon"><Navigation size={25} /></span>
-                <h3>Get ready to move</h3>
-                <p>
-                  Review your journey details and follow the booking process
-                  as the service becomes available.
-                </p>
-              </article>
-            </div>
-          </div>
-        </section>
-
-        {/* About */}
-        <section className="ek-section ek-about-section" id="about">
-          <div className="ek-container ek-about-grid">
-            <div className="ek-about-image-wrap">
-              <img
-                src="/images/ekimove-ekiti-street.jpg"
-                alt="A local street scene representing everyday movement in Ekiti"
-                className="ek-about-image"
-                loading="lazy"
-              />
-
-              <div className="ek-about-image-note">
-                <span className="ek-about-note-mark">E</span>
-                <span>
-                  <strong>Made for Ekiti.</strong>
-                  <small>Designed around local journeys.</small>
+            <div className="grid grid-auto" style={{ gap: 20 }}>
+              <article className="ride-type ride-type-dark">
+                <span style={{ color: 'var(--gold-500)' }}>
+                  <VehicleIcon type="motorcycle" size={64} />
                 </span>
-              </div>
+                <div>
+                  <h3>Motorcycle</h3>
+                  <p>Fast, affordable trips through town. One passenger, helmet first.</p>
+                </div>
+              </article>
+              <article className="ride-type">
+                <span style={{ color: 'var(--laterite-600)' }}>
+                  <VehicleIcon type="car" size={64} />
+                </span>
+                <div>
+                  <h3>Car</h3>
+                  <p>More room and comfort for longer journeys, family trips or market runs.</p>
+                </div>
+              </article>
             </div>
+          </div>
+        </section>
 
-            <div className="ek-about-copy">
-              <span className="ek-eyebrow">ABOUT EKIMOVE</span>
-              <h2>Moving our communities forward, one ride at a time.</h2>
+        <section className="section section-white" id="how-it-works">
+          <div className="container">
+            <div className="section-head">
+              <p className="eyebrow">How it works</p>
+              <h2>Your journey in three steps.</h2>
+            </div>
+            <ol className="steps-big">
+              <li>
+                <span className="steps-big-num" style={{ color: 'var(--green-600)' }} aria-hidden="true">01</span>
+                <h3>Choose your route</h3>
+                <p>Pick your pickup and destination from places across your service area.</p>
+              </li>
+              <li>
+                <span className="steps-big-num" style={{ color: 'var(--laterite-600)' }} aria-hidden="true">02</span>
+                <h3>See the fare, pick a ride</h3>
+                <p>Compare motorcycle and car prices for that exact route, then send your request.</p>
+              </li>
+              <li>
+                <span className="steps-big-num" style={{ color: '#B57B0B' }} aria-hidden="true">03</span>
+                <h3>Meet your driver</h3>
+                <p>A verified driver is assigned and you follow each step until you arrive.</p>
+              </li>
+            </ol>
+          </div>
+        </section>
 
-              <p>
-                Getting from one place to another is part of everyday life.
-                Whether it is going to work, running an errand, attending
-                an appointment, or visiting family, local movement should
-                feel simpler.
+        <section className="section" id="about">
+          <div className="container split">
+            <img
+              className="photo"
+              src="/images/ekimove-local-rides.jpg"
+              alt="An EkiMove rider in a high-visibility vest and a car on a street in Ado-Ekiti, with the town gate and hills behind"
+              style={{ aspectRatio: '4 / 3', objectPosition: '78% center' }}
+              loading="lazy"
+            />
+            <div className="stack">
+              <p className="eyebrow">Made for Ekiti</p>
+              <h2 className="display" style={{ fontSize: 'clamp(32px, 4vw, 46px)', color: 'var(--green-800)' }}>
+                Built around how Ekiti moves.
+              </h2>
+              <p className="muted" style={{ fontSize: 17 }}>
+                EkiMove starts in Ado-Ekiti with the places people actually go:
+                markets, campuses, junctions and neighbourhoods. Every route has an
+                approved fare, so riders and drivers agree on the price before the
+                trip begins.
               </p>
-
-              <p>
-                EkiMove is a transport project focused on making it easier
-                to plan local journeys across Ekiti State, with practical
-                ride options and an experience designed for the people who
-                live and move here.
-              </p>
-
-              <a href="#booking" className="ek-button ek-button-dark">
-                Plan your journey <ArrowRight size={18} />
+              <a className="text-link" href="#plan">
+                Plan your first trip →
               </a>
             </div>
           </div>
         </section>
 
-        {/* Payment information */}
-        <section className="ek-payment-section">
-          <div className="ek-container ek-payment-card">
-            <div className="ek-payment-icon">
-              <CreditCard size={28} />
+        <section className="section section-white" id="safety">
+          <div className="container split">
+            <div className="stack">
+              <p className="eyebrow">Safety and trust</p>
+              <h2 className="display" style={{ fontSize: 'clamp(32px, 4vw, 46px)', color: 'var(--green-800)' }}>
+                Ride with confidence.
+              </h2>
+              <p className="muted" style={{ fontSize: 17 }}>
+                Every part of the journey is recorded, from the driver who accepts
+                your ride to the payment that settles it.
+              </p>
             </div>
-
-            <div className="ek-payment-copy">
-              <span className="ek-eyebrow">PAYMENT INFORMATION</span>
-              <h2>Know what to expect.</h2>
-              <p>{paymentDescription}</p>
-            </div>
-
-            <div className="ek-payment-note">
-              <ShieldCheck size={20} />
-              <span>Clear information. Better decisions.</span>
-            </div>
+            <ul className="safety-list">
+              <li style={{ background: 'var(--mist)' }}>
+                <span className="safety-icon" style={{ background: 'var(--laterite-600)', color: '#fff' }}>
+                  <Siren size={20} aria-hidden="true" />
+                </span>
+                <p><strong>In-ride SOS</strong> alerts the EkiMove team straight away during any trip.</p>
+              </li>
+              <li style={{ background: 'var(--mist)' }}>
+                <span className="safety-icon" style={{ background: 'var(--green-800)', color: '#fff' }}>
+                  <UserRoundCheck size={20} aria-hidden="true" />
+                </span>
+                <p><strong>Approved drivers and vehicles</strong>, checked before their first ride.</p>
+              </li>
+              <li style={{ background: 'var(--mist)' }}>
+                <span className="safety-icon" style={{ background: 'var(--gold-500)', color: 'var(--ink)' }}>
+                  <Wallet size={20} aria-hidden="true" />
+                </span>
+                <p><strong>Payments confirmed by EkiMove</strong>, never by a screenshot alone.</p>
+              </li>
+            </ul>
           </div>
         </section>
 
-        {/* Call to action */}
-        <section className="ek-final-cta">
-          <div className="ek-container ek-final-cta-content">
-            <span className="ek-eyebrow">YOUR NEXT JOURNEY STARTS HERE</span>
-            <h2>Wherever you're going,<br />let's make moving easier.</h2>
-            <p>
-              Explore a simpler approach to local transport in Ekiti State.
-            </p>
-            <button
-              type="button"
-              className="ek-button ek-button-lime"
-              onClick={scrollToBooking}
-            >
-              Find a ride <ArrowRight size={19} />
-            </button>
+        <section className="section" id="drive">
+          <div className="container">
+            <div className="cta-band">
+              <div style={{ flex: '1 1 420px' }}>
+                <h2>Drive with EkiMove.</h2>
+                <p>Own a motorcycle or car? Apply, get verified and start earning on trips across Ekiti.</p>
+              </div>
+              <Link className="btn btn-lg" to="/driver/apply" style={{ color: 'var(--laterite-700)' }}>
+                Apply to drive
+              </Link>
+            </div>
           </div>
-          <div className="ek-cta-decoration" aria-hidden="true">E</div>
         </section>
       </main>
 
-      {/* Footer */}
-      <footer className="ek-footer">
-        <div className="ek-container">
-          <div className="ek-footer-main">
-            <div className="ek-footer-brand">
-              <a className="ek-brand ek-brand-footer" href="#home">
-                <span className="ek-brand-mark">E</span>
-                <span>EkiMove<span className="ek-brand-period">.</span></span>
-              </a>
-              <p>
-                A simpler way to think about local transportation in Ekiti
-                State, Nigeria.
-              </p>
-            </div>
-
-            <div className="ek-footer-links">
-              <h4>Explore</h4>
-              <a href="#services">Our services</a>
-              <a href="#how-it-works">How it works</a>
-              <a href="#about">About EkiMove</a>
-            </div>
-
-            <div className="ek-footer-links">
-              <h4>Get started</h4>
-              <button type="button" onClick={scrollToBooking}>Find a ride</button>
-              <a href="#booking">Plan your journey</a>
-            </div>
-
-            <div className="ek-footer-location">
-              <span className="ek-footer-location-icon"><MapPin size={19} /></span>
-              <div>
-                <h4>Rooted in Ekiti</h4>
-                <p>Ekiti State, Nigeria</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="ek-footer-bottom">
-            <span>© {new Date().getFullYear()} EkiMove. All rights reserved.</span>
-            <span>Built with Ekiti in mind.</span>
-          </div>
-        </div>
-      </footer>
-
-      {/* Keep your existing Atona assistant component mounted here if it
-          is a default-exported React component. See note below the code. */}
-
-          <AtonaFloatingAssistant />
+      <PublicFooter />
+      <AtonaFloatingAssistant />
     </div>
-  );
+  )
 }

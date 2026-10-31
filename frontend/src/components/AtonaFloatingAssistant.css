@@ -1,4 +1,4 @@
-﻿.atona-widget {
+.atona-widget {
   position: fixed;
   right: 24px;
   bottom: 24px;
@@ -15,7 +15,7 @@
   padding: 0 20px;
   border: 0;
   border-radius: 999px;
-  background: #087f5b;
+  background: #0E4D3B;
   color: #fff;
   box-shadow: 0 8px 28px rgb(0 0 0 / 20%);
   font: inherit;
@@ -24,7 +24,7 @@
 }
 
 .atona-launcher:hover {
-  background: #066b4c;
+  background: #0A3A2C;
 }
 
 .atona-panel {
@@ -34,10 +34,10 @@
   max-height: min(620px, calc(100dvh - 110px));
   margin-bottom: 12px;
   overflow: hidden;
-  border: 1px solid #dce8e2;
+  border: 1px solid #DCEBE3;
   border-radius: 18px;
   background: #fff;
-  color: #172b23;
+  color: #10201A;
   box-shadow: 0 16px 48px rgb(0 0 0 / 20%);
 }
 
@@ -47,7 +47,7 @@
   justify-content: space-between;
   gap: 12px;
   padding: 16px;
-  background: #087f5b;
+  background: #0E4D3B;
   color: #fff;
 }
 
@@ -99,30 +99,30 @@
 
 .atona-message-assistant {
   align-self: flex-start;
-  border: 1px solid #e0ebe5;
+  border: 1px solid #DFF0E7;
   border-bottom-left-radius: 4px;
-  background: #f1f7f3;
+  background: #EEF6F1;
 }
 
 .atona-message-user {
   align-self: flex-end;
   border-bottom-right-radius: 4px;
-  background: #087f5b;
+  background: #0E4D3B;
   color: #fff;
 }
 
 .atona-typing {
   margin: 0;
-  color: #52685d;
+  color: #4E5F57;
   font-size: 0.82rem;
 }
 
 .atona-booking-preview {
   margin: 0 12px 12px;
   padding: 13px;
-  border: 1px solid #b7dfca;
+  border: 1px solid #DCEBE3;
   border-radius: 12px;
-  background: #f3faf5;
+  background: #F2F5F1;
   font-size: 0.87rem;
 }
 
@@ -135,7 +135,7 @@
 .atona-compose button {
   border: 0;
   border-radius: 9px;
-  background: #087f5b;
+  background: #0E4D3B;
   color: #fff;
   font: inherit;
   font-weight: 700;
@@ -153,7 +153,7 @@
   align-items: stretch;
   gap: 8px;
   padding: 12px;
-  border-top: 1px solid #e5ece8;
+  border-top: 1px solid #E2E8E4;
 }
 
 .atona-compose textarea {
@@ -161,9 +161,9 @@
   min-width: 0;
   resize: vertical;
   padding: 10px;
-  border: 1px solid #cad8d0;
+  border: 1px solid #C9D3CD;
   border-radius: 10px;
-  color: #172b23;
+  color: #10201A;
   font: inherit;
   font-size: 0.88rem;
 }
@@ -181,14 +181,14 @@
 
 .atona-error {
   margin: 0 12px 10px;
-  color: #b42318;
+  color: #8A3519;
   font-size: 0.85rem;
 }
 
 .atona-disclaimer {
   margin: 0;
   padding: 0 12px 12px;
-  color: #617168;
+  color: #4E5F57;
   font-size: 0.72rem;
   line-height: 1.45;
 }
@@ -236,7 +236,7 @@
   padding: 14px 22px;
   border: 2px solid #ffffff;
   border-radius: 999px;
-  background: linear-gradient(135deg, #087f5b 0%, #00a878 55%, #35c98a 100%);
+  background: linear-gradient(135deg, #0E4D3B 0%, #2E8B63 55%, #2E8B63 100%);
   color: #ffffff;
   box-shadow: 0 8px 28px rgba(0, 90, 60, 0.38),
               0 0 0 4px rgba(0, 168, 120, 0.16);
@@ -259,7 +259,7 @@
 }
 
 .atona-launcher:focus-visible {
-  outline: 3px solid #102a43;
+  outline: 3px solid #10201A;
   outline-offset: 4px;
 }
 

@@ -1,5 +1,7 @@
-﻿import { useState } from 'react'
+﻿import { useId, useState } from 'react'
+import { Siren } from 'lucide-react'
 import { apiRequest } from '../services/authService.js'
+import Alert from './ui/Alert.jsx'
 
 const eligibleStatuses = new Set([
   'assigned',
@@ -8,32 +10,27 @@ const eligibleStatuses = new Set([
   'incident_review',
 ])
 
+const DEFAULT_DESCRIPTION = 'SOS alert submitted by a ride participant.'
+
+/**
+ * Emergency alert for an active ride. Opens an in-page confirmation so the
+ * person can describe what's happening before the alert is sent.
+ */
 export default function SOSButton({ rideId, rideStatus }) {
+  const [open, setOpen] = useState(false)
+  const [description, setDescription] = useState(DEFAULT_DESCRIPTION)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const fieldId = useId()
 
   if (!rideId || !eligibleStatuses.has(rideStatus)) return null
 
-  async function submitSOS() {
-    const confirmed = window.confirm(
-      `Send an SOS alert for ride #${rideId}?\n\n` +
-      'This creates a critical incident for EkiMove administrators. ' +
-      'It does NOT automatically contact emergency services.'
-    )
-
-    if (!confirmed) return
-
-    const description = window.prompt(
-      'Briefly describe the emergency (at least 5 characters):',
-      'SOS alert submitted by a ride participant.'
-    )
-
-    if (description === null) return
+  async function submitSOS(event) {
+    event.preventDefault()
 
     if (description.trim().length < 5) {
-      setError('Please provide at least 5 characters describing the incident.')
-      setNotice('')
+      setError('Please describe what is happening in at least 5 characters.')
       return
     }
 
@@ -42,44 +39,90 @@ export default function SOSButton({ rideId, rideStatus }) {
     setNotice('')
 
     try {
-      const result = await apiRequest(
-        `/api/v1/rides/${rideId}/sos`,
-        {
-          method: 'POST',
-          body: JSON.stringify({ description: description.trim() }),
-        }
-      )
+      const result = await apiRequest(`/api/v1/rides/${rideId}/sos`, {
+        method: 'POST',
+        body: JSON.stringify({ description: description.trim() }),
+      })
 
       setNotice(
         result.message ||
-        `SOS recorded. Incident #${result.incident_id ?? 'created'}.`
+          `SOS sent. The EkiMove team has been alerted (incident #${result.incident_id ?? 'created'}).`,
       )
+      setOpen(false)
+      setDescription(DEFAULT_DESCRIPTION)
     } catch (err) {
-      setError(err.message || 'Unable to submit SOS. Please try again.')
+      setError(err.message || 'Unable to send SOS. Please try again.')
     } finally {
       setSending(false)
     }
   }
 
   return (
-    <section className="app-page-actions" aria-label="Emergency assistance">
-      <button
-        type="button"
-        onClick={submitSOS}
-        disabled={sending}
-        aria-label={`Send SOS for ride ${rideId}`}
-      >
-        {sending ? 'Sending SOS…' : 'SOS — Emergency alert'}
-      </button>
+    <>
+      {!open && (
+        <button
+          type="button"
+          className="btn sos-btn"
+          onClick={() => {
+            setOpen(true)
+            setNotice('')
+          }}
+          aria-label={`Send SOS for ride ${rideId}`}
+        >
+          <Siren size={18} aria-hidden="true" /> SOS
+        </button>
+      )}
 
-      <p>
-        SOS creates an incident for EkiMove administrators. It does not
-        automatically call emergency services. If you are in immediate
-        danger, contact local emergency services directly when safe.
-      </p>
+      {open && (
+        <form
+          className="sos-panel"
+          style={{ flexBasis: '100%' }}
+          onSubmit={submitSOS}
+          aria-label="Emergency alert"
+        >
+          <p style={{ fontWeight: 800, fontSize: 17 }}>Send an SOS alert?</p>
+          <p className="small" style={{ color: 'var(--ink-700)' }}>
+            This alerts the EkiMove safety team about ride #{rideId}. It does
+            not call emergency services. If you are in immediate danger, call
+            112 when it is safe to do so.
+          </p>
+          <label className="field" htmlFor={fieldId}>
+            <span className="field-label">What is happening?</span>
+            <textarea
+              id={fieldId}
+              className="textarea"
+              rows={3}
+              maxLength={1000}
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              required
+            />
+          </label>
+          <Alert tone="error">{error}</Alert>
+          <div className="row">
+            <button type="submit" className="btn sos-btn" disabled={sending}>
+              {sending ? 'Sending SOS…' : 'Send SOS now'}
+            </button>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                setOpen(false)
+                setError('')
+              }}
+              disabled={sending}
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
 
-      {error && <p role="alert">{error}</p>}
-      {notice && <p role="status">{notice}</p>}
-    </section>
+      {notice && (
+        <div style={{ flexBasis: '100%' }}>
+          <Alert tone="success">{notice}</Alert>
+        </div>
+      )}
+    </>
   )
 }

@@ -522,6 +522,33 @@ def payment_policy() -> dict[str, object]:
         "screenshot_alone_confirms_payment": False,
     }
 
+
+@app.get("/api/v1/business-info", tags=["policy"])
+def business_info() -> dict[str, object]:
+    """Expose the configured bank-transfer account and support contacts.
+
+    Values come from environment settings so they can be filled in or
+    changed without a code release. Bank details are only reported as
+    configured when the bank name, account number and account name are
+    all set.
+    """
+    bank_name = settings.bank_transfer_bank_name
+    account_number = settings.bank_transfer_account_number
+    account_name = settings.bank_transfer_account_name
+    return {
+        "bank_transfer": {
+            "configured": bool(bank_name and account_number and account_name),
+            "bank_name": bank_name,
+            "account_number": account_number,
+            "account_name": account_name,
+        },
+        "support": {
+            "phone": settings.support_phone,
+            "email": settings.support_email,
+            "whatsapp": settings.support_whatsapp,
+        },
+    }
+
 @app.post(
     "/api/v1/auth/register",
     tags=["authentication"],
@@ -883,17 +910,35 @@ def list_my_ride_requests(
     ).all()
 
     request_ids = [item.id for item in requests]
+    requests_by_id = {item.id: item for item in requests}
     assigned_rides = {}
     if request_ids:
         rows = db.execute(
-            select(Ride.request_id, Ride.id, Ride.status).where(
-                Ride.request_id.in_(request_ids)
-            )
+            select(Ride.request_id, Ride.id, Ride.status, Ride.driver_id, User.full_name)
+            .join(Driver, Ride.driver_id == Driver.id)
+            .join(User, Driver.user_id == User.id)
+            .where(Ride.request_id.in_(request_ids))
         ).all()
-        assigned_rides = {
-            request_id: {"id": ride_id, "status": ride_status}
-            for request_id, ride_id, ride_status in rows
-        }
+        for request_id, ride_id, ride_status, driver_id, driver_full_name in rows:
+            ride_request = requests_by_id[request_id]
+            # Rides do not record a vehicle; use the same rule as assignment:
+            # the driver's first approved vehicle matching the booking.
+            vehicle = db.scalar(
+                select(Vehicle)
+                .where(
+                    Vehicle.driver_id == driver_id,
+                    Vehicle.is_approved.is_(True),
+                    Vehicle.vehicle_type == ride_request.vehicle_type,
+                    Vehicle.capacity >= ride_request.passenger_count,
+                )
+                .order_by(Vehicle.id)
+            )
+            assigned_rides[request_id] = {
+                "id": ride_id,
+                "status": ride_status,
+                "driver_name": _short_display_name(driver_full_name),
+                "vehicle_plate": vehicle.plate_number if vehicle else None,
+            }
 
     return [
         {
@@ -916,9 +961,31 @@ def list_my_ride_requests(
                 if ride_request.id in assigned_rides
                 else None
             ),
+            "driver_name": (
+                assigned_rides[ride_request.id]["driver_name"]
+                if ride_request.id in assigned_rides
+                else None
+            ),
+            "vehicle_plate": (
+                assigned_rides[ride_request.id]["vehicle_plate"]
+                if ride_request.id in assigned_rides
+                else None
+            ),
         }
         for ride_request in requests
     ]
+
+
+def _short_display_name(full_name: str | None) -> str | None:
+    """Return a first name and last initial, e.g. "Tunde A."."""
+    if not full_name:
+        return None
+    parts = full_name.split()
+    if not parts:
+        return None
+    if len(parts) == 1:
+        return parts[0]
+    return f"{parts[0]} {parts[-1][0].upper()}."
 
 
 @app.post(

@@ -1,6 +1,9 @@
 ﻿import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import AppPage from '../../layouts/AppPage.jsx'
+import { CheckCircle2 } from 'lucide-react'
+import AuthLayout from '../../layouts/AuthLayout.jsx'
+import Alert from '../../components/ui/Alert.jsx'
+import PasswordInput from '../../components/ui/PasswordInput.jsx'
 
 export default function DriverApplicationPage() {
   const [error, setError] = useState('')
@@ -54,59 +57,114 @@ export default function DriverApplicationPage() {
     }
   }
 
-  return (
-    <AppPage
-      eyebrow="DRIVER ONBOARDING"
-      title="Apply to drive with EkiMove."
-      description="Submit your details for review. You cannot accept rides until your driver profile and vehicle are approved."
-      sectionTitle="Driver application"
-      sectionText="Use your own accurate details. Your face photo is required for identity review."
-    >
-      {message ? (
-        <div role="status">
-          <h3>Application received</h3>
-          <p>{message}</p>
-          <p>Keep your sign-in details safe. Approval is not automatic.</p>
-          <Link to="/login">Continue to sign in</Link>
+  if (message) {
+    return (
+      <AuthLayout
+        title="Drive with EkiMove."
+        intro="Earn on trips across Ekiti with fares agreed before every ride."
+        heading="Application received"
+      >
+        <div className="stack">
+          <div className="row" style={{ alignItems: 'flex-start', flexWrap: 'nowrap' }}>
+            <CheckCircle2 size={28} color="#2E8B63" aria-hidden="true" style={{ flexShrink: 0 }} />
+            <div className="stack stack-sm">
+              <p role="status" style={{ fontWeight: 700 }}>{message}</p>
+              <p className="muted">
+                Our team will review your details and vehicle. You can't accept
+                rides until both are approved. Keep your sign-in details safe.
+              </p>
+            </div>
+          </div>
+          <Link className="btn btn-primary btn-lg btn-block" to="/login">
+            Continue to sign in
+          </Link>
         </div>
-      ) : (
-        <form className="auth-form" onSubmit={submit} encType="multipart/form-data">
-          <label htmlFor="driver-name">Full legal name</label>
-          <input id="driver-name" name="full_name" autoComplete="name" minLength={2} maxLength={160} required />
+      </AuthLayout>
+    )
+  }
 
-          <label htmlFor="driver-phone">Phone number</label>
-          <input id="driver-phone" name="phone" type="tel" autoComplete="tel" minLength={7} maxLength={32} required />
+  return (
+    <AuthLayout
+      title="Drive with EkiMove."
+      intro="Earn on trips across Ekiti with fares agreed before every ride. Apply once, get verified, then go online whenever you're ready."
+      heading="Apply to drive"
+      subheading="Use your own accurate details. Approval isn't automatic: your profile and vehicle are reviewed separately."
+      wide
+    >
+      <form className="form" onSubmit={submit} encType="multipart/form-data">
+        <fieldset className="stack" style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
+          <legend className="section-title" style={{ marginBottom: 14 }}>About you</legend>
+          <div className="form-grid">
+            <label className="field" htmlFor="driver-name">
+              <span className="field-label">Full legal name</span>
+              <input id="driver-name" className="input" name="full_name" autoComplete="name" minLength={2} maxLength={160} required />
+            </label>
 
-          <label htmlFor="driver-password">Password (at least 12 characters)</label>
-          <input id="driver-password" name="password" type="password" autoComplete="new-password" minLength={12} maxLength={256} required />
+            <label className="field" htmlFor="driver-phone">
+              <span className="field-label">Phone number</span>
+              <input id="driver-phone" className="input" name="phone" type="tel" inputMode="tel" autoComplete="tel" minLength={7} maxLength={32} required />
+            </label>
+          </div>
 
-          <label htmlFor="driver-photo">Face photo (JPEG, PNG, or WebP; max 5 MB)</label>
-          <input id="driver-photo" name="face_photo" type="file" accept="image/jpeg,image/png,image/webp" required />
+          <div className="field">
+            <label className="field-label" htmlFor="driver-password">Password</label>
+            <PasswordInput
+              id="driver-password"
+              name="password"
+              autoComplete="new-password"
+              minLength={12}
+              maxLength={256}
+              aria-describedby="driver-password-hint"
+              required
+            />
+            <span className="field-hint" id="driver-password-hint">At least 12 characters.</span>
+          </div>
 
-          <label htmlFor="vehicle-type">Vehicle type</label>
-          <select id="vehicle-type" name="vehicle_type" defaultValue="motorcycle" required>
-            <option value="motorcycle">Motorcycle</option>
-            <option value="tricycle">Tricycle</option>
-            <option value="car">Car</option>
-            <option value="minibus">Minibus</option>
-          </select>
+          <label className="field" htmlFor="driver-photo">
+            <span className="field-label">Face photo</span>
+            <input id="driver-photo" className="input" name="face_photo" type="file" accept="image/jpeg,image/png,image/webp" aria-describedby="driver-photo-hint" required />
+            <span className="field-hint" id="driver-photo-hint">
+              A clear photo of your face. JPEG, PNG or WebP, up to 5 MB. Only EkiMove reviewers can see it.
+            </span>
+          </label>
+        </fieldset>
 
-          <label htmlFor="vehicle-plate">Vehicle registration number</label>
-          <input id="vehicle-plate" name="plate_number" minLength={2} maxLength={32} required />
+        <fieldset className="stack" style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
+          <legend className="section-title" style={{ marginBottom: 14 }}>Your vehicle</legend>
+          <div className="form-grid">
+            <label className="field" htmlFor="vehicle-type">
+              <span className="field-label">Vehicle type</span>
+              <select id="vehicle-type" className="select" name="vehicle_type" defaultValue="motorcycle" required>
+                <option value="motorcycle">Motorcycle</option>
+                <option value="tricycle">Tricycle</option>
+                <option value="car">Car</option>
+                <option value="minibus">Minibus</option>
+              </select>
+            </label>
 
-          <label htmlFor="vehicle-capacity">Passenger capacity (excluding driver)</label>
-          <input id="vehicle-capacity" name="capacity" type="number" min="1" max="8" defaultValue="1" required />
+            <label className="field" htmlFor="vehicle-plate">
+              <span className="field-label">Plate number</span>
+              <input id="vehicle-plate" className="input" name="plate_number" autoCapitalize="characters" placeholder="e.g. EKT 123 AB" minLength={2} maxLength={32} required />
+            </label>
 
-          {error && <p className="auth-error" role="alert">{error}</p>}
+            <label className="field" htmlFor="vehicle-capacity">
+              <span className="field-label">Passenger seats</span>
+              <input id="vehicle-capacity" className="input" name="capacity" type="number" min="1" max="8" defaultValue="1" aria-describedby="vehicle-capacity-hint" required />
+              <span className="field-hint" id="vehicle-capacity-hint">Not counting the driver.</span>
+            </label>
+          </div>
+        </fieldset>
 
-          <button className="auth-submit" type="submit" disabled={loading}>
-            {loading ? 'Submitting…' : 'Submit application'}
-          </button>
-          <p className="auth-switch">Already applied? <Link to="/login">Sign in</Link></p>
-        </form>
-      )}
-    </AppPage>
+        <Alert tone="error">{error}</Alert>
+
+        <button className="btn btn-accent btn-lg btn-block" type="submit" disabled={loading}>
+          {loading ? 'Submitting your application…' : 'Submit application'}
+        </button>
+      </form>
+
+      <p className="auth-switch">
+        Already applied? <Link to="/login">Sign in</Link>
+      </p>
+    </AuthLayout>
   )
 }
-
-

@@ -74,6 +74,26 @@ Endpoints:
 - `GET /api/v1/zones`
 - `POST /api/v1/ride-requests`
 
+## Business details (bank account, support contacts)
+Passengers see the bank-transfer account and EkiMove's support contacts in the app. These are settings, not code, so they can be filled in or changed later without a release. Set them in `.env` locally or in the deployment environment:
+
+```dotenv
+BANK_TRANSFER_BANK_NAME=
+BANK_TRANSFER_ACCOUNT_NUMBER=
+BANK_TRANSFER_ACCOUNT_NAME=
+SUPPORT_PHONE=
+SUPPORT_EMAIL=
+SUPPORT_WHATSAPP=
+```
+
+Until all three bank fields are set, the payments page tells passengers the account details aren't available yet and points them to support. Any support contact left blank is simply not shown. The values are served by `GET /api/v1/business-info`; restart the API after changing them.
+
+Driver plate numbers come from each driver's application (`plate_number` on the vehicle record). Passengers see the assigned driver's first name, last initial and plate on My rides once a ride is assigned.
+
+## Brand assets
+- Logo, app icon and favicon: `frontend/public/favicon.svg`, `frontend/public/brand/`
+- Design system (colours, type, components): `frontend/src/styles/ekimove.css`
+
 ## Next implementation stages
 1. Phone verification and role-based authorization.
 2. Admin-only zone/fare management and audit logging for changes.

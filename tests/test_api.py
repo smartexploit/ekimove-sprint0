@@ -2399,3 +2399,102 @@ def test_interswitch_verification_selects_mode_specific_requery_url(
     assert captured["params"]["merchantcode"] == "TEST-MERCHANT"
     assert captured["params"]["transactionreference"] == checkout["txn_ref"]
     assert captured["params"]["amount"] == checkout["amount"]
+
+
+def test_business_info_reports_unconfigured_details(client, monkeypatch):
+    for name in (
+        "bank_transfer_bank_name",
+        "bank_transfer_account_number",
+        "bank_transfer_account_name",
+        "support_phone",
+        "support_email",
+        "support_whatsapp",
+    ):
+        monkeypatch.setattr(settings, name, None)
+
+    response = client.get("/api/v1/business-info")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["bank_transfer"] == {
+        "configured": False,
+        "bank_name": None,
+        "account_number": None,
+        "account_name": None,
+    }
+    assert body["support"] == {"phone": None, "email": None, "whatsapp": None}
+
+
+def test_business_info_requires_all_bank_fields(client, monkeypatch):
+    monkeypatch.setattr(settings, "bank_transfer_bank_name", "Example Bank")
+    monkeypatch.setattr(settings, "bank_transfer_account_number", "0123456789")
+    monkeypatch.setattr(settings, "bank_transfer_account_name", None)
+    monkeypatch.setattr(settings, "support_phone", "08000000000")
+
+    body = client.get("/api/v1/business-info").json()
+    assert body["bank_transfer"]["configured"] is False
+    assert body["support"]["phone"] == "08000000000"
+
+    monkeypatch.setattr(settings, "bank_transfer_account_name", "EkiMove Ltd")
+    body = client.get("/api/v1/business-info").json()
+    assert body["bank_transfer"] == {
+        "configured": True,
+        "bank_name": "Example Bank",
+        "account_number": "0123456789",
+        "account_name": "EkiMove Ltd",
+    }
+
+
+def test_business_settings_strip_blank_values():
+    from app.config import Settings
+
+    configured = Settings(
+        _env_file=None,
+        bank_transfer_bank_name="  ",
+        support_email=" help@example.com ",
+    )
+    assert configured.bank_transfer_bank_name is None
+    assert configured.support_email == "help@example.com"
+
+
+def test_my_rides_shows_assigned_driver_name_and_plate(client):
+    passenger_headers, _, request_id = create_assigned_ride(client)
+
+    response = client.get(
+        "/api/v1/ride-requests/my-rides",
+        headers=passenger_headers,
+    )
+
+    assert response.status_code == 200, response.text
+    item = next(r for r in response.json() if r["id"] == request_id)
+    assert item["driver_name"] == "Test D."
+    assert item["vehicle_plate"] == "EKM-TEST-001"
+
+
+def test_my_rides_has_no_driver_details_before_assignment(client):
+    passenger_headers = login(
+        client, "08000000001", "Passenger-Test-Password-1!"
+    )
+    created = client.post(
+        "/api/v1/ride-requests",
+        json={
+            "origin_zone_id": 1,
+            "destination_zone_id": 2,
+            "origin_text": "Central Market gate",
+            "destination_text": "North Estate entrance",
+            "vehicle_type": "standard",
+            "passenger_count": 1,
+        },
+        headers=passenger_headers,
+    )
+    assert created.status_code in (200, 201), created.text
+
+    item = next(
+        r
+        for r in client.get(
+            "/api/v1/ride-requests/my-rides", headers=passenger_headers
+        ).json()
+        if r["id"] == created.json()["id"]
+    )
+    assert item["driver_name"] is None
+    assert item["vehicle_plate"] is None

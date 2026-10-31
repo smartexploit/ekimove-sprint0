@@ -1,10 +1,14 @@
-﻿import { useCallback, useState } from 'react'
-import AppPage from '../../layouts/AppPage.jsx'
+﻿import { useCallback, useEffect, useState } from 'react'
+import { RefreshCw, Wallet } from 'lucide-react'
+import AdminShell from '../../layouts/AdminShell.jsx'
+import Alert from '../../components/ui/Alert.jsx'
+import StatusBadge from '../../components/ui/StatusBadge.jsx'
 import { apiRequest } from '../../services/authService.js'
+import { formatDateTime, formatNaira } from '../../utils/format.js'
 
 export default function AdminPaymentsPage() {
   const [payments, setPayments] = useState([])
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [reasons, setReasons] = useState({})
@@ -17,7 +21,7 @@ export default function AdminPaymentsPage() {
     setError('')
     try {
       const result = await apiRequest('/api/v1/admin/payments/pending')
-      setPayments(result)
+      setPayments(Array.isArray(result) ? result : [])
     } catch (err) {
       setError(err.message || 'Could not load pending payments.')
     } finally {
@@ -25,7 +29,15 @@ export default function AdminPaymentsPage() {
     }
   }, [])
 
-
+  useEffect(() => {
+    let cancelled = false
+    Promise.resolve().then(() => {
+      if (!cancelled) loadPayments()
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [loadPayments])
 
   async function reconcile(payment, decision) {
     const reason = (reasons[payment.id] || '').trim()
@@ -36,7 +48,6 @@ export default function AdminPaymentsPage() {
     }
 
     if (decision === 'reject') {
-      setConfirmingId(null)
       setVerified((current) => ({ ...current, [payment.id]: false }))
       setConfirmingId(null)
     }
@@ -44,7 +55,7 @@ export default function AdminPaymentsPage() {
     if (decision === 'confirm' && !verified[payment.id]) {
       setConfirmingId(payment.id)
       setError(
-        'Before confirming, independently verify the transfer and check the verification box.'
+        'Before confirming, independently verify the transfer and tick the verification box.',
       )
       return
     }
@@ -74,58 +85,72 @@ export default function AdminPaymentsPage() {
   }
 
   return (
-    <AppPage
-      title="Payment Reconciliation"
-      description="Review bank-transfer references and reconcile payments only after independent verification."
+    <AdminShell
+      title="Payment reconciliation"
+      description="Confirm bank-transfer payments only after checking the money has actually arrived."
+      actions={
+        <button type="button" className="btn btn-sm" onClick={() => loadPayments()} disabled={loading}>
+          <RefreshCw size={16} aria-hidden="true" /> {loading ? 'Loading…' : 'Refresh'}
+        </button>
+      }
     >
-      <div className="app-panel">
-        <p>
-          <strong>Bank transfer only.</strong> A transfer reference or screenshot
-          does not prove that funds have been received. Verify the actual
-          transaction independently before confirming.
-        </p>
-
-        <div className="app-page-actions">
-          <button type="button" onClick={() => { loadPayments() }} disabled={loading}>
-            {loading ? 'Loading…' : 'Refresh payments'}
-          </button>
-        </div>
-
-        {error && <p role="alert">{error}</p>}
-        {notice && <p role="status">{notice}</p>}
+      <div className="stack">
+        <Alert tone="warning">
+          A transfer reference or screenshot doesn't prove funds were received.
+          Check the actual transaction in the bank account before confirming.
+        </Alert>
+        <Alert tone="error">{error}</Alert>
+        <Alert tone="success">{notice}</Alert>
 
         {loading ? (
-          <p>Loading pending payments…</p>
+          <div className="loading-block" role="status">
+            <span className="spinner" aria-hidden="true" /> Loading pending payments…
+          </div>
         ) : payments.length === 0 ? (
-          <p>No payments are awaiting confirmation.</p>
+          <div className="card empty">
+            <span className="empty-icon"><Wallet size={28} aria-hidden="true" /></span>
+            <h2>Nothing to reconcile</h2>
+            <p className="muted">No payments are waiting for confirmation.</p>
+          </div>
         ) : (
-          <div className="app-list">
+          <div className="grid grid-auto" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))' }}>
             {payments.map((payment) => (
-              <section className="app-panel" key={payment.id}>
-                <h3>Payment #{payment.id}</h3>
-                <p><strong>Ride:</strong> #{payment.ride_id}</p>
-                <p><strong>Amount:</strong> ₦{Number(payment.amount).toLocaleString('en-NG', { minimumFractionDigits: 2 })}</p>
-                <p><strong>Method:</strong> Bank transfer</p>
-                <p><strong>Reference:</strong> {payment.transfer_reference || 'Not supplied'}</p>
-                <p><strong>Status:</strong> {payment.status}</p>
-                <p><strong>Submitted:</strong> {payment.created_at ? new Date(payment.created_at).toLocaleString() : 'Unavailable'}</p>
+              <section className="card stack" key={payment.id} aria-labelledby={`payment-${payment.id}`}>
+                <div className="row row-between">
+                  <h2 id={`payment-${payment.id}`} className="card-title">
+                    Payment #{payment.id}
+                  </h2>
+                  <StatusBadge status={payment.status} kind="payment" />
+                </div>
+                <p className="money" style={{ fontSize: 28, color: 'var(--green-800)' }}>
+                  {formatNaira(payment.amount)}
+                </p>
+                <dl className="rows">
+                  <div><dt>Ride</dt><dd>#{payment.ride_id}</dd></div>
+                  <div><dt>Method</dt><dd>Bank transfer</dd></div>
+                  <div><dt>Reference</dt><dd>{payment.transfer_reference || 'Not supplied'}</dd></div>
+                  <div><dt>Submitted</dt><dd>{payment.created_at ? formatDateTime(payment.created_at) : 'Unavailable'}</dd></div>
+                </dl>
 
-                <label htmlFor={`reason-${payment.id}`}>Reconciliation reason</label>
-                <textarea
-                  id={`reason-${payment.id}`}
-                  rows={3}
-                  value={reasons[payment.id] || ''}
-                  onChange={(event) =>
-                    setReasons((current) => ({
-                      ...current,
-                      [payment.id]: event.target.value,
-                    }))
-                  }
-                  placeholder="Record the verification result or rejection reason"
-                />
+                <label className="field" htmlFor={`reason-${payment.id}`}>
+                  <span className="field-label">Reconciliation note</span>
+                  <textarea
+                    id={`reason-${payment.id}`}
+                    className="textarea"
+                    rows={3}
+                    value={reasons[payment.id] || ''}
+                    onChange={(event) =>
+                      setReasons((current) => ({
+                        ...current,
+                        [payment.id]: event.target.value,
+                      }))
+                    }
+                    placeholder="What you checked, or why you're rejecting it"
+                  />
+                </label>
 
                 {confirmingId === payment.id && (
-                  <label>
+                  <label className="check-row">
                     <input
                       type="checkbox"
                       checked={Boolean(verified[payment.id])}
@@ -136,13 +161,14 @@ export default function AdminPaymentsPage() {
                         }))
                       }
                     />
-                    {' '}I independently verified the actual transfer in the bank account or trusted provider.
+                    I independently verified this transfer in the bank account or with a trusted provider.
                   </label>
                 )}
 
-                <div className="app-page-actions">
+                <div className="row">
                   <button
                     type="button"
+                    className="btn btn-primary btn-sm"
                     disabled={busyId !== null}
                     onClick={() => reconcile(payment, 'confirm')}
                   >
@@ -150,10 +176,11 @@ export default function AdminPaymentsPage() {
                   </button>
                   <button
                     type="button"
+                    className="btn btn-danger-outline btn-sm"
                     disabled={busyId !== null}
                     onClick={() => reconcile(payment, 'reject')}
                   >
-                    Reject payment
+                    Reject
                   </button>
                 </div>
               </section>
@@ -161,6 +188,6 @@ export default function AdminPaymentsPage() {
           </div>
         )}
       </div>
-    </AppPage>
+    </AdminShell>
   )
 }

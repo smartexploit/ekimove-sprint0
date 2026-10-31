@@ -1,4 +1,4 @@
-﻿import { Navigate, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes } from 'react-router-dom'
 import HomePage from './pages/public/HomePage.jsx'
 import LoginPage from './pages/auth/LoginPage.jsx'
 import RegisterPage from './pages/auth/RegisterPage.jsx'
@@ -13,7 +13,8 @@ import DriverTripsPage from './pages/driver/DriverTripsPage.jsx'
 import ProtectedRoute from './routes/ProtectedRoute.jsx'
 import AdminDriverVerificationPage from './pages/admin/AdminDriverVerificationPage.jsx'
 import AdminPaymentsPage from './pages/admin/AdminPaymentsPage.jsx'
-import AdminIncidentsPage from './pages/admin/AdminIncidentsPage.jsx'
+import AdminIncidentsPage from './pages/admin/AdminIncidentsPage.jsx'
+
 import AdminLocationsPage from './pages/admin/AdminLocationsPage.jsx'
 
 export default function App() {
@@ -25,22 +26,19 @@ export default function App() {
       <Route path="/driver/apply" element={<DriverApplicationPage />} />
 
       <Route element={<ProtectedRoute />}>
-  <Route path="/dashboard" element={<DashboardPage />} />
-  <Route path="/book-ride" element={<BookRidePage />} />
-  <Route path="/my-rides" element={<MyRidesPage />} />
-  <Route path="/payments" element={<PaymentsPage />} />
-</Route>
+        <Route path="/dashboard" element={<DashboardPage />} />
+        <Route path="/book-ride" element={<BookRidePage />} />
+        <Route path="/my-rides" element={<MyRidesPage />} />
+        <Route path="/payments" element={<PaymentsPage />} />
+      </Route>
 
-<Route element={<ProtectedRoute requiredRole="super_admin" />}>
-  <Route path="/admin/dispatch" element={<AdminDispatchPage />} />
-  <Route path="/admin/payments" element={<AdminPaymentsPage />} />
-  <Route path="/admin/incidents" element={<AdminIncidentsPage />} />
+      <Route element={<ProtectedRoute requiredRole="super_admin" />}>
+        <Route path="/admin/dispatch" element={<AdminDispatchPage />} />
+        <Route path="/admin/payments" element={<AdminPaymentsPage />} />
+        <Route path="/admin/incidents" element={<AdminIncidentsPage />} />
         <Route path="/admin/locations" element={<AdminLocationsPage />} />
-  <Route
-    path="/admin/drivers"
-    element={<AdminDriverVerificationPage />}
-  />
-</Route>
+        <Route path="/admin/drivers" element={<AdminDriverVerificationPage />} />
+      </Route>
 
       <Route element={<ProtectedRoute requiredRole="driver" />}>
         <Route path="/driver/status" element={<DriverStatusPage />} />

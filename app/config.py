@@ -35,6 +35,31 @@ class Settings(BaseSettings):
         cleaned = str(value).strip()
         return cleaned or None
 
+    # Business details shown to passengers. Leave blank until confirmed;
+    # the app shows "not yet available" instead of placeholder values.
+    bank_transfer_bank_name: str | None = None
+    bank_transfer_account_number: str | None = None
+    bank_transfer_account_name: str | None = None
+    support_phone: str | None = None
+    support_email: str | None = None
+    support_whatsapp: str | None = None
+
+    @field_validator(
+        "bank_transfer_bank_name",
+        "bank_transfer_account_number",
+        "bank_transfer_account_name",
+        "support_phone",
+        "support_email",
+        "support_whatsapp",
+        mode="before",
+    )
+    @classmethod
+    def clean_business_detail(cls, value):
+        if value is None:
+            return None
+        cleaned = str(value).strip()
+        return cleaned or None
+
     # Interswitch Web Checkout. TEST is the safe default.
     interswitch_merchant_code: str | None = None
     interswitch_pay_item_id: str | None = None
