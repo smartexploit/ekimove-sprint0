@@ -2351,15 +2351,20 @@ button:disabled {
   text-decoration: underline;
 }
 
-/* Keep the floating Atọ́nà assistant clear of the phone tab bar and the
-   booking page's fare bar. */
+/* Room under the last card for the floating Atọ́nà button. */
+.app-main {
+  padding-bottom: 104px;
+}
+
+/* Keep the floating Atọ́nà button clear of the phone tab bar, and leave
+   room under the last card so it never hides the end of a page. */
 @media (max-width: 760px) {
   .app .atona-widget {
-    bottom: 92px;
+    bottom: calc(84px + env(safe-area-inset-bottom));
   }
 
-  .app.has-bottom-bar .atona-widget {
-    bottom: 192px;
+  .app-main {
+    padding-bottom: calc(176px + env(safe-area-inset-bottom));
   }
 }
 
@@ -2473,18 +2478,7 @@ button:disabled {
   }
 }
 
-.atona-header-btn {
-  background: var(--green-50);
-  color: var(--green-800);
-  box-shadow: inset 0 0 0 1.5px var(--green-200);
-}
-
 @media (max-width: 760px) {
-  /* Atọ́nà opens from the header icon instead of a floating button. */
-  .atona-widget-header-launch .atona-launcher {
-    display: none;
-  }
-
   /* The booking fare bar sits after the ride options rather than pinned
      over them. */
   .bottom-bar {

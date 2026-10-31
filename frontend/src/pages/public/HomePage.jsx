@@ -404,7 +404,7 @@ export default function HomePage() {
       </main>
 
       <PublicFooter />
-      <AtonaFloatingAssistant headerLaunch />
+      <AtonaFloatingAssistant />
     </div>
   )
 }

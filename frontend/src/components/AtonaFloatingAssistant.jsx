@@ -4,6 +4,7 @@ import { ArrowRight, RotateCcw, Send, Sparkles, X } from 'lucide-react'
 import { LogoMark } from './brand/Logo.jsx'
 import FormattedText from './atona/FormattedText.jsx'
 import useAtonaStatus from '../hooks/useAtonaStatus.js'
+import useLauncherPosition from '../hooks/useLauncherPosition.js'
 import { apiRequest, getAccessToken, getStoredUser } from '../services/authService.js'
 import { firstName, formatNaira } from '../utils/format.js'
 import { OPEN_ATONA_EVENT } from '../utils/atona.js'
@@ -77,7 +78,7 @@ function TripCard({ draft, onUse }) {
  * `onApplyBooking` fills the current booking form; otherwise it navigates
  * to Book a ride with the trip prefilled.
  */
-export default function AtonaFloatingAssistant({ onApplyBooking, headerLaunch = false }) {
+export default function AtonaFloatingAssistant({ onApplyBooking }) {
   const available = useAtonaStatus()
   const navigate = useNavigate()
   const location = useLocation()
@@ -91,10 +92,12 @@ export default function AtonaFloatingAssistant({ onApplyBooking, headerLaunch = 
   const inputRef = useRef(null)
   const messagesRef = useRef(null)
   const panelRef = useRef(null)
+  const widgetRef = useRef(null)
   const wasOpenRef = useRef(false)
   const openerRef = useRef(null)
   const panelId = useId()
   const viewer = viewerProfile()
+  const placement = useLauncherPosition(widgetRef, open)
 
   // Header buttons (used on phones) open the chat through an event.
   useEffect(() => {
@@ -269,7 +272,13 @@ export default function AtonaFloatingAssistant({ onApplyBooking, headerLaunch = 
   }
 
   return (
-    <div className={`atona-widget ${headerLaunch ? 'atona-widget-header-launch' : ''}`.trim()}>
+    <div
+      ref={widgetRef}
+      className={['atona-widget', open && 'is-open', placement.hidden && 'is-hidden', placement.dragging && 'is-dragging',
+        placement.tucked && `is-tucked is-tucked-${placement.tucked}`]
+        .filter(Boolean).join(' ')}
+      style={placement.style}
+    >
       {open && (
         <section
           className="atona-panel"
@@ -394,6 +403,8 @@ export default function AtonaFloatingAssistant({ onApplyBooking, headerLaunch = 
           ref={launcherRef}
           type="button"
           className="atona-launcher"
+          title="Ask Atọ́nà (you can drag this button)"
+          {...placement.handlers}
           onClick={() => {
             openerRef.current = launcherRef.current
             setOpen(true)

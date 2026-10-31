@@ -3,8 +3,39 @@
   position: fixed;
   right: 24px;
   bottom: 24px;
-  z-index: 1000;
+  /* Above the page and tab bar, below dialogs (sign-out warning, policies). */
+  z-index: 150;
   font-family: var(--font-text, system-ui, sans-serif);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.atona-widget.is-open {
+  z-index: 1000;
+}
+
+/* Out of the way while someone types in a form field. */
+.atona-widget.is-hidden {
+  opacity: 0;
+  transform: scale(0.85);
+  pointer-events: none;
+}
+
+.atona-widget.is-dragging {
+  transition: none;
+}
+
+/* When both sides would cover a control, the button tucks into the screen
+   edge, leaving a small tab that still opens the chat. */
+.atona-widget.is-tucked-right {
+  transform: translateX(54px);
+}
+
+.atona-widget.is-tucked-left {
+  transform: translateX(-54px);
+}
+
+.atona-widget.is-tucked .atona-launcher {
+  opacity: 0.92;
 }
 
 .atona-launcher {
@@ -402,19 +433,33 @@
   text-align: center;
 }
 
-@media (max-width: 600px) {
+@media (max-width: 760px) {
   .atona-widget {
     right: 14px;
-    bottom: 16px;
+    bottom: calc(16px + env(safe-area-inset-bottom));
   }
 
-  /* A compact round button on phones so it doesn't cover content. */
+  /* A compact round button on phones and small tablets: it floats over
+     the page, can be dragged up or down either edge, and snaps to a side. */
   .atona-launcher {
     width: 56px;
     min-height: 56px;
     padding: 0;
     justify-content: center;
     box-shadow: 0 10px 28px rgba(4, 30, 22, 0.32), 0 0 0 3px #fff;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+
+  .atona-launcher:hover {
+    transform: none;
+  }
+
+  .is-dragging .atona-launcher {
+    cursor: grabbing;
+    box-shadow: 0 16px 36px rgba(4, 30, 22, 0.4), 0 0 0 3px #fff;
   }
 
   .atona-launcher svg {
@@ -430,7 +475,9 @@
     clip: rect(0, 0, 0, 0);
     white-space: nowrap;
   }
+}
 
+@media (max-width: 600px) {
   .atona-panel {
     position: fixed;
     inset: 0;

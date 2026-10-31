@@ -12,7 +12,6 @@ import useSupportUnread from '../hooks/useSupportUnread.js'
 import OfferWatcher from '../components/driver/OfferWatcher.jsx'
 import Logo from '../components/brand/Logo.jsx'
 import AtonaFloatingAssistant from '../components/AtonaFloatingAssistant.jsx'
-import AtonaHeaderButton from '../components/atona/AtonaHeaderButton.jsx'
 import { logoutPassenger } from '../services/authService.js'
 import { firstName, initials } from '../utils/format.js'
 import { homePathForRole } from '../utils/roles.js'
@@ -82,7 +81,6 @@ export default function AppShell({
           </nav>
 
           <div className="app-user">
-            <AtonaHeaderButton className="tabbar-only" />
             <Link to="/profile" className="avatar avatar-link" aria-label={`Your profile (${user?.full_name || 'signed in'})`}>
               {initials(user?.full_name)}
             </Link>
@@ -121,7 +119,7 @@ export default function AppShell({
         </div>
       </main>
 
-      <AtonaFloatingAssistant onApplyBooking={onApplyBooking} headerLaunch />
+      <AtonaFloatingAssistant onApplyBooking={onApplyBooking} />
 
       <nav className="tabbar" aria-label="App">
         {items.map(([to, label, Icon]) => (

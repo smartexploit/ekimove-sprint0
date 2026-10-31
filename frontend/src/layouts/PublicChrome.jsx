@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom'
 import { Menu, X } from 'lucide-react'
 import Logo from '../components/brand/Logo.jsx'
 import SupportContacts from '../components/SupportContacts.jsx'
-import AtonaHeaderButton from '../components/atona/AtonaHeaderButton.jsx'
 import { getAccessToken, getStoredUser } from '../services/authService.js'
 import { homePathForRole } from '../utils/roles.js'
 
@@ -27,7 +26,6 @@ export function PublicHeader({ dark = false }) {
         <Logo reversed={dark} onClick={close} />
 
         <div className="site-nav-phone">
-          <AtonaHeaderButton className="tabbar-only" />
           <button
             type="button"
             className="icon-btn menu-toggle"

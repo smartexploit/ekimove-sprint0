@@ -184,7 +184,7 @@ People turn notifications on from *Profile* (drivers also on *My driver status*,
 - **Backups:** Render's paid Postgres plans take daily backups with point-in-time recovery; free databases have no backups and expire, so move to a paid database before real money flows. Before big changes, download a backup from the database's *Recovery* page.
 
 ## Atọ́nà assistant
-Atọ́nà is EkiMove's chat guide, available to everyone on the homepage and on every passenger and driver screen. It chats naturally in English or Nigerian Pidgin, and answers EkiMove questions from live data through tools instead of guessing:
+Atọ́nà is EkiMove's chat guide, available to everyone on the homepage and on every passenger and driver screen. It opens from a floating button: a pill in the corner on laptops, and a round button above the tab bar on phones and small tablets. On phones the button can be dragged up or down either edge (it snaps to the nearest side and remembers the spot), hides while someone types in a form, and steps aside, to the other side or tucked into the screen edge, when it would cover a small control such as a password eye icon. It chats naturally in English or Nigerian Pidgin, and answers EkiMove questions from live data through tools instead of guessing:
 
 - **Places and fares:** quotes the approved fare for an exact route and shows a "Trip ready" card that opens Book a ride prefilled.
 - **Your rides:** a passenger's latest rides with status, driver and plate; a driver's trips and approval status. Guests are asked to sign in, with buttons in the chat.
