@@ -9,6 +9,8 @@ from app.cancellations import router as cancellations_router
 from app.accounts import router as accounts_router
 from app.support import router as support_router
 from app.haulage import router as haulage_router
+from app.verification import client_fingerprint, ensure_passenger_may_book, record_policy_acceptance, router as verification_router
+from app.trips import check_pickup_pin, my_rating, passenger_verified, rating_summary, router as trips_router, short_name as trip_short_name
 from app.dispatch import advance_dispatch, assign_driver, dispatch_summary, router as dispatch_router, withdraw_offers
 from app.app_settings import booking_rules, is_motorcycle, max_passengers, quote_amount, router as app_settings_router, seats_needed
 from app.earnings import record_trip_earning, ride_earning_preview, router as earnings_router
@@ -62,6 +64,8 @@ app.include_router(accounts_router)
 app.include_router(support_router)
 app.include_router(haulage_router)
 app.include_router(dispatch_router)
+app.include_router(trips_router)
+app.include_router(verification_router)
 
 class LoginRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
@@ -76,6 +80,8 @@ class RegisterRequest(BaseModel):
     phone: str = Field(min_length=7, max_length=32)
     full_name: str = Field(min_length=2, max_length=160)
     password: str = Field(min_length=12, max_length=256)
+    # The app sends true after the person ticks "I agree" to EkiMove's policies.
+    accept_policies: bool | None = None
 
 
 class TokenResponse(BaseModel):
@@ -116,6 +122,8 @@ class RideStatusUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     status: Literal["driver_arriving", "in_progress", "completed"]
+    # Required to start a trip: the 4-digit PIN shown in the passenger's app.
+    pickup_pin: str | None = Field(default=None, max_length=8)
 
 
 class SOSReport(BaseModel):
@@ -551,6 +559,7 @@ def business_info() -> dict[str, object]:
 )
 def register(
     payload: RegisterRequest,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> AuthenticatedResponse:
     """Create a passenger account and return an access token."""
@@ -588,6 +597,9 @@ def register(
 
     try:
         db.add(user)
+        db.flush()
+        if payload.accept_policies:
+            record_policy_acceptance(db, user, request)
         db.commit()
         db.refresh(user)
     except IntegrityError:
@@ -695,6 +707,10 @@ def login(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    # Sign-in log for traceability (time, IP address and device).
+    db.add(AuditLog(actor_user_id=user.id, action="auth.login", entity_type="user",
+                    entity_id=str(user.id), details=client_fingerprint(request)))
+    db.commit()
     token = create_access_token(user)
     return TokenResponse(
         access_token=token,
@@ -937,7 +953,13 @@ def list_my_ride_requests(
             )
             payment = db.scalar(select(Payment).where(Payment.ride_id == ride_id))
             ride = db.get(Ride, ride_id)
+            if ride.vehicle_id:
+                vehicle = db.get(Vehicle, ride.vehicle_id)
             assigned_rides[request_id] = {
+                "pickup_pin": ride.pickup_pin if ride.status in ("assigned", "driver_arriving") else None,
+                "my_rating": my_rating(db, ride.id, current_user.id),
+                "share_active": bool(ride.share_token),
+                "driver_rating": rating_summary(db, db.get(Driver, driver_id).user_id),
                 "payment_status": payment.status if payment else None,
                 "refund_status": payment.refund_status if payment else None,
                 "refund_amount": (
@@ -998,6 +1020,10 @@ def list_my_ride_requests(
                     "refund_status",
                     "refund_amount",
                     "cancellation_fee",
+                    "pickup_pin",
+                    "my_rating",
+                    "share_active",
+                    "driver_rating",
                 )
             },
         }
@@ -1034,6 +1060,7 @@ def create_ride_request(
             status_code=403,
             detail="Only passenger accounts can create ride requests",
         )
+    ensure_passenger_may_book(db, current_user)
 
     use_places = (
         payload.origin_place_id is not None
@@ -1366,6 +1393,12 @@ def list_driver_rides(
         .where(Driver.user_id == current_user.id)
         .order_by(Ride.id.desc())
     ).all()
+    passengers = {
+        user.id: user
+        for user in db.scalars(
+            select(User).where(User.id.in_({request.passenger_user_id for _, request in rows}))
+        ).all()
+    } if rows else {}
 
     return [
         {
@@ -1380,6 +1413,17 @@ def list_driver_rides(
             "passenger_count": request.passenger_count,
             "created_at": request.created_at.isoformat() if request.created_at else None,
             "earning": ride_earning_preview(db, ride),
+            "passenger_name": trip_short_name(
+                passengers[request.passenger_user_id].full_name
+                if request.passenger_user_id in passengers else None
+            ),
+            "passenger_verified": passenger_verified(db, request.passenger_user_id),
+            # Trips created before pickup PINs existed start without one.
+            "pin_required": bool(ride.pickup_pin),
+            "passenger_rating": rating_summary(db, request.passenger_user_id),
+            "my_rating": my_rating(db, ride.id, current_user.id),
+            "service_type": request.service_type,
+            "load_description": request.load_description,
         }
         for ride, request in rows
     ]
@@ -1445,12 +1489,17 @@ def update_driver_ride_status(
                 ),
             )
 
+    if payload.status == "in_progress":
+        check_pickup_pin(db, ride, payload.pickup_pin, current_user.id)
+
     previous_status = ride.status
     now = datetime.now(timezone.utc)
 
     ride.status = payload.status
 
-    if payload.status == "in_progress":
+    if payload.status == "driver_arriving":
+        ride.arrived_at = now
+    elif payload.status == "in_progress":
         ride.started_at = now
     elif payload.status == "completed":
         ride.completed_at = now

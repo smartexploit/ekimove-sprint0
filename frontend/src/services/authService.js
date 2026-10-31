@@ -1,4 +1,4 @@
-﻿const TOKEN_KEY = 'ekimove_access_token'
+const TOKEN_KEY = 'ekimove_access_token'
 const USER_KEY = 'ekimove_user'
 const API_BASE_URL = (
   import.meta.env.VITE_API_BASE_URL || ''
@@ -48,7 +48,8 @@ export async function apiRequest(path, options = {}) {
     headers.Authorization = `Bearer ${token}`
   }
 
-  if (options.body && !headers['Content-Type']) {
+  // Let the browser set the multipart boundary for file uploads.
+  if (options.body && !(options.body instanceof FormData) && !headers['Content-Type']) {
     headers['Content-Type'] = 'application/json'
   }
 
@@ -96,11 +97,12 @@ export async function getPaymentPolicy() {
   return apiRequest('/api/v1/policy/payments')
 }
 
-export async function registerPassenger({ phone, full_name, password }) {
+export async function registerPassenger({ phone, full_name, password, accept_policies = false }) {
   const data = await requestAuth('register', {
     phone: phone.trim(),
     full_name: full_name.trim(),
     password,
+    accept_policies,
   })
 
   saveSession(data.access_token, data.user)
@@ -166,4 +168,15 @@ export function tokenSecondsLeft() {
   } catch {
     return 0
   }
+}
+
+/** Fetch a protected image (e.g. an ID photo) and return an object URL. */
+export async function fetchImageUrl(path) {
+  const response = await fetch(apiUrl(path), {
+    headers: { Authorization: `Bearer ${getAccessToken()}` },
+  })
+  if (!response.ok) throw new Error('Could not load the image.')
+  const blob = await response.blob()
+  if (!blob.type.startsWith('image/')) throw new Error('The server did not return an image.')
+  return URL.createObjectURL(blob)
 }

@@ -3324,3 +3324,240 @@ button:disabled {
   bottom: 26px;
   left: 20px;
 }
+
+/* Maps */
+.live-map {
+  position: relative;
+  /* Keep Leaflet's own z-indexes (400+) inside the map so it can never
+     cover the app header or tab bar. */
+  isolation: isolate;
+  z-index: 0;
+  width: 100%;
+  border-radius: 16px;
+  overflow: hidden;
+  background: #dfe7e2;
+}
+
+.map-pin {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 3px solid var(--white);
+  box-shadow: 0 2px 8px rgba(16, 32, 26, 0.35);
+  color: var(--white);
+  font: 800 11px/1 var(--font-text);
+}
+
+.map-pin-driver { background: var(--green-600, #2e8b63); }
+.map-pin-busy { background: var(--laterite-600); }
+.map-pin-offered { background: var(--gold-500); color: var(--ink); }
+.map-pin-stale { background: #8a978f; }
+.map-pin-pickup { background: var(--green-800); border-radius: 50% 50% 50% 4px; }
+.map-pin-destination { background: var(--laterite-700); border-radius: 4px; }
+
+.leaflet-container {
+  font-family: var(--font-text);
+}
+
+/* Passenger trip tracker */
+.tracker {
+  display: grid;
+  gap: 10px;
+}
+
+.pin-box {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--gold-500);
+  color: var(--ink);
+}
+
+.pin-label {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.pin-code {
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: 0.3em;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.pin-hint {
+  grid-column: 1 / -1;
+  margin-top: 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tracker-eta {
+  font-weight: 800;
+}
+
+.tracker-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--green-200);
+  font-size: 13px;
+}
+
+/* Ratings */
+.rate-trip {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.stars {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.stars legend {
+  float: left;
+  margin-right: 8px;
+}
+
+.star {
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  color: #b9c4bd;
+  cursor: pointer;
+}
+
+.star.is-on {
+  color: var(--gold-500);
+}
+
+.star:focus-within {
+  outline: 3px solid var(--green-800);
+  border-radius: 8px;
+}
+
+.rating-done {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 6px;
+  color: var(--gold-700, #a46d00);
+}
+
+.rating-done span {
+  margin-left: 6px;
+  color: var(--ink-500);
+}
+
+/* Receipts */
+.receipt {
+  display: grid;
+  gap: 12px;
+}
+
+.receipt-amount {
+  font-family: var(--font-display);
+  font-size: 36px;
+  font-weight: 800;
+  color: var(--green-800);
+}
+
+@media print {
+  .app-topbar,
+  .tabbar,
+  .no-print,
+  .page-head,
+  .atona-widget,
+  .offline-banner,
+  .session-warning {
+    display: none !important;
+  }
+
+  .app-main {
+    padding: 0 !important;
+  }
+
+  .receipt {
+    box-shadow: none;
+    border: 1px solid #ccc;
+  }
+}
+
+.share-page {
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--mist, #f2f5f1);
+}
+
+.map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.map-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.map-legend .map-pin {
+  width: 16px;
+  height: 16px;
+  border-width: 2px;
+}
+
+.id-photo {
+  max-width: 100%;
+  max-height: 320px;
+  border-radius: 12px;
+  object-fit: contain;
+  background: #eef1ef;
+}
+
+.trail-viewer {
+  padding: 12px;
+  border-radius: 14px;
+  background: var(--green-50);
+}
+
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--green-800);
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+a.chip {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+/* Comfortable tap targets for map zoom buttons on phones. */
+.live-map .leaflet-bar.leaflet-control-zoom a,
+.leaflet-touch .live-map .leaflet-bar.leaflet-control-zoom a {
+  width: 44px;
+  height: 44px;
+  line-height: 44px;
+  font-size: 22px;
+}

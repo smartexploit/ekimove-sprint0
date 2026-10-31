@@ -37,6 +37,7 @@ DEFAULTS = {
     "auto_dispatch_enabled": "true",
     "dispatch_offer_seconds": "30",
     "dispatch_max_offers": "5",
+    "require_verified_passengers": "false",
 }
 
 
@@ -59,6 +60,7 @@ def booking_rules(db: Session) -> dict:
         "motorcycle_second_passenger_enabled": second,
         "motorcycle_second_passenger_fee": fee,
         "max_passengers": {"motorcycle": 2 if second else 1, **PASSENGER_LIMITS},
+        "require_verified_passengers": _get(db, "require_verified_passengers") == "true",
         "haulage_vehicle_types": [{"value": k, "label": v} for k, v in HAULAGE_TYPES.items()],
     }
 
@@ -101,6 +103,7 @@ class SettingsUpdate(BaseModel):
     auto_dispatch_enabled: bool | None = None
     dispatch_offer_seconds: int | None = Field(default=None, ge=15, le=120)
     dispatch_max_offers: int | None = Field(default=None, ge=1, le=20)
+    require_verified_passengers: bool | None = None
 
 
 def all_settings(db: Session) -> dict:
@@ -131,6 +134,8 @@ def admin_update_settings(
         changes["dispatch_offer_seconds"] = str(payload.dispatch_offer_seconds)
     if payload.dispatch_max_offers is not None:
         changes["dispatch_max_offers"] = str(payload.dispatch_max_offers)
+    if payload.require_verified_passengers is not None:
+        changes["require_verified_passengers"] = "true" if payload.require_verified_passengers else "false"
     if not changes:
         raise HTTPException(status_code=422, detail="Nothing to change.")
     for key, value in changes.items():

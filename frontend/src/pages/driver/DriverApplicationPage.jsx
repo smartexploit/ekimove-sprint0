@@ -162,6 +162,19 @@ export default function DriverApplicationPage() {
 
         <Alert tone="error">{error}</Alert>
 
+        <label className="check-row">
+          <input type="checkbox" name="accept_policies" value="true" required />
+          <span>
+            I agree to EkiMove’s{' '}
+            <Link className="text-link" to="/policies/driver" target="_blank" rel="noreferrer">Driver Agreement</Link>,{' '}
+            <Link className="text-link" to="/policies/terms" target="_blank" rel="noreferrer">Terms</Link>,{' '}
+            <Link className="text-link" to="/policies/privacy" target="_blank" rel="noreferrer">Privacy Policy</Link>{' '}
+            and{' '}
+            <Link className="text-link" to="/policies/community" target="_blank" rel="noreferrer">Safety Guidelines</Link>,
+            including sharing my location while I’m online.
+          </span>
+        </label>
+
         <button className="btn btn-accent btn-lg btn-block" type="submit" disabled={loading}>
           {loading ? 'Submitting your application…' : 'Submit application'}
         </button>

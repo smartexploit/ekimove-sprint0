@@ -13,7 +13,8 @@ import { formatNaira } from '../../utils/format.js'
 import { vehicleLabel } from '../../utils/vehicles.js'
 
 const POLL_MS = 3000
-const LOCATION_EVERY_MS = 30000
+// Often enough for passengers to watch the driver approach on the map.
+const LOCATION_EVERY_MS = 10000
 
 function beep() {
   try {

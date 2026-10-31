@@ -4,6 +4,7 @@ import { LogoMark } from '../components/brand/Logo.jsx'
 import { getCurrentUser, getAccessToken, logoutPassenger } from '../services/authService.js'
 import { homePathForRole } from '../utils/roles.js'
 import SessionTimeout from '../components/SessionTimeout.jsx'
+import PolicyGate from '../components/PolicyGate.jsx'
 
 export default function ProtectedRoute({ requiredRole = 'passenger' }) {
   const location = useLocation()
@@ -74,6 +75,7 @@ export default function ProtectedRoute({ requiredRole = 'passenger' }) {
   return (
     <>
       <SessionTimeout />
+      <PolicyGate role={state.user.role} />
       <Outlet context={{ user: state.user }} />
     </>
   )

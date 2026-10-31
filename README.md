@@ -125,6 +125,16 @@ New requests (and accepted load quotes) are offered to one driver at a time:
 - **No extra server needed:** the engine runs whenever drivers, passengers or admins have the app open (their pages check every few seconds). The database allows only one live offer per request and per driver. Optionally, a Render Cron Job every minute can call `POST /api/v1/internal/dispatch/run` with the same `X-Cron-Token` header as the payout job.
 - Drivers share location only while online, and only if they allow it on their phone.
 
+## Trust and safety
+- **Pickup PIN:** every assigned trip gets a 4-digit PIN shown only in the passenger's app. The driver must enter it to start the trip; 5 wrong tries lock the trip (contact support). Trips from before PINs existed start without one.
+- **Live tracking:** while online, drivers' phones share location every ~10 s (with permission). Passengers see the driver approaching on a map with distance and an estimated arrival time, then the route during the trip. Maps use OpenStreetMap tiles, or Geoapify's when `GEOAPIFY_API_KEY` is set (recommended for production traffic).
+- **Trip sharing:** passengers can share a live link (`/t/…`) with someone they trust, or text it to their emergency contact. No sign-in needed; it never shows the PIN and stops working 2 hours after the trip ends or when sharing is stopped.
+- **Traceability:** each trip records the exact vehicle, arrival/start/end times and the driver's GPS trail. Every sign-in is logged with time, IP address and device. Admins see all of this per person under *People* (“Trip record”, “Recent sign-ins”), and online drivers on *Live map*.
+- **Ratings and receipts:** passengers and drivers rate each other after a completed trip; averages show on profiles and to the other side. Every ended trip has a printable receipt with a “Report a problem” link.
+- **Passenger ID verification:** passengers can submit a NIN, voter's card, driver's licence or passport with a photo (stored privately in Cloudinary, so `CLOUDINARY_URL` must be set). Admins approve or reject under *People → ID to review*. Drivers see a “ID verified” badge. *Places & fares → Booking rules* can require verification before booking.
+- **Emergency contact:** set on the profile; used for one-tap trip sharing.
+- **Policies:** Terms of Service, Privacy Policy (Nigeria Data Protection Act 2023), Community & Safety Guidelines, Cancellation & Refund Policy and Driver Agreement at `/policies`. New users agree at sign-up; existing users are asked once. Acceptance is stored with time, IP and device. To publish a new version, update the text in `frontend/src/utils/policies.js` and bump `POLICY_VERSION` there **and** in `app/verification.py`; everyone is asked to accept again. Have a Nigerian lawyer review the policies before relying on them.
+
 ## Load bookings (big cars, vans, dyna trucks)
 Passengers describe the load and route on *Move a load*. That opens a support chat. EkiMove support agrees the price and terms there, then sends the quote from *Admin → Loads*. The customer accepts (the job joins the normal dispatch queue) or declines. Once a driver with a matching vehicle is assigned, the customer pays through EkiMove like any ride, and the driver's earnings and commission work the same way. Drivers can register big cars, vans/buses and dyna trucks.
 

@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 import os
 from pathlib import Path
 
-from fastapi import Body, APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import Body, APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -31,6 +31,7 @@ PRIVATE_UPLOAD_DIR = Path(
 
 @router.post("/api/v1/driver-applications", status_code=status.HTTP_201_CREATED)
 async def submit_driver_application(
+    request: Request,
     full_name: str = Form(min_length=2, max_length=160),
     phone: str = Form(min_length=7, max_length=32),
     password: str = Form(min_length=12, max_length=256),
@@ -38,6 +39,7 @@ async def submit_driver_application(
     plate_number: str = Form(min_length=2, max_length=32),
     capacity: int = Form(ge=1, le=8),
     face_photo: UploadFile = File(...),
+    accept_policies: bool = Form(False),
     db: Session = Depends(get_db),
 ):
     """Create a driver account pending review and keep the face photo private."""
@@ -115,6 +117,10 @@ async def submit_driver_application(
             capacity=capacity,
             is_approved=False,
         ))
+        if accept_policies:
+            from app.verification import record_policy_acceptance  # avoid an import cycle
+
+            record_policy_acceptance(db, user, request)
         db.commit()
 
         return {

@@ -7,9 +7,10 @@ import StatusBadge from '../../components/ui/StatusBadge.jsx'
 import { getPerson, listPeople, personAction } from '../../services/accountService.js'
 import { formatDateTime, formatNaira, formatShortDate, initials } from '../../utils/format.js'
 import { vehicleLabel } from '../../utils/vehicles.js'
+import { TrailViewer, VerificationReview } from '../../components/admin/PersonSafety.jsx'
 
 const STATUS_FILTERS = {
-  passenger: [['all', 'Everyone'], ['active', 'Active'], ['suspended', 'Suspended'], ['removed', 'Removed']],
+  passenger: [['all', 'Everyone'], ['active', 'Active'], ['id_pending', 'ID to review'], ['suspended', 'Suspended'], ['removed', 'Removed']],
   driver: [['all', 'Everyone'], ['approved', 'Approved'], ['pending', 'Awaiting review'], ['suspended', 'Suspended'], ['removed', 'Removed']],
 }
 
@@ -32,6 +33,7 @@ function PersonDetail({ id, onClose, onChanged }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [trailRide, setTrailRide] = useState(null)
 
   const load = useCallback(() => getPerson(id).then(setPerson).catch((err) => setError(err.message)), [id])
   useEffect(() => {
@@ -86,6 +88,11 @@ function PersonDetail({ id, onClose, onChanged }) {
             <div><dt>Role</dt><dd>{person.role === 'driver' ? 'Driver' : 'Passenger'}</dd></div>
             <div><dt>Joined</dt><dd>{formatShortDate(person.joined_at)}</dd></div>
             <div><dt>Trips</dt><dd>{person.rides.completed} completed · {person.rides.active} active · {person.rides.trips} total</dd></div>
+            <div><dt>Rating</dt><dd>{person.rating?.average ? `★ ${person.rating.average} (${person.rating.count})` : 'No ratings yet'}</dd></div>
+            <div><dt>Policies</dt><dd>{person.policies?.accepted_at ? `Accepted ${formatShortDate(person.policies.accepted_at)}` : 'Not yet accepted'}</dd></div>
+            {person.emergency_contact && (
+              <div><dt>Emergency contact</dt><dd>{person.emergency_contact.name} · {person.emergency_contact.phone}</dd></div>
+            )}
             {person.suspension_reason && <div><dt>Reason</dt><dd>{person.suspension_reason}</dd></div>}
           </dl>
 
@@ -112,6 +119,13 @@ function PersonDetail({ id, onClose, onChanged }) {
             </div>
           )}
 
+          {person.role === 'passenger' && (
+            <div className="stack stack-sm">
+              <h3 className="section-title" style={{ fontSize: 17 }}>ID verification</h3>
+              <VerificationReview person={person} onChanged={() => { load(); onChanged() }} />
+            </div>
+          )}
+
           {person.recent_rides?.length > 0 && (
             <div className="stack stack-sm">
               <h3 className="section-title" style={{ fontSize: 17 }}>Recent trips</h3>
@@ -119,11 +133,26 @@ function PersonDetail({ id, onClose, onChanged }) {
                 {person.recent_rides.map((ride) => (
                   <li key={ride.ride_id}>
                     #{ride.ride_id} · {ride.route} · {formatNaira(ride.fare, { decimals: 0 })} ·{' '}
-                    <StatusBadge status={ride.status} />
+                    <StatusBadge status={ride.status} />{' '}
+                    <button type="button" className="link-button" onClick={() => setTrailRide(ride.ride_id)}>
+                      Trip record
+                    </button>
                   </li>
                 ))}
               </ul>
+              {trailRide && <TrailViewer key={trailRide} rideId={trailRide} onClose={() => setTrailRide(null)} />}
             </div>
+          )}
+
+          {person.sign_ins?.length > 0 && (
+            <details>
+              <summary className="small" style={{ cursor: 'pointer', fontWeight: 700 }}>Recent sign-ins</summary>
+              <ul className="plain-list small" style={{ marginTop: 8 }}>
+                {person.sign_ins.map((item, index) => (
+                  <li key={index}>{formatDateTime(item.at)} · {item.details}</li>
+                ))}
+              </ul>
+            </details>
           )}
 
           {person.recent_activity?.length > 0 && (

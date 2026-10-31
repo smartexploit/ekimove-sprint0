@@ -1,4 +1,4 @@
-﻿import { useState } from 'react'
+import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { registerPassenger } from '../../services/authService.js'
 import AuthLayout from '../../layouts/AuthLayout.jsx'
@@ -23,6 +23,7 @@ export default function RegisterPage() {
     password: '',
     confirmPassword: '',
   })
+  const [agree, setAgree] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -47,6 +48,11 @@ export default function RegisterPage() {
       return
     }
 
+    if (!agree) {
+      setError('Please read and agree to EkiMove’s policies to continue.')
+      return
+    }
+
     setLoading(true)
 
     try {
@@ -54,6 +60,7 @@ export default function RegisterPage() {
         full_name: form.full_name,
         phone: form.phone,
         password: form.password,
+        accept_policies: true,
       })
 
       navigate(returnTo || '/dashboard', { replace: true })
@@ -157,6 +164,17 @@ export default function RegisterPage() {
               : ''}
           </span>
         </div>
+
+        <label className="check-row">
+          <input type="checkbox" checked={agree} onChange={(event) => setAgree(event.target.checked)} />
+          <span>
+            I agree to EkiMove’s{' '}
+            <Link className="text-link" to="/policies/terms" target="_blank" rel="noreferrer">Terms</Link>,{' '}
+            <Link className="text-link" to="/policies/privacy" target="_blank" rel="noreferrer">Privacy Policy</Link>{' '}
+            and{' '}
+            <Link className="text-link" to="/policies/community" target="_blank" rel="noreferrer">Safety Guidelines</Link>.
+          </span>
+        </label>
 
         <Alert tone="error">{error}</Alert>
 

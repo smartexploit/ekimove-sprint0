@@ -22,6 +22,10 @@ import AdminLoadsPage from './pages/admin/AdminLoadsPage.jsx'
 import HaulagePage from './pages/passenger/HaulagePage.jsx'
 import ProfilePage from './pages/account/ProfilePage.jsx'
 import SupportPage from './pages/account/SupportPage.jsx'
+import ReceiptPage from './pages/account/ReceiptPage.jsx'
+import TrackSharePage from './pages/public/TrackSharePage.jsx'
+import PoliciesPage from './pages/public/PoliciesPage.jsx'
+import AdminMapPage from './pages/admin/AdminMapPage.jsx'
 import AdminEarningsPage from './pages/admin/AdminEarningsPage.jsx'
 import AdminIncidentsPage from './pages/admin/AdminIncidentsPage.jsx'
 
@@ -36,6 +40,9 @@ export default function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/driver/apply" element={<DriverApplicationPage />} />
+        <Route path="/t/:token" element={<TrackSharePage />} />
+        <Route path="/policies" element={<PoliciesPage />} />
+        <Route path="/policies/:slug" element={<PoliciesPage />} />
 
         <Route element={<ProtectedRoute />}>
           <Route path="/dashboard" element={<DashboardPage />} />
@@ -48,6 +55,7 @@ export default function App() {
         <Route element={<ProtectedRoute requiredRole="super_admin" />}>
           <Route path="/admin/dispatch" element={<AdminDispatchPage />} />
           <Route path="/admin/overview" element={<AdminOverviewPage />} />
+          <Route path="/admin/map" element={<AdminMapPage />} />
           <Route path="/admin/people" element={<AdminPeoplePage />} />
           <Route path="/admin/support" element={<AdminSupportPage />} />
           <Route path="/admin/loads" element={<AdminLoadsPage />} />
@@ -66,6 +74,7 @@ export default function App() {
         <Route element={<ProtectedRoute requiredRole={['passenger', 'driver']} />}>
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/support" element={<SupportPage />} />
+          <Route path="/receipts/:rideId" element={<ReceiptPage />} />
         </Route>
         <Route path="/driver" element={<Navigate to="/driver/apply" replace />} />
         <Route path="/admin" element={<Navigate to="/admin/overview" replace />} />

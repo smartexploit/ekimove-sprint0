@@ -15,8 +15,8 @@ class PhotoStorageError(RuntimeError):
     """Raised when private photo storage cannot complete an operation."""
 
 
-def upload_driver_photo(photo_bytes: bytes) -> str:
-    """Upload a validated driver photo as an authenticated Cloudinary asset."""
+def upload_driver_photo(photo_bytes: bytes, folder: str = "driver-photos") -> str:
+    """Upload a validated photo as an authenticated (private) Cloudinary asset."""
     if not os.environ.get("CLOUDINARY_URL"):
         raise PhotoStorageError("Cloudinary is not configured")
 
@@ -25,7 +25,7 @@ def upload_driver_photo(photo_bytes: bytes) -> str:
             photo_bytes,
             resource_type="image",
             type="authenticated",
-            public_id=f"ekimove/driver-photos/{uuid.uuid4().hex}",
+            public_id=f"ekimove/{folder}/{uuid.uuid4().hex}",
             overwrite=False,
             unique_filename=False,
             use_filename=False,

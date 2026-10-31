@@ -8,6 +8,7 @@ import PasswordInput from '../../components/ui/PasswordInput.jsx'
 import { changePassword, getProfile, updateProfile } from '../../services/accountService.js'
 import { formatShortDate, initials } from '../../utils/format.js'
 import { vehicleLabel } from '../../utils/vehicles.js'
+import { EmergencyContactCard, VerificationCard } from '../../components/account/SafetyCards.jsx'
 
 function DetailsForm({ profile, onSaved }) {
   const [form, setForm] = useState({ full_name: profile.full_name, email: profile.email || '' })
@@ -158,6 +159,11 @@ export default function ProfilePage() {
                   {profile.role === 'driver' ? 'Driver' : 'Passenger'} · {profile.phone}
                 </p>
                 <p className="muted small">Member since {formatShortDate(profile.joined_at)}</p>
+                {profile.rating?.average && (
+                  <p className="small" style={{ fontWeight: 700 }}>
+                    ★ {profile.rating.average} from {profile.rating.count} rating{profile.rating.count === 1 ? '' : 's'}
+                  </p>
+                )}
               </div>
             </section>
 
@@ -187,8 +193,10 @@ export default function ProfilePage() {
             )}
 
             <DetailsForm key={profile.id} profile={profile} onSaved={setProfile} />
+            {profile.role === 'passenger' && <VerificationCard />}
           </div>
           <div className="stack">
+            <EmergencyContactCard initial={profile.emergency_contact} />
             <PasswordForm />
             <section className="card stack stack-sm" aria-labelledby="privacy-title">
               <div className="row" style={{ gap: 10, flexWrap: 'nowrap' }}>
@@ -201,6 +209,10 @@ export default function ProfilePage() {
               </p>
               <p className="muted small">
                 Want your account removed? <Link className="text-link" to="/support">Message support</Link>.
+              </p>
+              <p className="muted small">
+                Read our <Link className="text-link" to="/policies">policies</Link>
+                {profile.policies?.accepted_at ? ` (accepted ${formatShortDate(profile.policies.accepted_at)})` : ''}.
               </p>
             </section>
             {user?.role === 'passenger' && (

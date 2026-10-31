@@ -7,6 +7,8 @@ import StatusBadge from '../../components/ui/StatusBadge.jsx'
 import SOSButton from '../../components/SOSButton.jsx'
 import ProfileStrip from '../../components/ProfileStrip.jsx'
 import { TRIPS_CHANGED_EVENT } from '../../services/dispatchService.js'
+import RateTrip from '../../components/trips/RateTrip.jsx'
+import { BadgeCheck, Star } from 'lucide-react'
 import { apiRequest } from '../../services/authService.js'
 import { formatNaira, formatShortDate } from '../../utils/format.js'
 import { vehicleLabel } from '../../utils/vehicles.js'
@@ -42,6 +44,7 @@ const ACTIVE = new Set(['assigned', 'driver_arriving', 'in_progress', 'incident_
 
 function CurrentTrip({ ride, busy, onAdvance }) {
   const stepIndex = STEPS.findIndex(([key]) => key === ride.status)
+  const [pin, setPin] = useState('')
 
   return (
     <section className="card card-lg stack" aria-labelledby={`trip-${ride.id}`}>
@@ -67,6 +70,19 @@ function CurrentTrip({ ride, busy, onAdvance }) {
           <p className="route-value">{ride.destination_text}</p>
         </div>
       </div>
+
+      {ride.passenger_name && (
+        <p className="row small" style={{ gap: 8 }}>
+          <strong>Passenger: {ride.passenger_name}</strong>
+          {ride.passenger_verified && (
+            <span className="badge badge-green"><BadgeCheck size={14} aria-hidden="true" /> ID verified</span>
+          )}
+          {ride.passenger_rating?.average && (
+            <span className="muted"><Star size={13} aria-hidden="true" /> {ride.passenger_rating.average}</span>
+          )}
+        </p>
+      )}
+      {ride.load_description && <p className="small"><strong>Load:</strong> {ride.load_description}</p>}
 
       <dl className="kv">
         <div><dt>Vehicle</dt><dd>{vehicleLabel(ride.vehicle_type)}</dd></div>
@@ -100,14 +116,26 @@ function CurrentTrip({ ride, busy, onAdvance }) {
         </ol>
       )}
 
+      {ride.status === 'driver_arriving' && ride.pin_required && (
+        <label className="field pin-entry">
+          <span className="field-label">Passenger's 4-digit pickup PIN</span>
+          <input className="input" inputMode="numeric" autoComplete="one-time-code" maxLength={4}
+            value={pin} onChange={(event) => setPin(event.target.value.replace(/\D/g, ''))}
+            placeholder="Ask the passenger" aria-describedby={`pin-hint-${ride.id}`} />
+          <span className="field-hint" id={`pin-hint-${ride.id}`}>
+            Only start once the passenger is with you and gives you this PIN from their app.
+          </span>
+        </label>
+      )}
+
       <div className="row">
         {nextStatus[ride.status] && (
           <button
             type="button"
             className="btn btn-accent btn-lg"
             style={{ flexGrow: 1 }}
-            onClick={() => onAdvance(ride)}
-            disabled={busy !== null}
+            onClick={() => onAdvance(ride, pin)}
+            disabled={busy !== null || (ride.status === 'driver_arriving' && ride.pin_required && pin.length !== 4)}
           >
             {busy === ride.id ? 'Updating…' : actionLabels[ride.status]}
           </button>
@@ -164,7 +192,7 @@ export default function DriverTripsPage() {
     setRefreshKey((value) => value + 1)
   }
 
-  async function advanceRide(ride) {
+  async function advanceRide(ride, pin) {
     const status = nextStatus[ride.status]
     if (!status) return
 
@@ -176,7 +204,7 @@ export default function DriverTripsPage() {
       await apiRequest(`/api/v1/driver/rides/${ride.id}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify(status === 'in_progress' ? { status, pickup_pin: pin } : { status }),
       })
       setNotice(`Trip #${ride.id} updated: ${statusLabels[status]}.`)
       refresh()
@@ -255,6 +283,14 @@ export default function DriverTripsPage() {
                             ? `You earned ${formatNaira(ride.earning.earning, { decimals: 0 })}`
                             : formatNaira(ride.agreed_fare, { decimals: 0 })}
                         </p>
+                        {['completed', 'cancelled'].includes(ride.status) && (
+                          <p className="list-item-meta">
+                            <Link className="text-link" to={`/receipts/${ride.id}`}>Receipt</Link>
+                          </p>
+                        )}
+                        {ride.status === 'completed' && (
+                          <RateTrip rideId={ride.id} existing={ride.my_rating} who="passenger" />
+                        )}
                       </div>
                       <StatusBadge status={ride.status} kind="driverTrip" />
                     </li>

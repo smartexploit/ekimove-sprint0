@@ -4,6 +4,7 @@ import {
   Banknote,
   LayoutDashboard,
   LifeBuoy,
+  Map as MapIcon,
   Truck,
   Users,
   MapPin,
@@ -17,6 +18,7 @@ import { logoutPassenger } from '../services/authService.js'
 
 const NAV = [
   ['/admin/overview', 'Overview', LayoutDashboard],
+  ['/admin/map', 'Live map', MapIcon],
   ['/admin/dispatch', 'Dispatch', Route],
   ['/admin/loads', 'Loads', Truck],
   ['/admin/support', 'Support', LifeBuoy],

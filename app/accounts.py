@@ -33,6 +33,7 @@ from app.models import (
     DriverPayoutAccount,
     EarningEntry,
     Incident,
+    PassengerVerification,
     Payment,
     Ride,
     RideRequest,
@@ -78,7 +79,17 @@ def _driver_info(db: Session, user: User) -> dict | None:
 
 
 def profile_result(db: Session, user: User) -> dict:
+    from app.trips import rating_summary  # avoid an import cycle
+    from app.verification import POLICY_VERSION, verification_result
+
+    record = db.scalar(select(PassengerVerification).where(PassengerVerification.user_id == user.id))
     return {
+        "emergency_contact": ({"name": user.emergency_contact_name, "phone": user.emergency_contact_phone}
+                              if user.emergency_contact_phone else None),
+        "verification": verification_result(record) if user.role == "passenger" else None,
+        "rating": rating_summary(db, user.id),
+        "policies": {"accepted_version": user.policies_version, "accepted_at": _iso(user.policies_accepted_at),
+                     "current_version": POLICY_VERSION},
         "id": user.id,
         "full_name": user.full_name,
         "phone": user.phone,
@@ -207,7 +218,7 @@ def _person_row(db: Session, user: User) -> dict:
 @router.get("/admin/people")
 def admin_list_people(
     role: Literal["passenger", "driver"] = Query("passenger"),
-    status: Literal["all", "active", "suspended", "removed", "approved", "pending"] = Query("all"),
+    status: Literal["all", "active", "suspended", "removed", "approved", "pending", "id_pending"] = Query("all"),
     q: str | None = Query(default=None, max_length=80),
     db: Session = Depends(get_db),
     _admin: User = Depends(require_super_admin),
@@ -219,6 +230,9 @@ def admin_list_people(
         query = query.where(User.is_active.is_(False), User.removed_at.is_(None))
     elif status == "removed":
         query = query.where(User.removed_at.is_not(None))
+    elif status == "id_pending":
+        query = query.join(PassengerVerification, PassengerVerification.user_id == User.id) \
+            .where(PassengerVerification.status == "pending")
     elif status in ("approved", "pending") and role == "driver":
         query = query.join(Driver, Driver.user_id == User.id).where(Driver.verification_status == status)
     if status != "removed":
@@ -251,6 +265,18 @@ def admin_get_person(user_id: int, db: Session = Depends(get_db), _admin: User =
          "route": f"{req.origin_text} → {req.destination_text}", "vehicle_type": req.vehicle_type,
          "created_at": _iso(req.created_at)}
         for ride, req in rides
+    ]
+    from app.verification import verification_result
+
+    record = db.scalar(select(PassengerVerification).where(PassengerVerification.user_id == user.id))
+    row["verification"] = verification_result(record, full=True) if user.role == "passenger" else None
+    row["emergency_contact"] = ({"name": user.emergency_contact_name, "phone": user.emergency_contact_phone}
+                                if user.emergency_contact_phone else None)
+    row["sign_ins"] = [
+        {"at": _iso(log.created_at), "details": log.details}
+        for log in db.scalars(select(AuditLog).where(AuditLog.actor_user_id == user.id,
+                                                     AuditLog.action == "auth.login")
+                              .order_by(AuditLog.id.desc()).limit(10)).all()
     ]
     row["recent_activity"] = [
         {"action": log.action, "details": log.details, "created_at": _iso(log.created_at)}

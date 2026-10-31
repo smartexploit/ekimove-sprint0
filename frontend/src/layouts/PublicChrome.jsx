@@ -7,11 +7,12 @@ import AtonaHeaderButton from '../components/atona/AtonaHeaderButton.jsx'
 import { getAccessToken, getStoredUser } from '../services/authService.js'
 import { homePathForRole } from '../utils/roles.js'
 
+// Homepage sections; the leading "/" makes them work from any page.
 const SECTION_LINKS = [
-  ['#rides', 'Rides'],
-  ['#how-it-works', 'How it works'],
-  ['#safety', 'Safety'],
-  ['#drive', 'Drive with us'],
+  ['/#rides', 'Rides'],
+  ['/#how-it-works', 'How it works'],
+  ['/#safety', 'Safety'],
+  ['/#drive', 'Drive with us'],
 ]
 
 export function PublicHeader({ dark = false }) {
@@ -86,16 +87,25 @@ export function PublicFooter() {
 
           <nav className="footer-col" aria-label="Ride">
             <h2 className="footer-heading">Ride</h2>
-            <a href="#plan">Book a ride</a>
-            <a href="#how-it-works">How it works</a>
-            <a href="#safety">Safety</a>
+            <a href="/#plan">Book a ride</a>
+            <a href="/#how-it-works">How it works</a>
+            <a href="/#safety">Safety</a>
           </nav>
 
           <nav className="footer-col" aria-label="Company">
             <h2 className="footer-heading">Company</h2>
             <Link to="/driver/apply">Drive with EkiMove</Link>
-            <a href="#about">About EkiMove</a>
+            <a href="/#about">About EkiMove</a>
             <Link to="/login">Sign in</Link>
+          </nav>
+
+          <nav className="footer-col" aria-label="Policies">
+            <h2 className="footer-heading">Policies</h2>
+            <Link to="/policies/terms">Terms of Service</Link>
+            <Link to="/policies/privacy">Privacy Policy</Link>
+            <Link to="/policies/community">Safety guidelines</Link>
+            <Link to="/policies/cancellations">Cancellations & refunds</Link>
+            <Link to="/policies/driver">Driver Agreement</Link>
           </nav>
 
           <div className="footer-col">

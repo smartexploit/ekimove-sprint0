@@ -7,6 +7,7 @@ import { getAdminSettings, saveAdminSettings } from '../../services/accountServi
 export default function BookingRulesCard() {
   const [rules, setRules] = useState(null)
   const [enabled, setEnabled] = useState(true)
+  const [requireId, setRequireId] = useState(false)
   const [fee, setFee] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -19,6 +20,7 @@ export default function BookingRulesCard() {
         if (!active) return
         setRules(data)
         setEnabled(data.motorcycle_second_passenger_enabled)
+        setRequireId(Boolean(data.require_verified_passengers))
         setFee(String(data.motorcycle_second_passenger_fee))
       })
       .catch((err) => active && setError(err.message || 'Could not load booking rules.'))
@@ -38,6 +40,7 @@ export default function BookingRulesCard() {
       const data = await saveAdminSettings({
         motorcycle_second_passenger_enabled: enabled,
         motorcycle_second_passenger_fee: amount,
+        require_verified_passengers: requireId,
       })
       setRules(data)
       setNotice('Saved. New bookings use these rules straight away.')
@@ -73,6 +76,10 @@ export default function BookingRulesCard() {
               Used on every motorcycle route, unless that route's own “extra passenger” amount is set
               above ₦0, which then applies instead.
             </span>
+          </label>
+          <label className="check-row">
+            <input type="checkbox" checked={requireId} onChange={(event) => setRequireId(event.target.checked)} />
+            Passengers must verify their ID before booking
           </label>
           <div>
             <button type="submit" className="btn btn-primary btn-sm" disabled={busy}>

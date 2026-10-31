@@ -1579,7 +1579,7 @@ def test_driver_can_progress_ride_and_timestamps_are_recorded(client):
     assert response.json()["status"] == "driver_arriving"
 
     response = client.patch(
-        url, json={"status": "in_progress"}, headers=driver_headers
+        url, json={"status": "in_progress", "pickup_pin": ride_pin(client, ride_id)}, headers=driver_headers
     )
     assert response.status_code == 200, response.text
     assert response.json()["status"] == "in_progress"
@@ -2938,7 +2938,8 @@ def test_transfer_to_personal_account_confirms_the_ride_automatically(client, pa
     driver_headers = login(client, "08000000006", "Driver-Test-Password-5!")
     assert client.patch(f"/api/v1/driver/rides/{ride_id}/status", json={"status": "driver_arriving"},
                         headers=driver_headers).status_code == 200
-    assert client.patch(f"/api/v1/driver/rides/{ride_id}/status", json={"status": "in_progress"},
+    assert client.patch(f"/api/v1/driver/rides/{ride_id}/status",
+                        json={"status": "in_progress", "pickup_pin": ride_pin(client, ride_id)},
                         headers=driver_headers).status_code == 200
 
 
@@ -3154,8 +3155,10 @@ def complete_paid_ride(client):
     _confirm_payment(client, passenger_headers, admin_headers, ride_id)
     driver_headers = login(client, *DRIVER_LOGIN)
     for status_value in ("driver_arriving", "in_progress", "completed"):
-        response = client.patch(f"/api/v1/driver/rides/{ride_id}/status", json={"status": status_value},
-                                headers=driver_headers)
+        body = {"status": status_value}
+        if status_value == "in_progress":
+            body["pickup_pin"] = ride_pin(client, ride_id)
+        response = client.patch(f"/api/v1/driver/rides/{ride_id}/status", json=body, headers=driver_headers)
         assert response.status_code == 200, response.text
     return driver_headers, admin_headers, ride_id, fare
 
@@ -3814,3 +3817,272 @@ def test_scheduled_dispatch_endpoint_needs_its_token(client, monkeypatch):
     monkeypatch.setattr(settings, "payout_cron_token", "cron-secret-123")
     assert client.post("/api/v1/internal/dispatch/run", headers={"X-Cron-Token": "nope"}).status_code == 401
     assert client.post("/api/v1/internal/dispatch/run", headers={"X-Cron-Token": "cron-secret-123"}).json() == {"ok": True}
+
+
+def ride_pin(client, ride_id):
+    """The pickup PIN the passenger sees (read straight from the test DB)."""
+    generator = client.app.dependency_overrides[get_db]()
+    db = next(generator)
+    try:
+        return db.get(Ride, ride_id).pickup_pin
+    finally:
+        generator.close()
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: trust and safety
+# ---------------------------------------------------------------------------
+
+import io
+
+import app.trips as trips_module
+import app.verification as verification_module
+from app.models import PassengerVerification, RideLocationPoint
+
+PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+
+
+def _start_trip(client, ride_id, driver_headers, pin=None):
+    return client.patch(f"/api/v1/driver/rides/{ride_id}/status",
+                        json={"status": "in_progress", "pickup_pin": pin}, headers=driver_headers)
+
+
+def _paid_arriving_ride(client):
+    passenger, admin, request_id = create_assigned_ride(client)
+    ride_id = get_ride_id_from_request(client, request_id, passenger)
+    _confirm_payment(client, passenger, admin, ride_id)
+    driver = login(client, *DRIVER_LOGIN)
+    client.patch(f"/api/v1/driver/rides/{ride_id}/status", json={"status": "driver_arriving"}, headers=driver)
+    return passenger, admin, driver, request_id, ride_id
+
+
+def test_pickup_pin_is_required_to_start_the_trip(client):
+    passenger, _, driver, request_id, ride_id = _paid_arriving_ride(client)
+    mine = next(r for r in client.get("/api/v1/ride-requests/my-rides", headers=passenger).json() if r["id"] == request_id)
+    pin = mine["pickup_pin"]
+    assert pin and len(pin) == 4 and pin.isdigit()
+    with session_for(client) as db:
+        ride = db.get(Ride, ride_id)
+        assert ride.vehicle_id == 1  # the exact vehicle is recorded
+        assert ride.arrived_at is not None
+    assert _start_trip(client, ride_id, driver).status_code == 409
+    wrong = "0000" if pin != "0000" else "1111"
+    assert "doesn't match" in _start_trip(client, ride_id, driver, wrong).json()["detail"]
+    started = _start_trip(client, ride_id, driver, pin)
+    assert started.status_code == 200
+    mine = next(r for r in client.get("/api/v1/ride-requests/my-rides", headers=passenger).json() if r["id"] == request_id)
+    assert mine["pickup_pin"] is None  # hidden once the trip has started
+
+
+def test_too_many_wrong_pins_lock_the_trip(client):
+    _, _, driver, _, ride_id = _paid_arriving_ride(client)
+    pin = ride_pin(client, ride_id)
+    wrong = "0000" if pin != "0000" else "1111"
+    for _ in range(5):
+        assert _start_trip(client, ride_id, driver, wrong).status_code == 409
+    assert _start_trip(client, ride_id, driver, pin).status_code == 429
+
+
+def test_passenger_tracks_driver_and_trip_trail_is_recorded(client, monkeypatch):
+    monkeypatch.setattr(trips_module, "TRAIL_EVERY_SECONDS", 0)
+    passenger, _, driver, request_id, ride_id = _paid_arriving_ride(client)
+    # Give the pickup coordinates through a place-based route.
+    ids = _seed_place_route(client)
+    with session_for(client) as db:
+        origin = db.get(Place, ids["origin_id"])
+        origin.latitude, origin.longitude = 7.6230, 5.2210
+        db.get(RideRequest, request_id).origin_place_id = ids["origin_id"]
+        db.commit()
+    client.post("/api/v1/driver/location", json={"latitude": 7.6275, "longitude": 5.2210}, headers=driver)
+    view = client.get(f"/api/v1/rides/{ride_id}/tracking", headers=passenger).json()
+    assert view["heading_to"] == "pickup"
+    assert view["driver_location"]["latitude"] == 7.6275
+    assert 450 <= view["distance_m"] <= 550 and view["eta_minutes"] >= 1
+    assert view["driver"]["plate_number"] == "EKM-TEST-001"
+    assert view["pickup_pin"] == ride_pin(client, ride_id)
+    assert "pickup_pin" not in client.get(f"/api/v1/rides/{ride_id}/tracking", headers=driver).json()
+
+    _start_trip(client, ride_id, driver, ride_pin(client, ride_id))
+    for lat in (7.628, 7.630, 7.632):
+        client.post("/api/v1/driver/location", json={"latitude": lat, "longitude": 5.221}, headers=driver)
+    with session_for(client) as db:
+        assert db.query(RideLocationPoint).filter(RideLocationPoint.ride_id == ride_id).count() >= 4
+    assert len(client.get(f"/api/v1/rides/{ride_id}/tracking", headers=passenger).json()["trail"]) >= 3
+    outsider = login(client, "08000000002", "Second-Test-Password-2!")
+    assert client.get(f"/api/v1/rides/{ride_id}/tracking", headers=outsider).status_code == 404
+
+    admin = login(client, *ADMIN_LOGIN)
+    trail = client.get(f"/api/v1/admin/rides/{ride_id}/trail", headers=admin).json()
+    assert len(trail["trail"]) >= 4 and trail["vehicle"]["plate_number"] == "EKM-TEST-001"
+
+
+def test_trip_share_link_for_a_trusted_contact(client):
+    passenger, _, driver, _, ride_id = _paid_arriving_ride(client)
+    assert client.post(f"/api/v1/rides/{ride_id}/share", headers=driver).status_code == 403
+    link = client.post(f"/api/v1/rides/{ride_id}/share", headers=passenger).json()
+    assert link["path"].startswith("/t/")
+    public = client.get(f"/api/v1/share/{link['token']}")  # no sign-in
+    assert public.status_code == 200
+    body = public.json()
+    assert "pickup_pin" not in body and body["driver"]["plate_number"] == "EKM-TEST-001"
+    assert body["passenger_name"] == "Test P."
+    # Ended more than 2 hours ago: link stops working.
+    with session_for(client) as db:
+        ride = db.get(Ride, ride_id)
+        ride.status = "completed"
+        ride.completed_at = datetime.now(timezone.utc) - timedelta(hours=3)
+        db.commit()
+    assert client.get(f"/api/v1/share/{link['token']}").status_code == 410
+    assert client.get("/api/v1/share/not-a-real-token-123456").status_code == 404
+
+
+def test_two_way_ratings_after_a_completed_trip(client):
+    driver_headers, _, ride_id, _ = complete_paid_ride(client)
+    passenger = login(client, *PASSENGER_LOGIN)
+    assert client.post(f"/api/v1/rides/{ride_id}/rating", json={"score": 6}, headers=passenger).status_code == 422
+    assert client.post(f"/api/v1/rides/{ride_id}/rating", json={"score": 5, "comment": "Safe and polite"},
+                       headers=passenger).status_code == 201
+    assert client.post(f"/api/v1/rides/{ride_id}/rating", json={"score": 4}, headers=passenger).status_code == 409
+    assert client.post(f"/api/v1/rides/{ride_id}/rating", json={"score": 4}, headers=driver_headers).status_code == 201
+    rides = client.get("/api/v1/ride-requests/my-rides", headers=passenger).json()
+    mine = next(r for r in rides if r["assigned_ride_id"] == ride_id)
+    assert mine["my_rating"] == 5 and mine["driver_rating"] == {"count": 1, "average": 5.0}
+    trip = next(t for t in client.get("/api/v1/driver/rides", headers=driver_headers).json() if t["id"] == ride_id)
+    assert trip["my_rating"] == 4 and trip["passenger_rating"] == {"count": 1, "average": 4.0}
+    assert client.get("/api/v1/me", headers=driver_headers).json()["rating"]["average"] == 5.0
+    outsider = login(client, "08000000002", "Second-Test-Password-2!")
+    assert client.post(f"/api/v1/rides/{ride_id}/rating", json={"score": 1}, headers=outsider).status_code == 404
+
+
+def test_rating_before_the_trip_ends_is_refused(client):
+    passenger, _, _, _, ride_id = _paid_arriving_ride(client)
+    assert client.post(f"/api/v1/rides/{ride_id}/rating", json={"score": 5}, headers=passenger).status_code == 409
+
+
+def test_trip_receipts(client):
+    passenger, _, _, _, live_ride = _paid_arriving_ride(client)
+    assert client.get(f"/api/v1/rides/{live_ride}/receipt", headers=passenger).status_code == 409
+    driver_headers, _, ride_id, fare = complete_paid_ride(client)
+    receipt = client.get(f"/api/v1/rides/{ride_id}/receipt", headers=passenger).json()
+    assert receipt["receipt_number"] == f"EKM-{ride_id:06d}"
+    assert receipt["fare"] == f"{fare:.2f}" and receipt["paid"] is True
+    assert receipt["plate_number"] == "EKM-TEST-001" and receipt["payment_reference"]
+    assert "driver_earning" not in receipt
+    driver_view = client.get(f"/api/v1/rides/{ride_id}/receipt", headers=driver_headers).json()
+    assert Decimal(driver_view["driver_earning"]["earning"]) == fare * Decimal("0.9")
+
+
+def test_passenger_id_verification_and_required_setting(client, monkeypatch):
+    monkeypatch.setattr(verification_module, "upload_driver_photo", lambda data, folder: f"cloudinary:ekimove/{folder}/x|png")
+    monkeypatch.setattr(verification_module, "delete_driver_photo", lambda ref: None)
+    monkeypatch.setattr(verification_module, "download_driver_photo", lambda ref: (PNG_BYTES, "image/png"))
+    passenger = login(client, *PASSENGER_LOGIN)
+    admin = login(client, *ADMIN_LOGIN)
+    assert client.get("/api/v1/me/verification", headers=passenger).json()["status"] == "not_submitted"
+
+    bad = client.post("/api/v1/me/verification", headers=passenger, data={"id_type": "nin", "id_number": "12345"},
+                      files={"id_photo": ("id.png", io.BytesIO(PNG_BYTES), "image/png")})
+    assert bad.status_code == 422
+    sent = client.post("/api/v1/me/verification", headers=passenger,
+                       data={"id_type": "nin", "id_number": "12345678901"},
+                       files={"id_photo": ("id.png", io.BytesIO(PNG_BYTES), "image/png")})
+    assert sent.status_code == 201, sent.text
+    assert sent.json()["status"] == "pending" and sent.json()["id_number"].endswith("8901")
+    assert "1234567" not in sent.json()["id_number"]  # masked to the passenger too
+
+    queue = client.get("/api/v1/admin/verifications", headers=admin).json()
+    assert [q["user_id"] for q in queue] == [1] and queue[0]["id_number"] == "12345678901"
+    assert client.get("/api/v1/admin/verifications/1/photo", headers=admin).content == PNG_BYTES
+    assert client.post("/api/v1/admin/verifications/1/review", json={"decision": "reject"},
+                       headers=admin).status_code == 422
+    people = client.get("/api/v1/admin/people?role=passenger&status=id_pending", headers=admin).json()
+    assert [p["id"] for p in people] == [1]
+
+    # Require verification: unverified passengers can't book.
+    client.put("/api/v1/admin/settings", json={"require_verified_passengers": True}, headers=admin)
+    other = login(client, "08000000002", "Second-Test-Password-2!")
+    blocked = client.post("/api/v1/ride-requests", json=ride_payload(), headers=other)
+    assert blocked.status_code == 403 and "verify your ID" in blocked.json()["detail"]
+    assert client.post("/api/v1/ride-requests", json=ride_payload(), headers=passenger).status_code == 403
+
+    approved = client.post("/api/v1/admin/verifications/1/review", json={"decision": "approve"}, headers=admin)
+    assert approved.json()["status"] == "approved"
+    created = client.post("/api/v1/ride-requests", json=ride_payload(), headers=passenger)
+    assert created.status_code == 201
+    driver = login(client, *DRIVER_LOGIN)
+    assert client.get("/api/v1/me", headers=passenger).json()["verification"]["status"] == "approved"
+    resubmit = client.post("/api/v1/me/verification", headers=passenger,
+                           data={"id_type": "nin", "id_number": "12345678901"},
+                           files={"id_photo": ("id.png", io.BytesIO(PNG_BYTES), "image/png")})
+    assert resubmit.status_code == 409
+    assert client.post("/api/v1/me/verification", headers=driver, data={"id_type": "nin", "id_number": "12345678901"},
+                       files={"id_photo": ("id.png", io.BytesIO(PNG_BYTES), "image/png")}).status_code == 403
+
+
+def test_verified_badge_reaches_the_driver(client, monkeypatch):
+    with session_for(client) as db:
+        db.add(PassengerVerification(user_id=1, id_type="nin", id_number="12345678901", status="approved"))
+        db.commit()
+    passenger, _, request_id = create_assigned_ride(client)
+    ride_id = get_ride_id_from_request(client, request_id, passenger)
+    trip = next(t for t in client.get("/api/v1/driver/rides", headers=login(client, *DRIVER_LOGIN)).json()
+                if t["id"] == ride_id)
+    assert trip["passenger_verified"] is True and trip["passenger_name"] == "Test P."
+
+
+def test_emergency_contact(client):
+    headers = login(client, *PASSENGER_LOGIN)
+    assert client.put("/api/v1/me/emergency-contact", json={"name": "Mum", "phone": ""}, headers=headers).status_code == 422
+    assert client.put("/api/v1/me/emergency-contact", json={"name": "Mum", "phone": "abc"}, headers=headers).status_code == 422
+    saved = client.put("/api/v1/me/emergency-contact", json={"name": "Mum", "phone": "08031112222"}, headers=headers)
+    assert saved.json() == {"name": "Mum", "phone": "08031112222"}
+    assert client.get("/api/v1/me", headers=headers).json()["emergency_contact"]["name"] == "Mum"
+
+
+def test_policies_acceptance(client):
+    created = client.post("/api/v1/auth/register", json={"phone": "08099990000", "full_name": "New Rider",
+                                                         "password": "New-Rider-Password-1!", "accept_policies": True})
+    assert created.status_code in (200, 201), created.text
+    fresh = {"Authorization": f"Bearer {created.json()['access_token']}"}
+    assert client.get("/api/v1/policies/status", headers=fresh).json()["needs_acceptance"] is False
+
+    existing = login(client, *PASSENGER_LOGIN)
+    status = client.get("/api/v1/policies/status", headers=existing).json()
+    assert status["needs_acceptance"] is True
+    assert client.post("/api/v1/policies/accept", json={"version": "1999-01-01"}, headers=existing).status_code == 409
+    accepted = client.post("/api/v1/policies/accept", json={"version": status["current_version"]}, headers=existing)
+    assert accepted.json()["needs_acceptance"] is False
+    assert client.get("/api/v1/policies/status", headers=login(client, *ADMIN_LOGIN)).json()["needs_acceptance"] is False
+
+
+def test_sign_ins_are_logged_for_traceability(client):
+    client.post("/api/v1/auth/login", json={"phone": "08000000001", "password": PASSENGER_LOGIN[1]},
+                headers={"User-Agent": "TestPhone/1.0", "X-Forwarded-For": "102.89.1.2"})
+    detail = client.get("/api/v1/admin/people/1", headers=login(client, *ADMIN_LOGIN)).json()
+    assert any("102.89.1.2" in s["details"] and "TestPhone" in s["details"] for s in detail["sign_ins"])
+
+
+def test_admin_live_map_shows_online_drivers_and_trips(client):
+    driver = login(client, *DRIVER_LOGIN)
+    client.post("/api/v1/driver/location", json={"latitude": 7.62, "longitude": 5.22}, headers=driver)
+    admin = login(client, *ADMIN_LOGIN)
+    live = client.get("/api/v1/admin/live-map", headers=admin).json()
+    assert live["drivers"][0]["state"] == "free" and live["drivers"][0]["latitude"] == 7.62
+    assert live["drivers"][0]["plates"] == ["EKM-TEST-001"]
+    create_assigned_ride(client)
+    live = client.get("/api/v1/admin/live-map", headers=admin).json()
+    assert live["drivers"][0]["state"] == "on_trip" and len(live["trips"]) == 1
+    assert client.get("/api/v1/admin/live-map", headers=driver).status_code == 403
+    assert "tile_url" in client.get("/api/v1/map-config").json()
+
+
+def test_trips_without_a_pin_say_so_to_the_driver(client):
+    passenger, _, driver, _, ride_id = _paid_arriving_ride(client)
+    trip = next(t for t in client.get("/api/v1/driver/rides", headers=driver).json() if t["id"] == ride_id)
+    assert trip["pin_required"] is True
+    with session_for(client) as db:
+        db.get(Ride, ride_id).pickup_pin = None  # a trip from before PINs existed
+        db.commit()
+    trip = next(t for t in client.get("/api/v1/driver/rides", headers=driver).json() if t["id"] == ride_id)
+    assert trip["pin_required"] is False
+    assert _start_trip(client, ride_id, driver).status_code == 200

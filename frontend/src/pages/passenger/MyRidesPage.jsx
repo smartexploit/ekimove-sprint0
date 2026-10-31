@@ -7,6 +7,9 @@ import StatusBadge from '../../components/ui/StatusBadge.jsx'
 import { vehicleLabel } from '../../utils/vehicles.js'
 import SOSButton from '../../components/SOSButton.jsx'
 import CancelRide from '../../components/CancelRide.jsx'
+import TripTracker from '../../components/trips/TripTracker.jsx'
+import RateTrip from '../../components/trips/RateTrip.jsx'
+import { getProfile } from '../../services/accountService.js'
 import { apiRequest } from '../../services/authService.js'
 import { formatNaira, formatShortDate, initials } from '../../utils/format.js'
 import {
@@ -16,7 +19,7 @@ import {
   rideStatus,
 } from '../../utils/rides.js'
 
-function LiveRide({ ride, onChanged }) {
+function LiveRide({ ride, onChanged, emergencyContact }) {
   const status = rideStatus(ride)
   const step = progressIndex(status)
 
@@ -111,6 +114,10 @@ function LiveRide({ ride, onChanged }) {
         </div>
       )}
 
+      {ride.assigned_ride_id && ['assigned', 'driver_arriving', 'in_progress'].includes(ride.ride_status) && (
+        <TripTracker rideId={ride.assigned_ride_id} emergencyContact={emergencyContact} />
+      )}
+
       <CancelRide requestId={ride.id} status={status} onCancelled={onChanged} />
     </section>
   )
@@ -121,6 +128,15 @@ export default function MyRidesPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [refreshKey, setRefreshKey] = useState(0)
+  const [emergencyContact, setEmergencyContact] = useState(null)
+
+  useEffect(() => {
+    let active = true
+    getProfile().then((me) => active && setEmergencyContact(me.emergency_contact)).catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -211,6 +227,7 @@ export default function MyRidesPage() {
                 <LiveRide
                   key={ride.id}
                   ride={ride}
+                  emergencyContact={emergencyContact}
                   onChanged={() => setRefreshKey((value) => value + 1)}
                 />
               ))
@@ -252,6 +269,14 @@ export default function MyRidesPage() {
                           {Number(ride.cancellation_fee) > 0 &&
                             ` · fee ${formatNaira(ride.cancellation_fee, { decimals: 0 })}`}
                         </p>
+                      )}
+                      {ride.assigned_ride_id && ['completed', 'cancelled'].includes(ride.ride_status) && (
+                        <p className="list-item-meta">
+                          <Link className="text-link" to={`/receipts/${ride.assigned_ride_id}`}>Receipt</Link>
+                        </p>
+                      )}
+                      {ride.assigned_ride_id && ride.ride_status === 'completed' && (
+                        <RateTrip rideId={ride.assigned_ride_id} existing={ride.my_rating} who="driver" />
                       )}
                     </div>
                     <StatusBadge status={rideStatus(ride)} />

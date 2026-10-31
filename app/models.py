@@ -23,6 +23,11 @@ class User(Base):
     suspended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     suspension_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    emergency_contact_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    emergency_contact_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Version of EkiMove's policies this person last accepted, and when.
+    policies_version: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    policies_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Driver(Base):
@@ -127,6 +132,11 @@ class Ride(Base):
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cancelled_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=True)
     cancellation_fee: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    # Traceability and pickup safety.
+    vehicle_id: Mapped[int | None] = mapped_column(ForeignKey("vehicles.id", ondelete="RESTRICT"), nullable=True, index=True)
+    pickup_pin: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    arrived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    share_token: Mapped[str | None] = mapped_column(String(48), nullable=True, unique=True, index=True)
 
 
 class Payment(Base):
@@ -293,6 +303,40 @@ class RideOffer(Base):
     responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class RideLocationPoint(Base):
+    """The driver's position during a trip (the trip's GPS trail)."""
+
+    __tablename__ = "ride_location_points"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ride_id: Mapped[int] = mapped_column(ForeignKey("rides.id", ondelete="RESTRICT"), index=True)
+    latitude: Mapped[float] = mapped_column(Float)
+    longitude: Mapped[float] = mapped_column(Float)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class PassengerVerification(Base):
+    """A passenger's government ID, reviewed by an admin."""
+
+    __tablename__ = "passenger_verifications"
+    __table_args__ = (
+        CheckConstraint("status IN ('pending', 'approved', 'rejected')", name="ck_passenger_verifications_status"),
+        CheckConstraint("id_type IN ('nin', 'voters_card', 'drivers_licence', 'passport')",
+                        name="ck_passenger_verifications_id_type"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), unique=True, index=True)
+    id_type: Mapped[str] = mapped_column(String(20))
+    id_number: Mapped[str] = mapped_column(String(40))
+    id_photo_ref: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="pending", nullable=False, index=True)
+    review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=True)
+    submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class AppSetting(Base):
     """Business rules the super-admin can change in the app."""
 
@@ -334,11 +378,15 @@ class SupportMessage(Base):
 
 class Rating(Base):
     __tablename__ = "ratings"
-    __table_args__ = (CheckConstraint("score BETWEEN 1 AND 5", name="ck_ratings_score_range"),)
+    __table_args__ = (
+        CheckConstraint("score BETWEEN 1 AND 5", name="ck_ratings_score_range"),
+        UniqueConstraint("ride_id", "author_user_id", name="uq_ratings_ride_author"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     ride_id: Mapped[int] = mapped_column(ForeignKey("rides.id", ondelete="RESTRICT"), index=True)
     author_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+    ratee_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=True, index=True)
     score: Mapped[int] = mapped_column(Integer)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -141,8 +141,11 @@ def assign_driver(db: Session, ride_request: RideRequest, driver: Driver, actor_
         raise HTTPException(status_code=409,
                             detail="Driver has no approved matching vehicle with sufficient capacity")
 
+    from app.trips import new_pickup_pin  # avoid an import cycle
+
     ride = Ride(request_id=ride_request.id, driver_id=driver.id, status="assigned",
-                agreed_fare=Decimal(ride_request.quoted_fare), assigned_at=_now())
+                agreed_fare=Decimal(ride_request.quoted_fare), assigned_at=_now(),
+                vehicle_id=vehicle.id, pickup_pin=new_pickup_pin())
     ride_request.status = "assigned"
     ride_request.dispatch_status = None
     db.add(ride)
@@ -294,9 +297,12 @@ class LocationUpdate(BaseModel):
 def update_my_location(payload: LocationUpdate, current_user: User = Depends(get_current_user),
                        db: Session = Depends(get_db)) -> dict:
     driver = _my_driver(current_user, db)
+    from app.trips import record_trail_point  # avoid an import cycle
+
     driver.last_latitude = payload.latitude
     driver.last_longitude = payload.longitude
     driver.location_updated_at = _now()
+    record_trail_point(db, driver, payload.latitude, payload.longitude)
     db.commit()
     return {"ok": True}
 

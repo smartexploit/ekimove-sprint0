@@ -15,8 +15,8 @@ import { formatDateTime } from '../../utils/format.js'
 
 const POLL_MS = 5000
 
-function NewConversation({ onCreated, onCancel }) {
-  const [subject, setSubject] = useState('')
+function NewConversation({ onCreated, onCancel, initialSubject = '' }) {
+  const [subject, setSubject] = useState(initialSubject.slice(0, 160))
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -116,6 +116,7 @@ export default function SupportPage() {
 
       {composing ? (
         <NewConversation
+          initialSubject={params.get('subject') || ''}
           onCreated={(created) => {
             setThread(created)
             loadThreads()

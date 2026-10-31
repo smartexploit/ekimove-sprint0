@@ -69,6 +69,9 @@ def create_haulage_request(
 ) -> dict:
     if current_user.role != "passenger":
         raise HTTPException(status_code=403, detail="Only passenger accounts can book a load.")
+    from app.verification import ensure_passenger_may_book  # avoid an import cycle
+
+    ensure_passenger_may_book(db, current_user)
     scheduled = payload.scheduled_for
     if scheduled is not None and scheduled.tzinfo is None:
         scheduled = scheduled.replace(tzinfo=timezone.utc)
