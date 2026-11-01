@@ -18,13 +18,14 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app import messaging
 from app.auth import get_current_user, hash_password, verify_password
+from app.client_ip import client_ip
 from app.config import settings
 from app.contacts import (
     ContactError,
@@ -35,8 +36,10 @@ from app.contacts import (
     is_email,
     mask_email,
     mask_phone,
+    password_problem,
     phone_taken,
 )
+from app.rate_limit import enforce as enforce_rate_limit
 from app.database import get_db
 from app.models import AppSetting, AuditLog, User, VerificationCode
 
@@ -46,6 +49,9 @@ CODE_MINUTES = 10
 MAX_ATTEMPTS = 5
 RESEND_SECONDS = 60
 MAX_PER_HOUR = 5
+# Each phone number or address gets at most this many codes a day, so a
+# 6-digit code can't be ground down by asking again and again.
+MAX_PER_DAY = 10
 Channel = Literal["sms", "email"]
 
 
@@ -111,11 +117,12 @@ def issue_code(db: Session, *, user: User | None, purpose: str, channel: str, de
     """Create and send a code. Raises 429 when asked too often and 502 when
     the provider can't send it."""
     now = _now()
-    recent = db.scalars(
+    today = db.scalars(
         select(VerificationCode.created_at)
-        .where(VerificationCode.destination == destination, VerificationCode.created_at >= now - timedelta(hours=1))
+        .where(VerificationCode.destination == destination, VerificationCode.created_at >= now - timedelta(days=1))
         .order_by(VerificationCode.created_at.desc())
     ).all()
+    recent = [created for created in today if _aware(created) >= now - timedelta(hours=1)]
     if recent:
         wait = RESEND_SECONDS - int((now - _aware(recent[0])).total_seconds())
         if wait > 0:
@@ -124,6 +131,9 @@ def issue_code(db: Session, *, user: User | None, purpose: str, channel: str, de
     if len(recent) >= MAX_PER_HOUR:
         raise HTTPException(status_code=429, detail="Too many codes asked for. Please try again in an hour.",
                             headers={"Retry-After": "3600"})
+    if len(today) >= MAX_PER_DAY:
+        raise HTTPException(status_code=429, detail="Too many codes asked for today. Please try again tomorrow, "
+                                                    "or message EkiMove support.", headers={"Retry-After": "3600"})
 
     # A daily ceiling on text messages caps the cost if someone abuses sign-up.
     if channel == "sms" and settings.sms_daily_limit > 0:
@@ -173,7 +183,7 @@ def check_code(db: Session, *, user: User, purpose: str, code: str, destination:
     if record is None or _aware(record.expires_at) < now:
         raise HTTPException(status_code=400, detail="This code has expired or was replaced. Ask for a new one.")
     record.attempts += 1
-    supplied = "".join(ch for ch in str(code or "") if ch.isdigit())
+    supplied = "".join(ch for ch in str(code or "") if ch in "0123456789")
     if not hmac.compare_digest(record.code_hash, _hash(supplied, record.destination, purpose)):
         if record.attempts >= MAX_ATTEMPTS:
             record.used_at = now
@@ -214,11 +224,22 @@ class ResetRequest(BaseModel):
 GENERIC_RESET = "If an account uses that phone number or email, we've sent it a 6-digit code."
 
 
+def _limit_codes(request: Request) -> None:
+    enforce_rate_limit("codes", client_ip(request), settings.code_ip_limit_per_hour, 3600,
+                       "Too many codes asked for from this connection. Please try again in an hour.")
+
+
+def _limit_code_checks(request: Request) -> None:
+    enforce_rate_limit("code-checks", client_ip(request), settings.code_check_ip_limit, 900,
+                       "Too many codes tried from this connection. Please wait 15 minutes and try again.")
+
+
 @router.post("/auth/password-reset/request", tags=["authentication"])
-def request_password_reset(payload: ResetRequest, db: Session = Depends(get_db)) -> dict:
+def request_password_reset(payload: ResetRequest, request: Request, db: Session = Depends(get_db)) -> dict:
     if not (messaging.sms_configured() or messaging.email_configured()):
         raise HTTPException(status_code=503, detail="Password reset by code isn't switched on yet. "
                                                     "Please message EkiMove support to reset your password.")
+    _limit_codes(request)
     user = find_user(db, payload.identifier)
     if user is None or not user.is_active or user.removed_at is not None:
         return {"message": GENERIC_RESET}
@@ -228,7 +249,13 @@ def request_password_reset(payload: ResetRequest, db: Session = Depends(get_db))
         options.reverse()
     for channel, destination in options:
         if destination and channel_configured(channel):
-            issue_code(db, user=user, purpose="reset_password", channel=channel, destination=destination)
+            try:
+                issue_code(db, user=user, purpose="reset_password", channel=channel, destination=destination)
+            except HTTPException as exc:
+                # "Wait before asking again" would reveal that the account
+                # exists, so those answers look like every other one.
+                if exc.status_code != 429:
+                    raise
             break
     return {"message": GENERIC_RESET}
 
@@ -237,14 +264,18 @@ class ResetConfirm(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
     identifier: str = Field(min_length=3, max_length=254)
     code: str = Field(min_length=4, max_length=12)
-    new_password: str = Field(min_length=12, max_length=256)
+    new_password: str = Field(min_length=12, max_length=128)
 
 
 @router.post("/auth/password-reset/confirm", tags=["authentication"])
-def confirm_password_reset(payload: ResetConfirm, db: Session = Depends(get_db)) -> dict:
+def confirm_password_reset(payload: ResetConfirm, request: Request, db: Session = Depends(get_db)) -> dict:
+    _limit_code_checks(request)
     user = find_user(db, payload.identifier)
     if user is None or not user.is_active or user.removed_at is not None:
         raise HTTPException(status_code=400, detail="This code has expired or was replaced. Ask for a new one.")
+    weak = password_problem(payload.new_password, name=user.full_name, phone=user.phone, email=user.email)
+    if weak:
+        raise HTTPException(status_code=422, detail=weak)
     record = check_code(db, user=user, purpose="reset_password", code=payload.code)
     user.password_hash = hash_password(payload.new_password)
     user.must_change_password = False
@@ -273,13 +304,14 @@ def _destination(user: User, channel: str) -> str:
 
 
 @router.post("/me/verify/send")
-def send_my_verification(payload: VerifySend, current_user: User = Depends(get_current_user),
+def send_my_verification(payload: VerifySend, request: Request, current_user: User = Depends(get_current_user),
                          db: Session = Depends(get_db)) -> dict:
     if not channel_configured(payload.channel):
         raise HTTPException(status_code=503, detail="Codes by this route aren't switched on yet.")
     destination = _destination(current_user, payload.channel)
     if (current_user.phone_verified_at if payload.channel == "sms" else current_user.email_verified_at):
         raise HTTPException(status_code=409, detail="This is already confirmed.")
+    _limit_codes(request)
     issue_code(db, user=current_user, purpose="verify_contact", channel=payload.channel, destination=destination)
     shown = mask_phone(destination) if payload.channel == "sms" else mask_email(destination)
     return {"sent_to": shown, "expires_in_minutes": CODE_MINUTES}
@@ -360,8 +392,11 @@ def _profile(db: Session, user: User) -> dict:
 
 
 @router.post("/me/contact/start")
-def start_contact_change(payload: ContactStart, current_user: User = Depends(get_current_user),
+def start_contact_change(payload: ContactStart, request: Request, current_user: User = Depends(get_current_user),
                          db: Session = Depends(get_db)) -> dict:
+    from app.accounts import limit_password_checks  # avoid an import cycle
+
+    limit_password_checks(current_user)
     if not verify_password(payload.password, current_user.password_hash):
         raise HTTPException(status_code=400, detail="Your password isn't right.")
     value = _clean_new_contact(db, current_user, payload.kind, payload.value)
@@ -371,6 +406,7 @@ def start_contact_change(payload: ContactStart, current_user: User = Depends(get
         _apply_contact(db, current_user, payload.kind, value, None)
         db.commit()
         return {"code_sent": False, "profile": _profile(db, current_user)}
+    _limit_codes(request)
     issue_code(db, user=current_user, purpose="change_contact", channel=channel, destination=value)
     return {"code_sent": True, "sent_to": mask_phone(value) if channel == "sms" else mask_email(value),
             "expires_in_minutes": CODE_MINUTES}

@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.database import get_db
+from app.rate_limit import enforce as enforce_rate_limit
 from app.models import Driver, Ride, RideRequest, TripMessage, User
 
 router = APIRouter(prefix="/api/v1", tags=["trip chat"])
@@ -97,6 +98,8 @@ class TripMessageIn(BaseModel):
 def send_trip_message(ride_id: int, payload: TripMessageIn, current_user: User = Depends(get_current_user),
                       db: Session = Depends(get_db)) -> dict:
     ride, side = _ride(db, ride_id, current_user)
+    enforce_rate_limit("trip-chat", f"user:{current_user.id}", 20, 60,
+                       "You're sending messages very fast. Please wait a moment.")
     if ride.status not in OPEN_STATUSES:
         raise HTTPException(status_code=409, detail="This trip has ended, so the chat is closed. "
                                                     "Use Support if you need help.")

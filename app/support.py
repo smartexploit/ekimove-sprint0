@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, require_super_admin
 from app.database import get_db
+from app.rate_limit import enforce as enforce_rate_limit
 from app.models import RideRequest, SupportMessage, SupportThread, User
 
 router = APIRouter(prefix="/api/v1", tags=["support"])
@@ -169,6 +170,8 @@ def my_threads(current_user: User = Depends(get_current_user), db: Session = Dep
 def start_thread(payload: NewThread, current_user: User = Depends(get_current_user),
                  db: Session = Depends(get_db)) -> dict:
     _no_admins(current_user)
+    enforce_rate_limit("support-threads", f"user:{current_user.id}", 10, 3600,
+                       "You've opened a lot of conversations. Please reply in an existing one, or try later.")
     if payload.ride_request_id is not None:
         request = db.get(RideRequest, payload.ride_request_id)
         if request is None or request.passenger_user_id != current_user.id:
@@ -190,6 +193,8 @@ def read_thread(thread_id: int, current_user: User = Depends(get_current_user), 
 def reply(thread_id: int, payload: NewMessage, current_user: User = Depends(get_current_user),
           db: Session = Depends(get_db)) -> dict:
     thread = _own_thread(db, thread_id, current_user)
+    enforce_rate_limit("support-messages", f"user:{current_user.id}", 60, 3600,
+                       "You've sent a lot of messages. Please wait a little for EkiMove to reply.")
     post_message(db, thread, current_user, payload.body, from_staff=False)
     db.commit()
     return thread_detail(db, thread, for_staff=False)

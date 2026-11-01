@@ -41,6 +41,7 @@ def test_check_uses_separate_ip_and_phone_keys(monkeypatch):
     assert "192.0.2.10" not in ip_key
     assert "08000000001" not in phone_key
     assert call[4] == settings.login_rate_limit_attempts
+    assert call[5] == settings.login_ip_rate_limit_attempts
     assert fake.closed is True
 
 
@@ -62,7 +63,8 @@ def test_failed_login_uses_both_keys_and_configured_expiry(monkeypatch):
     assert call[2] == rate_limit_module._key("ip:192.0.2.20")
     assert call[3] == rate_limit_module._key("phone:08000000002")
     assert call[4] == settings.login_rate_limit_attempts
-    assert call[5] == settings.login_rate_limit_window_seconds
+    assert call[5] == settings.login_ip_rate_limit_attempts
+    assert call[6] == settings.login_rate_limit_window_seconds
     assert fake.closed is True
 
 

@@ -1,7 +1,10 @@
 ﻿from decimal import Decimal
+import os
+import re
 from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -144,6 +147,11 @@ def client():
 
 @pytest.fixture(autouse=True)
 def bypass_redis_rate_limiter_in_tests(monkeypatch):
+    import app.rate_limit as rate_limit_module
+
+    rate_limit_module.reset_memory_counters()
+    monkeypatch.setattr(settings, "redis_url", None)
+    monkeypatch.setattr(settings, "redis_host", None)
     monkeypatch.setattr(
         main_module,
         "check_login_allowed",
@@ -4057,9 +4065,12 @@ def test_policies_acceptance(client):
 
 def test_sign_ins_are_logged_for_traceability(client):
     client.post("/api/v1/auth/login", json={"phone": "08000000001", "password": PASSENGER_LOGIN[1]},
-                headers={"User-Agent": "TestPhone/1.0", "X-Forwarded-For": "102.89.1.2"})
+                headers={"User-Agent": "TestPhone/1.0", "True-Client-IP": "102.89.1.2",
+                         "X-Forwarded-For": "6.6.6.6"})
     detail = client.get("/api/v1/admin/people/1", headers=login(client, *ADMIN_LOGIN)).json()
     assert any("102.89.1.2" in s["details"] and "TestPhone" in s["details"] for s in detail["sign_ins"])
+    # A visitor-written X-Forwarded-For is never taken as their address.
+    assert not any("6.6.6.6" in s["details"] for s in detail["sign_ins"])
 
 
 def test_admin_live_map_shows_online_drivers_and_trips(client):
@@ -4288,8 +4299,14 @@ def test_codes_are_limited_per_hour(client, outbox):
         response = client.post("/api/v1/auth/password-reset/request", json={"identifier": "08000000001"})
         assert response.status_code == 200, (attempt, response.text)
         age_codes(client, 70)
+    sent = len(outbox)
+    # The sixth asks gets the same answer as an unknown account (so it can't
+    # be used to find accounts), but no new code is sent.
     blocked = client.post("/api/v1/auth/password-reset/request", json={"identifier": "08000000001"})
-    assert blocked.status_code == 429
+    assert blocked.status_code == 200
+    assert blocked.json()["message"] == client.post("/api/v1/auth/password-reset/request",
+                                                    json={"identifier": "08099999999"}).json()["message"]
+    assert len(outbox) == sent
 
 
 def test_failed_send_reports_an_error(client, outbox, monkeypatch):
@@ -5069,3 +5086,243 @@ def test_rides_are_not_affected_by_delivery_codes(client, no_paystack):
     driver_headers, _, ride_id, _ = complete_paid_ride(client)
     with session_for(client) as db:
         assert db.get(Ride, ride_id).delivery_code is None
+
+
+# --------------------------------------------------------------------------
+# Security review: what the sign-up and sign-in fields accept
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("phone", ["+447700900123", "12345678", "0123456789", "08123", "0803123456789",
+                                   "0603 123 4567", "0803-123-4567x", "0803<script>", "+234 703 123 456"])
+def test_sign_up_refuses_phones_that_are_not_nigerian_mobiles(client, phone):
+    response = register(client, phone=phone)
+    assert response.status_code == 422, (phone, response.text)
+    detail = response.json()["detail"]
+    assert "Nigerian mobile" in detail if isinstance(detail, str) else detail[0]["loc"][-1] == "phone"
+
+
+@pytest.mark.parametrize("typed", ["0803 123 4567", "+234 803 123 4567", "2348031234567", "(0803) 123-4567",
+                                   "8031234567"])
+def test_sign_up_accepts_common_ways_of_typing_a_number_and_saves_one_form(client, typed):
+    response = register(client, phone=typed)
+    assert response.status_code == 201, (typed, response.text)
+    assert response.json()["user"]["phone"] == "08031234567"
+    assert client.post("/api/v1/auth/login", json={"identifier": "+2348031234567",
+                                                   "password": "Email-Signup-Password-1!"}).status_code == 200
+
+
+@pytest.mark.parametrize("email", ["a@b", "a b@example.com", "<x>@example.com", "a@example..com", "a@-x.com",
+                                   "a@example.c", "a\"b@example.com", "a@exa mple.com", ".a@example.com",
+                                   "a..b@example.com", "x" * 65 + "@example.com"])
+def test_sign_up_refuses_malformed_emails(client, email):
+    response = register(client, email=email)
+    assert response.status_code == 422, (email, response.text)
+
+
+@pytest.mark.parametrize("name", ["A", "12345", "Ada 2", "Visit http://x.co", "<b>Ada</b>", "Ada@home", "Ada; drop",
+                                  "-Ada", "x" * 81, "Ada​​Love‮"])
+def test_sign_up_refuses_names_with_links_digits_or_symbols(client, name):
+    response = register(client, phone="08031234567", full_name=name)
+    assert response.status_code == 422, (name, response.text)
+
+
+@pytest.mark.parametrize("name", ["Ọlámídé Adébáyọ̀", "Mary-Jane O'Neil", "Dr. Funmi  Ajayi", "Chukwuemeka Obi"])
+def test_sign_up_keeps_real_names_including_yoruba_tone_marks(client, name):
+    response = register(client, phone="08031234567", full_name=name)
+    assert response.status_code == 201, (name, response.text)
+    assert response.json()["user"]["full_name"] == " ".join(name.split())
+
+
+@pytest.mark.parametrize("password,reason", [
+    ("123456789012", "only numbers"),
+    ("Password1234!", "too common"),
+    ("aaaaaaaaaaaa", "few"),
+    ("abcdefghijklmn", "run of keys"),
+    ("qwertyuiop123", "common"),
+    ("Hijklmnopqrs1", "run of keys"),
+    ("Ada08031234567", "phone number"),
+    ("adewale.k@2026", "email address"),
+])
+def test_sign_up_refuses_easily_guessed_passwords(client, password, reason):
+    response = register(client, phone="08031234567", email="adewale.k@example.com", password=password)
+    assert response.status_code == 422, (password, response.text)
+    assert reason in response.json()["detail"], response.json()["detail"]
+
+
+def test_sign_up_refuses_odd_invite_codes_and_unknown_fields(client):
+    assert register(client, phone="08031234567", referral_code="ABC<script>").status_code == 422
+    assert register(client, phone="08031234567", role="super_admin").status_code == 422
+    created = register(client, phone="08031234567", referral_code="")
+    assert created.status_code == 201 and created.json()["user"]["role"] == "passenger"
+
+
+def test_sign_ups_from_one_connection_are_limited(client, monkeypatch):
+    monkeypatch.setattr(settings, "signup_ip_limit_per_hour", 2)
+    ip = {"True-Client-IP": "102.88.7.7"}
+    body = {"full_name": "Ada Lim", "password": "Email-Signup-Password-1!", "accept_policies": True}
+    assert client.post("/api/v1/auth/register", json={**body, "phone": "08031110001"}, headers=ip).status_code == 201
+    assert client.post("/api/v1/auth/register", json={**body, "phone": "08031110002"}, headers=ip).status_code == 201
+    blocked = client.post("/api/v1/auth/register", json={**body, "phone": "08031110003"}, headers=ip)
+    assert blocked.status_code == 429 and "Retry-After" in blocked.headers
+    # Someone on another connection is not affected.
+    other = client.post("/api/v1/auth/register", json={**body, "phone": "08031110004"},
+                        headers={"True-Client-IP": "102.88.7.8"})
+    assert other.status_code == 201
+
+
+def test_login_limits_use_the_real_visitor_address(client, monkeypatch):
+    seen = []
+    monkeypatch.setattr(main_module, "check_login_allowed", lambda ip, key: (seen.append((ip, key)), (True, 0))[1])
+    client.post("/api/v1/auth/login", json={"identifier": "0803 000 0001", "password": "x"},
+                headers={"True-Client-IP": "105.112.4.5", "X-Forwarded-For": "1.2.3.4"})
+    client.post("/api/v1/auth/login", json={"identifier": "Someone@Example.com", "password": "x"},
+                headers={"CF-Connecting-IP": "2c0f:f5c0::1"})
+    client.post("/api/v1/auth/login", json={"identifier": "08030000001", "password": "x"},
+                headers={"True-Client-IP": "not-an-ip"})
+    assert seen[0] == ("105.112.4.5", "2348030000001")
+    assert seen[1] == ("2c0f:f5c0::1", "someone@example.com")
+    assert seen[2][0] == "testclient"
+
+
+def test_login_refuses_unknown_fields_and_huge_values(client):
+    assert client.post("/api/v1/auth/login", json={"identifier": "08000000001", "password": "x",
+                                                   "role": "super_admin"}).status_code == 422
+    assert client.post("/api/v1/auth/login", json={"identifier": "0" * 300, "password": "x"}).status_code == 422
+    assert client.post("/api/v1/auth/login", json={"identifier": "08000000001",
+                                                   "password": "x" * 300}).status_code == 422
+    wrong = client.post("/api/v1/auth/login", json={"identifier": "08000000001", "password": "nope"})
+    unknown = client.post("/api/v1/auth/login", json={"identifier": "08099998888", "password": "nope"})
+    assert wrong.status_code == unknown.status_code == 401
+    assert wrong.json() == unknown.json()
+
+
+def test_password_change_and_reset_apply_the_same_password_rules(client, outbox):
+    headers = login(client, *PASSENGER_LOGIN)
+    weak = client.post("/api/v1/me/password", json={"current_password": PASSENGER_LOGIN[1],
+                                                    "new_password": "111111111111"}, headers=headers)
+    assert weak.status_code == 422
+    client.post("/api/v1/auth/password-reset/request", json={"identifier": "08000000001"})
+    reset = client.post("/api/v1/auth/password-reset/confirm", json={
+        "identifier": "08000000001", "code": last_code(outbox), "new_password": "Password12345"})
+    assert reset.status_code == 422 and "common" in reset.json()["detail"]
+
+
+def test_current_password_guesses_are_limited(client):
+    headers = login(client, *PASSENGER_LOGIN)
+    for _ in range(5):
+        wrong = client.post("/api/v1/me/password", json={"current_password": "Wrong-Guess-0000!",
+                                                         "new_password": "A-Brand-New-Phrase-9"}, headers=headers)
+        assert wrong.status_code == 400
+    blocked = client.post("/api/v1/me/password", json={"current_password": PASSENGER_LOGIN[1],
+                                                       "new_password": "A-Brand-New-Phrase-9"}, headers=headers)
+    assert blocked.status_code == 429
+
+
+def test_code_requests_from_one_connection_are_limited(client, outbox, monkeypatch):
+    monkeypatch.setattr(settings, "code_ip_limit_per_hour", 2)
+    ip = {"True-Client-IP": "102.90.1.1"}
+    for number in ("08000000001", "08000000002"):
+        assert client.post("/api/v1/auth/password-reset/request", json={"identifier": number},
+                           headers=ip).status_code == 200
+    blocked = client.post("/api/v1/auth/password-reset/request", json={"identifier": "08000000003"}, headers=ip)
+    assert blocked.status_code == 429
+    assert len(outbox) == 2
+
+
+def test_codes_per_number_are_capped_per_day(client, outbox):
+    from app import codes as codes_module
+
+    for _ in range(codes_module.MAX_PER_DAY):
+        client.post("/api/v1/auth/password-reset/request", json={"identifier": "08000000001"})
+        age_codes(client, 3700)  # spread across the day, past the hourly limit
+    sent = len(outbox)
+    assert sent == codes_module.MAX_PER_DAY
+    client.post("/api/v1/auth/password-reset/request", json={"identifier": "08000000001"})
+    assert len(outbox) == sent
+
+
+def test_profile_edits_and_delivery_recipients_follow_the_same_rules(client):
+    headers = login(client, *PASSENGER_LOGIN)
+    assert client.patch("/api/v1/me", json={"full_name": "www.spam.com"}, headers=headers).status_code == 422
+    assert client.patch("/api/v1/me", json={"email": "bad@@x.com"}, headers=headers).status_code == 422
+    ok = client.patch("/api/v1/me", json={"full_name": "  Adébáyọ̀   Ola "}, headers=headers)
+    assert ok.status_code == 200 and ok.json()["full_name"] == "Adébáyọ̀ Ola"
+    assert client.put("/api/v1/me/emergency-contact", json={"name": "Call 0803", "phone": "08031112222"},
+                      headers=headers).status_code == 422
+
+
+def test_unusual_pin_characters_are_a_wrong_pin_not_a_crash(client):
+    from app.trips import check_pickup_pin
+
+    with session_for(client) as db:
+        from types import SimpleNamespace
+
+        ride = SimpleNamespace(id=999, pickup_pin="1234")
+        for pin in ("١٢٣٤", "12345\x00", "１２３４", "", None):
+            with pytest.raises(HTTPException) as exc:
+                check_pickup_pin(db, ride, pin, 1)
+            assert exc.value.status_code in (409, 429)
+
+
+def test_api_answers_carry_browser_safety_headers_and_size_cap():
+    from fastapi.testclient import TestClient as PlainClient
+
+    with PlainClient(main_module.application) as plain:
+        response = plain.get("/health")
+        assert response.headers["x-content-type-options"] == "nosniff"
+        assert response.headers["x-frame-options"] == "DENY"
+        assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
+        api = plain.get("/api/v1/auth/options")
+        assert api.headers.get("cache-control") == "no-store"
+        big = plain.post("/api/v1/auth/login", content=b"x", headers={
+            "content-length": str(settings.max_request_bytes + 1), "content-type": "application/json"})
+        assert big.status_code == 413
+
+
+def test_docs_are_off_in_production():
+    import subprocess
+    import sys
+
+    script = ("from app.main import app; import sys; "
+              "sys.exit(0 if app.docs_url is None and app.openapi_url is None else 1)")
+    env = {**os.environ, "APP_ENV": "production"}
+    assert subprocess.run([sys.executable, "-c", script], env=env, cwd=os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__)))).returncode == 0
+
+
+def test_every_staff_route_refuses_passengers_and_strangers(client):
+    from fastapi.routing import APIRoute
+
+    def walk(routes, prefix=""):
+        for route in routes:
+            if isinstance(route, APIRoute):
+                yield prefix + route.path, route
+            else:
+                inner = getattr(route, "original_router", None) or getattr(route, "router", None)
+                if inner is not None:
+                    yield from walk(inner.routes, prefix + (getattr(route, "prefix", "") or ""))
+
+    passenger = login(client, *PASSENGER_LOGIN)
+    checked = 0
+    for path, route in walk(main_module.app.routes):
+        if "/admin/" not in path:
+            continue
+        url = re.sub(r"\{[^}]+\}", "1", path)
+        for method in route.methods:
+            for headers, allowed in ((passenger, {403}), ({}, {401})):
+                response = client.request(method, url, headers=headers, json={})
+                assert response.status_code in allowed, (method, path, response.status_code)
+            checked += 1
+    assert checked > 50
+
+
+def test_support_conversations_are_limited_per_hour(client):
+    headers = login(client, *PASSENGER_LOGIN)
+    for number in range(10):
+        started = client.post("/api/v1/support/threads", json={"subject": f"Question {number}",
+                                                               "message": "Hello"}, headers=headers)
+        assert started.status_code == 201, started.text
+    blocked = client.post("/api/v1/support/threads", json={"subject": "One more", "message": "Hello"},
+                          headers=headers)
+    assert blocked.status_code == 429

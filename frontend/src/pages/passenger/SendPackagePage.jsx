@@ -13,6 +13,7 @@ import { createDelivery, getDeliveryOptions } from '../../services/deliveryServi
 import { getMyPromos, listSavedPlaces } from '../../services/promoService.js'
 import { formatNaira } from '../../utils/format.js'
 import { formatPickupTime, toApiTime } from '../../utils/schedule.js'
+import { nameProblem, nameTyping, nigerianMobile, phoneTyping } from '../../utils/inputRules.js'
 
 const EMPTY = {
   service_area_id: '', origin_place_id: '', destination_place_id: '', size: '', description: '', fragile: false,
@@ -76,6 +77,9 @@ export default function SendPackagePage() {
     event.preventDefault()
     if (!chosen) return setError('Choose the pickup, drop-off and package size.')
     if (!form.allowed) return setError('Please confirm the package holds no banned items.')
+    const problem = nameProblem(form.recipient_name, "recipient's name") ||
+      (nigerianMobile(form.recipient_phone) ? '' : "Enter the recipient's Nigerian mobile number, like 0803 123 4567.")
+    if (problem) return setError(problem)
     setBusy(true)
     setError('')
     try {
@@ -84,8 +88,8 @@ export default function SendPackagePage() {
         destination_place_id: Number(form.destination_place_id),
         size: form.size,
         description: form.description.trim(),
-        recipient_name: form.recipient_name.trim(),
-        recipient_phone: form.recipient_phone.trim(),
+        recipient_name: form.recipient_name.trim().replace(/\s+/g, ' '),
+        recipient_phone: nigerianMobile(form.recipient_phone),
         notes: form.notes.trim() || null,
         fragile: form.fragile,
         no_prohibited_items: true,
@@ -176,13 +180,14 @@ export default function SendPackagePage() {
               <h2 id="recipient-title" className="section-title">Who receives it</h2>
               <label className="field">
                 <span className="field-label">Recipient’s name</span>
-                <input className="input" required minLength={2} maxLength={160} autoComplete="off"
-                  value={form.recipient_name} onChange={field('recipient_name')} />
+                <input className="input" required minLength={2} maxLength={80} autoComplete="off"
+                  value={form.recipient_name} onChange={(event) => set('recipient_name', nameTyping(event.target.value))} />
               </label>
               <label className="field">
                 <span className="field-label">Recipient’s phone</span>
-                <input className="input" type="tel" inputMode="tel" required minLength={7} maxLength={32} autoComplete="off"
-                  placeholder="e.g. 08012345678" value={form.recipient_phone} onChange={field('recipient_phone')} />
+                <input className="input" type="tel" inputMode="tel" required minLength={10} maxLength={18} autoComplete="off"
+                  placeholder="e.g. 0803 123 4567" value={form.recipient_phone}
+                  onChange={(event) => set('recipient_phone', phoneTyping(event.target.value))} />
                 <span className="field-hint">The rider may call them. They get the delivery code to give the rider.</span>
               </label>
               <label className="field">

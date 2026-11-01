@@ -9,6 +9,7 @@ import Alert from '../../components/ui/Alert.jsx'
 import { IDLE_MINUTES } from '../../utils/session.js'
 import PasswordInput from '../../components/ui/PasswordInput.jsx'
 import { homePathForRole } from '../../utils/roles.js'
+import { identifierProblem } from '../../utils/inputRules.js'
 
 /** Only follow internal passenger paths saved by the route guard. */
 function safeReturnPath(value) {
@@ -29,10 +30,16 @@ export default function LoginPage() {
   async function submit(event) {
     event.preventDefault()
     setError('')
+    const problem = identifierProblem(identifier)
+    if (problem) {
+      setError(problem)
+      document.getElementById('login-identifier')?.focus()
+      return
+    }
     setLoading(true)
 
     try {
-      await loginPassenger({ identifier, password })
+      await loginPassenger({ identifier: identifier.trim(), password })
       const user = await getCurrentUser()
       const home = homePathForRole(user.role)
       const destination =
@@ -81,7 +88,7 @@ export default function LoginPage() {
             autoCapitalize="none"
             spellCheck={false}
             value={identifier}
-            onChange={(event) => setIdentifier(event.target.value)}
+            onChange={(event) => setIdentifier(event.target.value.replace(/[^\w@.%+\-() ]/g, '').slice(0, 254))}
             minLength={3}
             maxLength={254}
             placeholder="0803 000 0000 or you@example.com"

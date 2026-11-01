@@ -4,6 +4,10 @@ import { getAuthOptions, registerPassenger } from '../../services/authService.js
 import AuthLayout from '../../layouts/AuthLayout.jsx'
 import Alert from '../../components/ui/Alert.jsx'
 import PasswordInput from '../../components/ui/PasswordInput.jsx'
+import {
+  NAME_MAX, PASSWORD_MAX, PASSWORD_MIN, emailProblem, inviteTyping, nameProblem, nameTyping, nigerianMobile,
+  passwordProblem, phoneProblem, phoneTyping,
+} from '../../utils/inputRules.js'
 
 function safeReturnPath(value) {
   if (typeof value !== 'string') return null
@@ -21,13 +25,14 @@ export default function RegisterPage() {
     full_name: '',
     phone: '',
     email: '',
-    referral_code: (new URLSearchParams(location.search).get('ref') || '').toUpperCase().slice(0, 40),
+    referral_code: inviteTyping(new URLSearchParams(location.search).get('ref') || ''),
     password: '',
     confirmPassword: '',
   })
   const [method, setMethod] = useState('phone')
   const [options, setOptions] = useState(null)
   const [agree, setAgree] = useState(false)
+  const [touched, setTouched] = useState({})
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -39,19 +44,42 @@ export default function RegisterPage() {
     }
   }, [])
 
+  const typing = { full_name: nameTyping, phone: phoneTyping, email: (value) => value.replace(/\s/g, '').slice(0, 254) }
+
   function update(event) {
+    const { name, value } = event.target
     setForm((current) => ({
       ...current,
-      [event.target.name]: event.target.value,
+      [name]: typing[name] ? typing[name](value) : value,
     }))
   }
+
+  function touch(event) {
+    const { name } = event.target
+    setTouched((current) => ({ ...current, [name]: true }))
+  }
+
+  const problems = {
+    full_name: nameProblem(form.full_name),
+    phone: method === 'phone' ? phoneProblem(form.phone) : '',
+    email: method === 'email' ? emailProblem(form.email) : '',
+    password: passwordProblem(form.password, {
+      name: form.full_name,
+      phone: method === 'phone' ? form.phone : '',
+      email: method === 'email' ? form.email : '',
+    }),
+  }
+  const showProblem = (name) => (touched[name] && problems[name]) || ''
 
   async function submit(event) {
     event.preventDefault()
     setError('')
+    setTouched({ full_name: true, phone: true, email: true, password: true })
 
-    if (form.password.length < 12) {
-      setError('Your password must contain at least 12 characters.')
+    const firstBad = ['full_name', method, 'password'].find((name) => problems[name])
+    if (firstBad) {
+      setError(problems[firstBad])
+      document.getElementById(firstBad)?.focus()
       return
     }
 
@@ -69,9 +97,9 @@ export default function RegisterPage() {
 
     try {
       await registerPassenger({
-        full_name: form.full_name,
-        phone: method === 'phone' ? form.phone : '',
-        email: method === 'email' ? form.email : '',
+        full_name: form.full_name.trim().replace(/\s+/g, ' '),
+        phone: method === 'phone' ? nigerianMobile(form.phone) : '',
+        email: method === 'email' ? form.email.trim().toLowerCase() : '',
         referral_code: form.referral_code,
         password: form.password,
         accept_policies: true,
@@ -106,10 +134,16 @@ export default function RegisterPage() {
             placeholder="As drivers should know you"
             value={form.full_name}
             onChange={update}
+            onBlur={touch}
             minLength={2}
-            maxLength={160}
+            maxLength={NAME_MAX}
+            aria-invalid={Boolean(showProblem('full_name'))}
+            aria-describedby="name-hint"
             required
           />
+          <span id="name-hint" className={`field-hint ${showProblem('full_name') ? 'field-hint-error' : ''}`}>
+            {showProblem('full_name') || 'Letters only — no numbers or links.'}
+          </span>
         </label>
 
         <div className="field">
@@ -134,11 +168,13 @@ export default function RegisterPage() {
               type="tel"
               inputMode="tel"
               autoComplete="tel"
-              placeholder="e.g. 08012345678"
+              placeholder="e.g. 0803 123 4567"
               value={form.phone}
               onChange={update}
-              minLength={7}
-              maxLength={32}
+              onBlur={touch}
+              minLength={10}
+              maxLength={18}
+              aria-invalid={Boolean(showProblem('phone'))}
               aria-describedby="contact-hint"
               required
             />
@@ -158,16 +194,19 @@ export default function RegisterPage() {
               placeholder="you@example.com"
               value={form.email}
               onChange={update}
+              onBlur={touch}
               maxLength={254}
+              aria-invalid={Boolean(showProblem('email'))}
               aria-describedby="contact-hint"
               required
             />
           </label>
         )}
-        <span className="field-hint" id="contact-hint" style={{ marginTop: -8 }}>
-          {(method === 'phone' ? options?.sms : options?.email)
+        <span className={`field-hint ${showProblem(method) ? 'field-hint-error' : ''}`} id="contact-hint"
+          style={{ marginTop: -8 }} aria-live="polite">
+          {showProblem(method) || ((method === 'phone' ? options?.sms : options?.email)
             ? `We'll ${method === 'phone' ? 'text' : 'email'} you a 6-digit code to confirm it's yours.`
-            : `You'll sign in with this ${method === 'phone' ? 'number' : 'address'}. You can add the other later in your profile.`}
+            : `You'll sign in with this ${method === 'phone' ? 'number' : 'address'}. You can add the other later in your profile.`)}
         </span>
 
         <div className="field">
@@ -178,16 +217,24 @@ export default function RegisterPage() {
             id="password"
             name="password"
             autoComplete="new-password"
-            placeholder="At least 12 characters"
+            placeholder={`At least ${PASSWORD_MIN} characters`}
             value={form.password}
             onChange={update}
-            minLength={12}
-            maxLength={256}
+            onBlur={touch}
+            minLength={PASSWORD_MIN}
+            maxLength={PASSWORD_MAX}
+            aria-invalid={Boolean(form.password && problems.password && touched.password)}
             aria-describedby="password-hint"
             required
           />
-          <span className="field-hint" id="password-hint">
-            Use at least 12 characters. A short phrase is easy to remember.
+          <span
+            className={`field-hint ${form.password ? (problems.password ? (touched.password ? 'field-hint-error' : '') : 'field-hint-ok') : ''}`}
+            id="password-hint"
+            aria-live="polite"
+          >
+            {form.password
+              ? problems.password || 'Strong enough. Keep it to yourself.'
+              : `Use at least ${PASSWORD_MIN} characters. A short phrase only you would know is easy to remember.`}
           </span>
         </div>
 
@@ -202,7 +249,7 @@ export default function RegisterPage() {
             placeholder="Type it again"
             value={form.confirmPassword}
             onChange={update}
-            maxLength={256}
+            maxLength={PASSWORD_MAX}
             aria-describedby="confirm-hint"
             required
           />
@@ -223,7 +270,7 @@ export default function RegisterPage() {
           <span className="field-label">Invite code (optional)</span>
           <input id="referral_code" className="input" name="referral_code" autoCapitalize="characters" spellCheck={false}
             maxLength={40} value={form.referral_code} placeholder="From a friend"
-            onChange={(event) => setForm((current) => ({ ...current, referral_code: event.target.value.toUpperCase() }))} />
+            onChange={(event) => setForm((current) => ({ ...current, referral_code: inviteTyping(event.target.value) }))} />
           {form.referral_code && <span className="field-hint">You’ll get money off your first ride.</span>}
         </label>
 

@@ -1,7 +1,7 @@
 /* EkiMove phone notifications. Loaded into the app's service worker
    (see workbox.importScripts in vite.config.js). */
 self.addEventListener('push', (event) => {
-  let data = {}
+  let data
   try {
     data = event.data ? event.data.json() : {}
   } catch {

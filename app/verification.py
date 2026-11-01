@@ -14,6 +14,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, require_super_admin
+from app.client_ip import client_ip
+from app.contacts import ContactError, clean_name
 from app.config import settings
 from app.database import get_db
 from app.driver_applications import ALLOWED_IMAGES, MAX_PHOTO_BYTES
@@ -55,9 +57,8 @@ def _iso(value: datetime | None) -> str | None:
 
 
 def client_fingerprint(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for", "")
-    ip = forwarded.split(",")[0].strip() or (request.client.host if request.client else "unknown")
-    agent = request.headers.get("user-agent", "unknown")[:160]
+    ip = client_ip(request)
+    agent = "".join(ch for ch in request.headers.get("user-agent", "unknown") if ch.isprintable())[:160]
     return f"IP {ip} · {agent}"
 
 
@@ -238,8 +239,14 @@ class EmergencyContact(BaseModel):
 @router.put("/me/emergency-contact")
 def set_emergency_contact(payload: EmergencyContact, current_user: User = Depends(get_current_user),
                           db: Session = Depends(get_db)) -> dict:
+    payload.phone = " ".join(re.sub(r"[()\-.]", " ", payload.phone).split())
     if payload.phone and not re.fullmatch(r"\+?\d[\d ]{6,18}", payload.phone):
         raise HTTPException(status_code=422, detail="Enter a valid phone number.")
+    if payload.name:
+        try:
+            payload.name = clean_name(payload.name, label="contact's name")
+        except ContactError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
     if bool(payload.name) != bool(payload.phone):
         raise HTTPException(status_code=422, detail="Enter both a name and a phone number, or clear both.")
     current_user.emergency_contact_name = payload.name or None

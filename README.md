@@ -147,8 +147,8 @@ Passengers and drivers can chat with the EkiMove team under *Support*; the team 
 - **Super-admin:** *Overview* shows what needs attention, live trips, money and recent activity (refreshes every 20 seconds). *People* lists passengers and drivers with their profile, trips, vehicles, balance and activity, and can **suspend** (signed out at once, can't sign in or be assigned), **reactivate** or **remove** an account (name, phone and sign-in erased; trips, payments and earnings kept). Super-admin accounts can't be changed there, and people can't be removed mid-trip.
 
 ## Sign-up, codes and password reset
-- **Phone or email:** passengers sign up with a phone number *or* an email address (drivers give a phone number, email optional) and sign in with either. Numbers match in any common form (`0803…`, `234803…`, `+234 803…`); emails are case-insensitive and unique.
-- **Codes:** once text messages or email are set up, new and existing people confirm their phone number or email with a 6-digit code before they can book (super-admins are never asked). Codes last 10 minutes, allow 5 tries, can be re-sent once a minute and 5 times an hour per number, and only a hash is stored. `SMS_DAILY_LIMIT` (default 300) caps texts per 24 hours so abuse can't run up a bill. *Places & fares → Booking rules* can switch confirmation off at once if a provider has a problem.
+- **Phone or email:** passengers sign up with a Nigerian mobile number *or* an email address (drivers give a phone number, email optional) and sign in with either. Numbers match in any common form (`0803…`, `234803…`, `+234 803…`); emails are case-insensitive and unique. See *Security controls* for exactly what each field accepts.
+- **Codes:** once text messages or email are set up, new and existing people confirm their phone number or email with a 6-digit code before they can book (super-admins are never asked). Codes last 10 minutes, allow 5 tries, can be re-sent once a minute, 5 times an hour and 10 times a day per number, and only a hash is stored. `SMS_DAILY_LIMIT` (default 300) caps texts per 24 hours so abuse can't run up a bill. *Places & fares → Booking rules* can switch confirmation off at once if a provider has a problem.
 - **Forgot password:** `/forgot-password` sends a code to the phone or email on the account (it says the same thing whether or not an account exists). Until a provider is set up, the page tells people to message support.
 - **Changing phone or email:** from the profile, with the password; a code goes to the *new* number or address.
 - **Admin reset:** *People → Reset password* gives a one-time temporary password to read out to the person (after checking it's really them). They must choose their own on next sign-in, and every device they were on is signed out.
@@ -177,6 +177,18 @@ People turn notifications on from *Profile* (drivers also on *My driver status*,
 
 ## Reports
 *Admin → Reports* shows daily totals (Lagos days): requests, completed trips and fares, cancellations, payments received, refunds, commission, driver earnings, payouts and new sign-ups, for any range up to a year. CSV downloads (daily summary, trips, payments, payouts) open in Excel or Google Sheets.
+
+## Security controls
+- **What the sign-up, sign-in and contact fields accept** (checked on the phone and again by the server, `app/contacts.py`):
+  - *Phone:* Nigerian mobile numbers only (070/080/081/090/091, typed as `0803…`, `234803…` or `+234 803…`, spaces and dashes allowed), saved as `0803…`. Foreign and landline numbers are refused, which also blocks "SMS pumping" fraud on code texts.
+  - *Email:* a plain address (`name@example.com`), lower-cased.
+  - *Names* (people, recipients, emergency contacts): letters in any language including Yoruba tone marks, spaces, hyphens, apostrophes and "Dr."-style full stops, up to 80 characters. No digits, links or symbols, because names appear in texts and on drivers' screens.
+  - *Passwords:* 12–128 characters; not only numbers, not a common password, not a run of keys, and not containing the person's phone number, email or just their name.
+  - *Invite codes:* letters, numbers and hyphens. Unknown fields are refused everywhere.
+- **Limits:** 5 wrong passwords per account and 30 per connection in 15 minutes; 10 new accounts and 10 code requests per connection per hour; 5 driver applications per connection per hour; codes 5 per hour and 10 per day per number; current-password checks 5 per 15 minutes. Change them with `LOGIN_RATE_LIMIT_ATTEMPTS`, `LOGIN_IP_RATE_LIMIT_ATTEMPTS`, `SIGNUP_IP_LIMIT_PER_HOUR`, `CODE_IP_LIMIT_PER_HOUR`, `DRIVER_APPLY_IP_LIMIT_PER_HOUR` and `CODE_CHECK_IP_LIMIT`.
+- **Real visitor address:** Render's edge sets `True-Client-IP`, which the API uses for limits and sign-in logs; `X-Forwarded-For` is never trusted. Keep `TRUST_EDGE_IP_HEADERS=true` on Render.
+- **API:** browser safety headers and `Cache-Control: no-store` on every answer, a 6 MB request cap, and the `/docs` page off in production (`API_DOCS_ENABLED=true` turns it on).
+- **Dependencies:** `.github/dependabot.yml` checks weekly; switch on *Dependabot alerts* and *security updates* under the repository's Settings → Code security.
 
 ## Running in production
 - **Error alerts (optional):** set `SENTRY_DSN` from a free Sentry project to be emailed when the API crashes. No personal data is sent.
@@ -210,6 +222,7 @@ The frontend is a separate Render **Static Site** (`ekimove.onrender.com`), not 
 - **Publish directory:** `dist`
 - **Environment:** `VITE_API_BASE_URL=https://ekimove-api.onrender.com`
 - **Redirects/Rewrites:** source `/*`, destination `/index.html`, action **Rewrite**, so links such as `/login` or `/my-rides` open directly.
+- **Headers** (Settings → Headers, path `/*`): `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `Strict-Transport-Security: max-age=31536000`, and `Content-Security-Policy: frame-ancestors 'none'`. These stop other sites showing EkiMove inside a frame to trick people into tapping. The full content security policy is already built into the page itself.
 
 ## Brand assets
 - Logo, app icon and favicon: `frontend/public/favicon.svg`, `frontend/public/brand/`

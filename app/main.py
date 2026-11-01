@@ -1,5 +1,6 @@
 ﻿from app.admin_locations import router as admin_locations_router
 from app.atona import router as atona_router
+import re
 from datetime import datetime, timezone
 from typing import Literal
 from app.payments import router as payments_router
@@ -42,7 +43,9 @@ from app.auth import (
     verify_password,
 )
 from app.config import settings
-from app.contacts import ContactError, clean_email, clean_phone, email_taken, find_user, international_number, is_email, phone_taken
+from app.client_ip import client_ip
+from app.contacts import (ContactError, clean_email, clean_name, clean_phone, email_taken, find_user,
+                          international_number, is_email, password_problem, phone_taken)
 from app.database import engine, get_db
 from app.driver_applications import router as driver_applications_router
 from app.models import AuditLog, Driver, Fare, Incident, Payment, Place, PlaceFare, Ride, RideRequest, ServiceArea, User, Vehicle, Zone
@@ -51,6 +54,7 @@ from app.admin_driver_verification import router as admin_driver_verification_ro
 from app.rate_limit import (
     RateLimitUnavailable,
     check_login_allowed,
+    enforce as enforce_rate_limit,
     record_failed_login,
 )
 
@@ -66,6 +70,8 @@ if settings.sentry_dsn:
         traces_sample_rate=0.0,
     )
 
+_docs_on = settings.api_docs_enabled if settings.api_docs_enabled is not None else settings.app_env != "production"
+
 app = FastAPI(
     title=settings.app_name,
     version="0.4.0",
@@ -73,6 +79,10 @@ app = FastAPI(
         "EkiMove mobility platform API. Pilot scope: Ado-Ekiti. "
         "Payment policy: bank transfer only; cash is not supported."
     ),
+    # The interactive API map is for developers; it stays off in production.
+    docs_url="/docs" if _docs_on else None,
+    redoc_url="/redoc" if _docs_on else None,
+    openapi_url="/openapi.json" if _docs_on else None,
 )
 
 
@@ -116,7 +126,8 @@ class RegisterRequest(BaseModel):
     phone: str | None = Field(default=None, min_length=7, max_length=32)
     email: str | None = Field(default=None, max_length=254)
     full_name: str = Field(min_length=2, max_length=160)
-    password: str = Field(min_length=12, max_length=256)
+    # Leading/trailing spaces in a password are kept (they are part of it).
+    password: str = Field(min_length=12, max_length=128)
     # The app sends true after the person ticks "I agree" to EkiMove's policies.
     accept_policies: bool | None = None
     # Optional invite code from a friend (money off the first ride).
@@ -553,14 +564,8 @@ def database_health_check() -> dict[str, str]:
     """Check database connectivity without exposing credentials."""
     try:
         with engine.connect() as connection:
-            if settings.database_url.startswith("sqlite"):
-                connection.execute(text("SELECT 1"))
-                database_name = "sqlite"
-            else:
-                database_name, _ = connection.execute(
-                    text("SELECT current_database(), current_user")
-                ).one()
-        return {"status": "ok", "database": str(database_name)}
+            connection.execute(text("SELECT 1"))
+        return {"status": "ok"}
     except SQLAlchemyError as exc:
         raise HTTPException(
             status_code=503,
@@ -630,18 +635,26 @@ def register(
             detail="Authentication is not configured",
         )
 
-    full_name = payload.full_name.strip()
     try:
+        full_name = clean_name(payload.full_name, label="full name")
         phone = clean_phone(payload.phone)
         email = clean_email(payload.email)
     except ContactError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
 
-    if not (phone or email) or len(full_name) < 2:
+    if not (phone or email):
         raise HTTPException(
             status_code=422,
             detail="Enter your phone number or email address, and your full name",
         )
+    referral_code = (payload.referral_code or "").strip().upper()
+    if referral_code and not re.fullmatch(r"[A-Z0-9-]{3,40}", referral_code):
+        raise HTTPException(status_code=422, detail="Invite codes use only letters, numbers and hyphens.")
+    weak = password_problem(payload.password, name=full_name, phone=phone, email=email)
+    if weak:
+        raise HTTPException(status_code=422, detail=weak)
+    enforce_rate_limit("signup", client_ip(request), settings.signup_ip_limit_per_hour, 3600,
+                       "Too many new accounts from this connection. Please try again in an hour.")
 
     if phone and phone_taken(db, phone):
         raise HTTPException(
@@ -653,7 +666,7 @@ def register(
             status_code=409,
             detail="Email address is already registered",
         )
-    inviter = promos.find_inviter(db, payload.referral_code)
+    inviter = promos.find_inviter(db, referral_code or None)
 
     user = User(
         phone=phone,
@@ -718,9 +731,7 @@ def login(
     # Rate-limit on one spelling of the identifier.
     limit_key = identifier.lower() if is_email(identifier) else international_number(identifier)
 
-    ip_address = (
-        request.client.host if request.client is not None else "unknown"
-    )
+    ip_address = client_ip(request)
 
     try:
         allowed, retry_after = check_login_allowed(ip_address, limit_key)
@@ -1431,12 +1442,10 @@ def admin_list_incidents(
 def admin_review_incident(
     incident_id: int,
     payload: IncidentReviewUpdate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_super_admin),
     db: Session = Depends(get_db),
 ):
     """Allow a super-admin to record incident investigation or resolution."""
-    if current_user.role != "super_admin":
-        raise HTTPException(status_code=403, detail="Super-admin account required")
 
     incident = db.get(Incident, incident_id)
     if incident is None:
@@ -1652,8 +1661,62 @@ from starlette.middleware.cors import CORSMiddleware as OuterCORSMiddleware
 app.include_router(atona_router)
 app.include_router(admin_locations_router)
 
+class SecurityHeaders:
+    """Browser safety headers on every API response, and a cap on request
+    size so one huge upload can't tie the server up."""
+
+    HEADERS = [
+        (b"x-content-type-options", b"nosniff"),
+        (b"x-frame-options", b"DENY"),
+        (b"referrer-policy", b"no-referrer"),
+        (b"permissions-policy", b"camera=(), microphone=(), geolocation=()"),
+        (b"cross-origin-opener-policy", b"same-origin"),
+        (b"content-security-policy", b"default-src 'none'; frame-ancestors 'none'"),
+    ]
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        path = scope.get("path", "")
+        length = dict(scope.get("headers") or []).get(b"content-length")
+        if length is not None:
+            try:
+                too_big = int(length) > settings.max_request_bytes
+            except ValueError:
+                too_big = True
+            if too_big:
+                await send({"type": "http.response.start", "status": 413,
+                            "headers": [(b"content-type", b"application/json")] + self.HEADERS})
+                await send({"type": "http.response.body", "body": b'{"detail":"Request is too large."}'})
+                return
+
+        async def send_with_headers(message):
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers") or [])
+                present = {name.lower() for name, _ in headers}
+                is_docs = path in ("/docs", "/redoc")
+                for name, value in self.HEADERS:
+                    if name in present or (is_docs and name == b"content-security-policy"):
+                        continue
+                    headers.append((name, value))
+                if settings.app_env == "production":
+                    headers.append((b"strict-transport-security", b"max-age=31536000; includeSubDomains"))
+                # Account, ride and payment answers must never be stored by
+                # shared caches or left in a phone's back-button cache.
+                if path.startswith("/api/") and b"cache-control" not in present:
+                    headers.append((b"cache-control", b"no-store"))
+                message["headers"] = headers
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
+
+
 application = OuterCORSMiddleware(
-    app=app,
+    app=SecurityHeaders(app),
     allow_origins=[
         "https://ekimove.onrender.com",
         "http://localhost:5173",

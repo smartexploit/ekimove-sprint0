@@ -14,8 +14,10 @@
 from __future__ import annotations
 
 import logging
+import re
 import secrets
 import threading
+import unicodedata
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Literal
@@ -29,7 +31,7 @@ from app import messaging, promos
 from app.app_settings import booking_rules, delivery_rules, is_motorcycle, quote_amount
 from app.auth import get_current_user, require_super_admin
 from app.config import settings
-from app.contacts import ContactError, clean_phone
+from app.contacts import ContactError, clean_name, clean_phone
 from app.database import get_db
 from app.models import AuditLog, Place, PlaceFare, Ride, RideRequest, ServiceArea, User, Zone
 from app.scheduling import check_pickup_time, iso_utc
@@ -160,7 +162,12 @@ def create_delivery(payload: DeliveryCreate, current_user: User = Depends(get_cu
     try:
         recipient_phone = clean_phone(payload.recipient_phone)
     except ContactError:
-        raise HTTPException(status_code=422, detail="Enter the recipient's phone number.") from None
+        raise HTTPException(status_code=422, detail="Enter the recipient's Nigerian mobile number, "
+                                                    "like 0803 123 4567.") from None
+    try:
+        recipient_name = clean_name(payload.recipient_name, label="recipient's name")
+    except ContactError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
     origin, destination, _, _ = _active_route(db, payload.origin_place_id, payload.destination_place_id)
     option = next((o for o in delivery_options(db, origin.id, destination.id) if o["size"] == payload.size), None)
     if option is None:
@@ -170,7 +177,7 @@ def create_delivery(payload: DeliveryCreate, current_user: User = Depends(get_cu
         passenger_user_id=current_user.id, origin_place_id=origin.id, destination_place_id=destination.id,
         origin_text=origin.name, destination_text=destination.name, vehicle_type=option["vehicle_type"],
         passenger_count=1, quoted_fare=Decimal(option["price"]), status="requested", service_type="delivery",
-        load_description=payload.description, delivery_size=payload.size, recipient_name=payload.recipient_name,
+        load_description=payload.description, delivery_size=payload.size, recipient_name=recipient_name,
         recipient_phone=recipient_phone, delivery_notes=payload.notes or None, fragile=payload.fragile,
         scheduled_for=scheduled_for, dispatch_status="scheduled" if scheduled_for else None,
     )
@@ -179,7 +186,7 @@ def create_delivery(payload: DeliveryCreate, current_user: User = Depends(get_cu
     if payload.promo_code and payload.promo_code.strip():
         promos.apply_code(db, current_user, request, payload.promo_code)
     db.add(AuditLog(actor_user_id=current_user.id, action="delivery.requested", entity_type="ride_request",
-                    entity_id=str(request.id), details=f"{payload.size} package to {payload.recipient_name}."))
+                    entity_id=str(request.id), details=f"{payload.size} package to {recipient_name}."))
     db.commit()
     from app.dispatch import advance_dispatch  # avoid an import cycle
 
@@ -204,7 +211,8 @@ def check_delivery_code(db: Session, ride: Ride, code: str | None, driver_user_i
         AuditLog.action == "delivery.code_failed", AuditLog.entity_id == str(ride.id))) or 0
     if failures >= MAX_CODE_FAILURES:
         raise HTTPException(status_code=429, detail="Too many wrong codes for this delivery. Contact EkiMove support.")
-    if not code or not secrets.compare_digest(code.strip(), ride.delivery_code):
+    supplied = "".join(ch for ch in str(code or "") if ch in "0123456789")
+    if not supplied or not secrets.compare_digest(supplied, ride.delivery_code):
         db.add(AuditLog(actor_user_id=driver_user_id, action="delivery.code_failed", entity_type="ride",
                         entity_id=str(ride.id), details="Wrong delivery code entered."))
         db.commit()
@@ -231,7 +239,10 @@ def recipient_text(db: Session, ride: Ride, request: RideRequest) -> tuple[str, 
     if not (messaging.sms_configured() and request.recipient_phone and ride.delivery_code):
         return None
     sender = db.get(User, request.passenger_user_id)
-    first = (sender.full_name or "Someone").split()[0] if sender else "Someone"
+    first = (sender.full_name or "").split()[0] if sender and (sender.full_name or "").split() else ""
+    # Only plain letters from the first name go into the text (older
+    # accounts may hold names saved before names were checked).
+    first = re.sub(r"[^A-Za-z'-]", "", unicodedata.normalize("NFKD", first))[:20] or "Someone"
     link = f"{settings.frontend_url.rstrip('/')}/t/{ride.share_token}"
     body = (f"EkiMove: {first} sent you a package. Track: {link} Give the rider code {ride.delivery_code} "
             "only when you have it.")

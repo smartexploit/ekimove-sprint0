@@ -1,10 +1,50 @@
-﻿import { defineConfig } from 'vite'
+﻿import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
-export default defineConfig({
+/**
+ * Content Security Policy for the built app: only EkiMove's own scripts can
+ * run, the page talks only to the EkiMove API, and forms can only post to
+ * EkiMove or Interswitch checkout. Added at build time (the dev server
+ * needs inline scripts for hot reload).
+ */
+function contentSecurityPolicy(mode) {
+  const env = loadEnv(mode, '.', 'VITE_')
+  const api = new Set(['https://ekimove-api.onrender.com'])
+  try {
+    if (env.VITE_API_BASE_URL) api.add(new URL(env.VITE_API_BASE_URL).origin)
+  } catch {
+    // An unusable address is ignored; the default API stays allowed.
+  }
+  const policy = [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' data: https://fonts.gstatic.com",
+    "img-src 'self' data: blob: https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://maps.geoapify.com",
+    `connect-src 'self' ${[...api].join(' ')}`,
+    "worker-src 'self'",
+    "manifest-src 'self'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self' https://newwebpay.interswitchng.com https://newwebpay-sandbox.interswitchng.com",
+  ].join('; ')
+  return {
+    name: 'ekimove-csp',
+    apply: 'build',
+    transformIndexHtml(html) {
+      return html.replace(
+        '<meta charset="UTF-8" />',
+        `<meta charset="UTF-8" />\n    <meta http-equiv="Content-Security-Policy" content="${policy}" />\n    <meta name="referrer" content="strict-origin-when-cross-origin" />`,
+      )
+    },
+  }
+}
+
+export default defineConfig(({ mode }) => ({
   plugins: [
     react(),
+    contentSecurityPolicy(mode),
     VitePWA({
       // New releases install in the background and take over on the next
       // page load, so people never stay stuck on an old version.
@@ -91,4 +131,4 @@ export default defineConfig({
       },
     },
   },
-})
+}))

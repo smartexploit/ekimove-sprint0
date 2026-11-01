@@ -553,7 +553,7 @@ def cron_run_payouts(
     expected = settings.payout_cron_token
     if not expected:
         raise HTTPException(status_code=404, detail="Not found.")
-    if not x_cron_token or not hmac.compare_digest(expected, x_cron_token):
+    if not x_cron_token or not hmac.compare_digest(expected.encode(), x_cron_token.encode("utf-8", "replace")):
         raise HTTPException(status_code=401, detail="Invalid token.")
     return run_payouts(db, None)
 

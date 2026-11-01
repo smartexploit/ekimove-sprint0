@@ -10,7 +10,6 @@
 
 from __future__ import annotations
 
-import re
 import secrets
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -23,7 +22,8 @@ from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.codes import contact_status
-from app.contacts import email_taken, search_filter
+from app.contacts import ContactError, clean_email, clean_name, email_taken, password_problem, search_filter
+from app.rate_limit import enforce as enforce_rate_limit
 from app.messaging import email_configured
 from app.auth import create_access_token, get_current_user, hash_password, require_super_admin, verify_password
 from app.config import settings
@@ -127,14 +127,25 @@ class ProfileUpdate(BaseModel):
     full_name: str | None = Field(default=None, min_length=2, max_length=160)
     email: str | None = Field(default=None, max_length=254)
 
+    @field_validator("full_name")
+    @classmethod
+    def valid_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        try:
+            return clean_name(value, label="full name")
+        except ContactError as exc:
+            raise ValueError(str(exc)) from None
+
     @field_validator("email")
     @classmethod
     def valid_email(cls, value: str | None) -> str | None:
         if value is None or value == "":
             return ""
-        if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", value):
-            raise ValueError("Enter a valid email address.")
-        return value.lower()
+        try:
+            return clean_email(value) or ""
+        except ContactError as exc:
+            raise ValueError(str(exc)) from None
 
 
 @router.patch("/me")
@@ -166,7 +177,14 @@ def update_my_profile(
 class PasswordChange(BaseModel):
     model_config = ConfigDict(extra="forbid")
     current_password: str = Field(min_length=1, max_length=256)
-    new_password: str = Field(min_length=12, max_length=256)
+    new_password: str = Field(min_length=12, max_length=128)
+
+
+def limit_password_checks(user: User) -> None:
+    """Typing the current password is checked at most 5 times in 15 minutes,
+    so a stolen session can't be used to guess it."""
+    enforce_rate_limit("password-check", f"user:{user.id}", 5, 900,
+                       "Too many password tries. Please wait 15 minutes and try again.")
 
 
 @router.post("/me/password")
@@ -175,10 +193,15 @@ def change_my_password(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
+    limit_password_checks(current_user)
     if not verify_password(payload.current_password, current_user.password_hash):
         raise HTTPException(status_code=400, detail="Your current password isn't right.")
     if payload.new_password == payload.current_password:
         raise HTTPException(status_code=400, detail="Choose a password you haven't just used.")
+    weak = password_problem(payload.new_password, name=current_user.full_name, phone=current_user.phone,
+                            email=current_user.email)
+    if weak:
+        raise HTTPException(status_code=422, detail=weak)
     current_user.password_hash = hash_password(payload.new_password)
     current_user.must_change_password = False
     db.add(AuditLog(actor_user_id=current_user.id, action="password.changed", entity_type="user",

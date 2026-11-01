@@ -5,6 +5,7 @@ import Alert from '../../components/ui/Alert.jsx'
 import PasswordInput from '../../components/ui/PasswordInput.jsx'
 import SupportContacts from '../../components/SupportContacts.jsx'
 import { confirmPasswordReset, getAuthOptions, requestPasswordReset } from '../../services/authService.js'
+import { PASSWORD_MAX, PASSWORD_MIN, identifierProblem, passwordProblem } from '../../utils/inputRules.js'
 
 export default function ForgotPasswordPage() {
   const navigate = useNavigate()
@@ -29,8 +30,13 @@ export default function ForgotPasswordPage() {
 
   async function ask(event) {
     event?.preventDefault()
-    setBusy(true)
     setError('')
+    const problem = identifierProblem(identifier)
+    if (problem) {
+      setError(problem)
+      return
+    }
+    setBusy(true)
     try {
       const result = await requestPasswordReset(identifier)
       setNotice(result.message)
@@ -45,8 +51,14 @@ export default function ForgotPasswordPage() {
   async function reset(event) {
     event.preventDefault()
     setError('')
-    if (password.length < 12) {
-      setError('Your new password must contain at least 12 characters.')
+    if (code.replace(/\D/g, '').length !== 6) {
+      setError('Enter the 6-digit code we sent you.')
+      return
+    }
+    const weak = passwordProblem(password, { phone: identifier.includes('@') ? '' : identifier,
+      email: identifier.includes('@') ? identifier : '' })
+    if (weak) {
+      setError(weak)
       return
     }
     if (password !== confirm) {
@@ -55,7 +67,7 @@ export default function ForgotPasswordPage() {
     }
     setBusy(true)
     try {
-      await confirmPasswordReset({ identifier, code, new_password: password })
+      await confirmPasswordReset({ identifier: identifier.trim(), code: code.replace(/\D/g, ''), new_password: password })
       navigate('/login', { replace: true, state: { passwordReset: true, identifier } })
     } catch (err) {
       setError(err.message || 'Could not change your password. Please try again.')
@@ -88,7 +100,8 @@ export default function ForgotPasswordPage() {
             <span className="field-label">Phone number or email</span>
             <input id="reset-identifier" className="input" type="text" inputMode="email" autoComplete="username"
               autoCapitalize="none" spellCheck={false} value={identifier} minLength={3} maxLength={254} required
-              placeholder="0803 000 0000 or you@example.com" onChange={(event) => setIdentifier(event.target.value)} />
+              placeholder="0803 000 0000 or you@example.com"
+              onChange={(event) => setIdentifier(event.target.value.replace(/[^\w@.%+\-() ]/g, '').slice(0, 254))} />
           </label>
           <Alert tone="error">{error}</Alert>
           <button className="btn btn-primary btn-lg btn-block" type="submit" disabled={busy || !options}>
@@ -102,16 +115,21 @@ export default function ForgotPasswordPage() {
             <span className="field-label">6-digit code</span>
             <input id="reset-code" className="input code-input" type="text" inputMode="numeric"
               autoComplete="one-time-code" pattern="[0-9 ]*" maxLength={7} required value={code}
-              onChange={(event) => setCode(event.target.value)} />
+              onChange={(event) => setCode(event.target.value.replace(/[^\d ]/g, '').slice(0, 7))} />
           </label>
           <div className="field">
             <label className="field-label" htmlFor="reset-password">New password</label>
-            <PasswordInput id="reset-password" autoComplete="new-password" minLength={12} maxLength={256} required
-              placeholder="At least 12 characters" value={password} onChange={(event) => setPassword(event.target.value)} />
+            <PasswordInput id="reset-password" autoComplete="new-password" minLength={PASSWORD_MIN} maxLength={PASSWORD_MAX}
+              required placeholder={`At least ${PASSWORD_MIN} characters`} value={password}
+              aria-describedby="reset-password-hint" onChange={(event) => setPassword(event.target.value)} />
+            <span id="reset-password-hint" aria-live="polite"
+              className={`field-hint ${password ? (passwordProblem(password) ? '' : 'field-hint-ok') : ''}`}>
+              {password ? passwordProblem(password) || 'Strong enough.' : 'A short phrase only you would know is easy to remember.'}
+            </span>
           </div>
           <div className="field">
             <label className="field-label" htmlFor="reset-confirm">Confirm new password</label>
-            <PasswordInput id="reset-confirm" autoComplete="new-password" maxLength={256} required
+            <PasswordInput id="reset-confirm" autoComplete="new-password" maxLength={PASSWORD_MAX} required
               placeholder="Type it again" value={confirm} onChange={(event) => setConfirm(event.target.value)} />
           </div>
           <Alert tone="error">{error}</Alert>

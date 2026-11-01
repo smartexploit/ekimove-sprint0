@@ -33,6 +33,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth import bearer_scheme, get_current_user
+from app.client_ip import client_ip
 from app.config import settings
 from app.database import get_db
 from app.models import Place, ServiceArea, User, Zone
@@ -708,8 +709,7 @@ def atona_chat(
         identity = f"user:{current_user.id}"
         limit = settings.atona_user_message_limit
     else:
-        host = request.client.host if request.client is not None else "unknown"
-        identity = f"guest:{host}"
+        identity = f"guest:{client_ip(request)}"
         limit = settings.atona_guest_message_limit
     if not check_rate_limit(identity, max(1, limit)):
         raise HTTPException(

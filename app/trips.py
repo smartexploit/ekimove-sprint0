@@ -92,7 +92,8 @@ def check_pickup_pin(db: Session, ride: Ride, pin: str | None, driver_user_id: i
         AuditLog.action == "ride.pin_failed", AuditLog.entity_id == str(ride.id)))
     if failures >= MAX_PIN_FAILURES:
         raise HTTPException(status_code=429, detail="Too many wrong PINs for this trip. Contact EkiMove support.")
-    if not pin or not secrets.compare_digest(pin.strip(), ride.pickup_pin):
+    supplied = "".join(ch for ch in str(pin or "") if ch in "0123456789")
+    if not supplied or not secrets.compare_digest(supplied, ride.pickup_pin):
         db.add(AuditLog(actor_user_id=driver_user_id, action="ride.pin_failed", entity_type="ride",
                         entity_id=str(ride.id), details="Wrong pickup PIN entered."))
         db.commit()

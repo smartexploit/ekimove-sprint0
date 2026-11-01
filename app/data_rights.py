@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, verify_password
 from app.database import get_db
+from app.rate_limit import enforce as enforce_rate_limit
 from app.models import (
     AuditLog,
     Driver,
@@ -150,6 +151,8 @@ def export_data(db: Session, user: User) -> dict:
 
 @router.get("/me/export")
 def download_my_data(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> Response:
+    enforce_rate_limit("data-export", f"user:{current_user.id}", 5, 3600,
+                       "You've downloaded your data several times this hour. Please try again later.")
     data = export_data(db, current_user)
     db.add(AuditLog(actor_user_id=current_user.id, action="data.exported", entity_type="user",
                     entity_id=str(current_user.id), details="Downloaded a copy of their data."))

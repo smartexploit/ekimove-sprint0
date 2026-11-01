@@ -4,6 +4,17 @@ import { CheckCircle2 } from 'lucide-react'
 import AuthLayout from '../../layouts/AuthLayout.jsx'
 import Alert from '../../components/ui/Alert.jsx'
 import PasswordInput from '../../components/ui/PasswordInput.jsx'
+import {
+  NAME_MAX, PASSWORD_MAX, PASSWORD_MIN, emailProblem, nameProblem, nameTyping, nigerianMobile, passwordProblem,
+  phoneProblem, phoneTyping,
+} from '../../utils/inputRules.js'
+
+/** Keep stray characters out of an (uncontrolled) field as it's typed. */
+const filterWith = (rule) => (event) => {
+  const cleaned = rule(event.target.value)
+  if (cleaned !== event.target.value) event.target.value = cleaned
+}
+const plateTyping = (value) => value.toUpperCase().replace(/[^A-Z0-9 -]/g, '').slice(0, 15)
 
 export default function DriverApplicationPage() {
   const [error, setError] = useState('')
@@ -14,10 +25,26 @@ export default function DriverApplicationPage() {
     event.preventDefault()
     setError('')
     setMessage('')
-    setLoading(true)
 
     const formElement = event.currentTarget
     const form = new FormData(formElement)
+    const email = String(form.get('email') || '').trim().toLowerCase()
+    const plate = String(form.get('plate_number') || '').trim().replace(/\s+/g, ' ')
+    const problem =
+      nameProblem(form.get('full_name'), 'full legal name') ||
+      phoneProblem(form.get('phone')) ||
+      (email ? emailProblem(email) : '') ||
+      passwordProblem(form.get('password'), { name: form.get('full_name'), phone: form.get('phone'), email }) ||
+      (/^[A-Z0-9][A-Z0-9 -]{3,13}[A-Z0-9]$/.test(plate) ? '' : 'Enter the plate number as it appears on the vehicle, like EKT 123 AB.')
+    if (problem) {
+      setError(problem)
+      return
+    }
+    form.set('full_name', String(form.get('full_name')).trim().replace(/\s+/g, ' '))
+    form.set('phone', nigerianMobile(form.get('phone')))
+    form.set('email', email)
+    form.set('plate_number', plate)
+    setLoading(true)
 
     try {
       const apiBaseUrl = (
@@ -97,12 +124,14 @@ export default function DriverApplicationPage() {
           <div className="form-grid">
             <label className="field" htmlFor="driver-name">
               <span className="field-label">Full legal name</span>
-              <input id="driver-name" className="input" name="full_name" autoComplete="name" minLength={2} maxLength={160} required />
+              <input id="driver-name" className="input" name="full_name" autoComplete="name" minLength={2} maxLength={NAME_MAX} required
+                onInput={filterWith(nameTyping)} />
             </label>
 
             <label className="field" htmlFor="driver-phone">
               <span className="field-label">Phone number</span>
-              <input id="driver-phone" className="input" name="phone" type="tel" inputMode="tel" autoComplete="tel" minLength={7} maxLength={32} required />
+              <input id="driver-phone" className="input" name="phone" type="tel" inputMode="tel" autoComplete="tel" minLength={10} maxLength={18} required
+                placeholder="e.g. 0803 123 4567" onInput={filterWith(phoneTyping)} />
             </label>
           </div>
 
@@ -119,12 +148,14 @@ export default function DriverApplicationPage() {
               id="driver-password"
               name="password"
               autoComplete="new-password"
-              minLength={12}
-              maxLength={256}
+              minLength={PASSWORD_MIN}
+              maxLength={PASSWORD_MAX}
               aria-describedby="driver-password-hint"
               required
             />
-            <span className="field-hint" id="driver-password-hint">At least 12 characters.</span>
+            <span className="field-hint" id="driver-password-hint">
+              At least {PASSWORD_MIN} characters. Don't use your name or phone number; a short phrase is easy to remember.
+            </span>
           </div>
 
           <label className="field" htmlFor="driver-photo">
@@ -154,7 +185,8 @@ export default function DriverApplicationPage() {
 
             <label className="field" htmlFor="vehicle-plate">
               <span className="field-label">Plate number</span>
-              <input id="vehicle-plate" className="input" name="plate_number" autoCapitalize="characters" placeholder="e.g. EKT 123 AB" minLength={2} maxLength={32} required />
+              <input id="vehicle-plate" className="input" name="plate_number" autoCapitalize="characters" placeholder="e.g. EKT 123 AB" minLength={5} maxLength={15} required
+                onInput={filterWith(plateTyping)} />
             </label>
 
             <label className="field" htmlFor="vehicle-capacity">

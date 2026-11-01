@@ -4,6 +4,7 @@ import Alert from '../ui/Alert.jsx'
 import Select from '../ui/Select.jsx'
 import { getMyVerification, saveEmergencyContact, submitVerification } from '../../services/tripService.js'
 import { formatShortDate } from '../../utils/format.js'
+import { nameTyping, phoneTyping } from '../../utils/inputRules.js'
 
 export function EmergencyContactCard({ initial }) {
   const [name, setName] = useState(initial?.name || '')
@@ -41,13 +42,13 @@ export function EmergencyContactCard({ initial }) {
       <div className="row" style={{ gap: 12, alignItems: 'flex-end' }}>
         <label className="field" style={{ flex: '1 1 180px' }}>
           <span className="field-label">Name</span>
-          <input className="input" maxLength={160} value={name} onChange={(event) => setName(event.target.value)}
+          <input className="input" maxLength={80} value={name} onChange={(event) => setName(nameTyping(event.target.value))}
             placeholder="e.g. Mum" />
         </label>
         <label className="field" style={{ flex: '1 1 180px' }}>
           <span className="field-label">Phone number</span>
           <input className="input" type="tel" inputMode="tel" maxLength={20} value={phone}
-            onChange={(event) => setPhone(event.target.value)} placeholder="080…" />
+            onChange={(event) => setPhone(phoneTyping(event.target.value))} placeholder="080…" />
         </label>
       </div>
       <div>

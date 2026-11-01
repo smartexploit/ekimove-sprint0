@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 import os
+import re
 from pathlib import Path
 
 from fastapi import Body, APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
@@ -9,7 +10,9 @@ from sqlalchemy.orm import Session
 
 from app.auth import hash_password
 from app.config import settings
-from app.contacts import ContactError, clean_email, clean_phone, email_taken, phone_taken
+from app.client_ip import client_ip
+from app.contacts import ContactError, clean_email, clean_name, clean_phone, email_taken, password_problem, phone_taken
+from app.rate_limit import enforce as enforce_rate_limit
 from app.database import get_db
 from app.models import Driver, User, Vehicle
 from app.photo_storage import PhotoStorageError, upload_driver_photo, delete_driver_photo
@@ -35,7 +38,7 @@ async def submit_driver_application(
     request: Request,
     full_name: str = Form(min_length=2, max_length=160),
     phone: str = Form(min_length=7, max_length=32),
-    password: str = Form(min_length=12, max_length=256),
+    password: str = Form(min_length=12, max_length=128),
     vehicle_type: str = Form(min_length=2, max_length=32),
     plate_number: str = Form(min_length=2, max_length=32),
     capacity: int = Form(ge=1, le=8),
@@ -48,17 +51,25 @@ async def submit_driver_application(
     if not settings.jwt_secret_key:
         raise HTTPException(status_code=503, detail="Authentication is not configured")
 
-    full_name = full_name.strip()
     try:
+        full_name = clean_name(full_name, label="full name")
         phone = clean_phone(phone) or ""
         email = clean_email(email)
     except ContactError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
     vehicle_type = vehicle_type.strip().lower()
-    plate_number = plate_number.strip().upper()
+    plate_number = " ".join(plate_number.strip().upper().split())
 
-    if len(full_name) < 2 or len(phone) < 7:
+    if not phone:
         raise HTTPException(status_code=422, detail="Enter a valid name and phone number")
+    if not re.fullmatch(r"[A-Z0-9][A-Z0-9 -]{3,13}[A-Z0-9]", plate_number):
+        raise HTTPException(status_code=422, detail="Enter the plate number as it appears on the vehicle, "
+                                                    "like ABC-123DE (letters, numbers and hyphens only).")
+    weak = password_problem(password, name=full_name, phone=phone, email=email)
+    if weak:
+        raise HTTPException(status_code=422, detail=weak)
+    enforce_rate_limit("driver-apply", client_ip(request), settings.driver_apply_ip_limit_per_hour, 3600,
+                       "Too many applications from this connection. Please try again in an hour.")
 
     if vehicle_type not in {"motorcycle", "car", "tricycle", "minibus", "big_car", "van", "dyna"}:
         raise HTTPException(status_code=422, detail="Unsupported vehicle type")

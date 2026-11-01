@@ -11,6 +11,22 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 15
     login_rate_limit_attempts: int = 5
     login_rate_limit_window_seconds: int = 900
+    # Failed sign-ins allowed from one IP address in the same window. Higher
+    # than the per-account limit because mobile networks share addresses.
+    login_ip_rate_limit_attempts: int = 30
+    # New accounts, code requests (texts/emails) and driver applications
+    # allowed from one IP address per hour, and code checks per 15 minutes.
+    signup_ip_limit_per_hour: int = 10
+    code_ip_limit_per_hour: int = 10
+    driver_apply_ip_limit_per_hour: int = 5
+    code_check_ip_limit: int = 30
+    # Read the visitor's address from the header Render's edge sets
+    # (True-Client-IP / CF-Connecting-IP). Keep on when hosted on Render.
+    trust_edge_ip_headers: bool = True
+    # Interactive API docs (/docs). Off in production unless switched on.
+    api_docs_enabled: bool | None = None
+    # Largest request body accepted, in bytes (driver photos are up to 5 MB).
+    max_request_bytes: int = 6 * 1024 * 1024
 
     # Redis connection settings for shared login rate limiting
     redis_url: str | None = None

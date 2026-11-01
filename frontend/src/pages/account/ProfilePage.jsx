@@ -12,6 +12,7 @@ import { EmergencyContactCard, VerificationCard } from '../../components/account
 import ContactCard from '../../components/account/ContactCard.jsx'
 import NotificationsCard from '../../components/account/NotificationsCard.jsx'
 import DataRightsCard from '../../components/account/DataRightsCard.jsx'
+import { NAME_MAX, PASSWORD_MAX, nameProblem, nameTyping, passwordProblem } from '../../utils/inputRules.js'
 
 function DetailsForm({ profile, onSaved }) {
   const [form, setForm] = useState({ full_name: profile.full_name })
@@ -21,11 +22,13 @@ function DetailsForm({ profile, onSaved }) {
 
   async function save(event) {
     event.preventDefault()
-    setBusy(true)
     setError('')
     setNotice('')
+    const problem = nameProblem(form.full_name)
+    if (problem) return setError(problem)
+    setBusy(true)
     try {
-      const updated = await updateProfile({ full_name: form.full_name.trim() })
+      const updated = await updateProfile({ full_name: form.full_name.trim().replace(/\s+/g, ' ') })
       onSaved(updated)
       setNotice('Your details are saved.')
     } catch (err) {
@@ -42,8 +45,8 @@ function DetailsForm({ profile, onSaved }) {
       <Alert tone="success">{notice}</Alert>
       <label className="field">
         <span className="field-label">Full name</span>
-        <input className="input" autoComplete="name" minLength={2} maxLength={160} required
-          value={form.full_name} onChange={(event) => setForm((f) => ({ ...f, full_name: event.target.value }))} />
+        <input className="input" autoComplete="name" minLength={2} maxLength={NAME_MAX} required
+          value={form.full_name} onChange={(event) => setForm((f) => ({ ...f, full_name: nameTyping(event.target.value) }))} />
         {profile.role === 'driver' && (
           <span className="field-hint">Passengers see your first name and last initial.</span>
         )}
@@ -67,7 +70,7 @@ function PasswordField({ id, label, hint, ...props }) {
   )
 }
 
-function PasswordForm() {
+function PasswordForm({ profile }) {
   const [form, setForm] = useState({ current: '', next: '', confirm: '' })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -77,7 +80,8 @@ function PasswordForm() {
     event.preventDefault()
     setError('')
     setNotice('')
-    if (form.next.length < 12) return setError('Use at least 12 characters for your new password.')
+    const weak = passwordProblem(form.next, { name: profile?.full_name, phone: profile?.phone, email: profile?.email })
+    if (weak) return setError(weak)
     if (form.next !== form.confirm) return setError("The new passwords don't match.")
     setBusy(true)
     try {
@@ -103,9 +107,12 @@ function PasswordForm() {
         value={form.current} onChange={(event) => setForm((f) => ({ ...f, current: event.target.value }))} required />
       <PasswordField id="new-password" label="New password" autoComplete="new-password"
         value={form.next} onChange={(event) => setForm((f) => ({ ...f, next: event.target.value }))} required
-        hint="At least 12 characters." />
+        maxLength={PASSWORD_MAX}
+        hint={form.next ? passwordProblem(form.next, { name: profile?.full_name, phone: profile?.phone,
+          email: profile?.email }) || 'Strong enough.' : 'At least 12 characters. A short phrase is easy to remember.'} />
       <PasswordField id="confirm-password" label="Confirm new password" autoComplete="new-password"
-        value={form.confirm} onChange={(event) => setForm((f) => ({ ...f, confirm: event.target.value }))} required />
+        value={form.confirm} onChange={(event) => setForm((f) => ({ ...f, confirm: event.target.value }))} required
+        maxLength={PASSWORD_MAX} />
       <div>
         <button type="submit" className="btn btn-primary" disabled={busy}>
           {busy ? 'Changing…' : 'Change password'}
@@ -193,7 +200,7 @@ export default function ProfilePage() {
           <div className="stack">
             <NotificationsCard role={profile.role} />
             <EmergencyContactCard initial={profile.emergency_contact} />
-            <PasswordForm />
+            <PasswordForm profile={profile} />
             <section className="card stack stack-sm" aria-labelledby="privacy-title">
               <div className="row" style={{ gap: 10, flexWrap: 'nowrap' }}>
                 <span className="instant-icon" aria-hidden="true"><ShieldCheck size={20} /></span>
