@@ -40,3 +40,4 @@ Thumbs.db
 
 # Frontend starter backup files
 frontend/src/starter-backup/
+dump.rdb
