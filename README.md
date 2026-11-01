@@ -189,6 +189,8 @@ People turn notifications on from *Profile* (drivers also on *My driver status*,
 - **Real visitor address:** Render's edge sets `True-Client-IP`, which the API uses for limits and sign-in logs; `X-Forwarded-For` is never trusted. Keep `TRUST_EDGE_IP_HEADERS=true` on Render.
 - **API:** browser safety headers and `Cache-Control: no-store` on every answer, a 6 MB request cap, and the `/docs` page off in production (`API_DOCS_ENABLED=true` turns it on).
 - **Dependencies:** `.github/dependabot.yml` checks weekly; switch on *Dependabot alerts* and *security updates* under the repository's Settings → Code security.
+  - `frontend/package.json` `overrides` pin `minimatch` 11 (fixes GHSA-g3hv-75wg-m249) with `glob` 14 (glob 11 can't match files with minimatch 11, which would empty the offline cache). Remove them once `workbox-build` and `eslint` ship these versions themselves. After any change here, check `npm run build` still reports about 52 precache entries.
+  - `deepmerge` 4.3.1 (CVE-2026-93753) has no fixed release yet; it runs only inside the build tool on its own settings, never in the app, so the alert can be dismissed as "vulnerable code not used" until a fix ships.
 
 ## Running in production
 - **Error alerts (optional):** set `SENTRY_DSN` from a free Sentry project to be emailed when the API crashes. No personal data is sent.
