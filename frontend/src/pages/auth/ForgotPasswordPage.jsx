@@ -5,14 +5,17 @@ import Alert from '../../components/ui/Alert.jsx'
 import PasswordInput from '../../components/ui/PasswordInput.jsx'
 import SupportContacts from '../../components/SupportContacts.jsx'
 import { confirmPasswordReset, getAuthOptions, requestPasswordReset } from '../../services/authService.js'
-import { PASSWORD_MAX, PASSWORD_MIN, identifierProblem, passwordProblem } from '../../utils/inputRules.js'
+import { PASSWORD_MAX, PASSWORD_MIN, passwordProblem } from '../../utils/inputRules.js'
+import ContactMethodField from '../../components/auth/ContactMethodField.jsx'
+import useContactMethod from '../../hooks/useContactMethod.js'
 
 export default function ForgotPasswordPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const [options, setOptions] = useState(null)
   const [step, setStep] = useState('ask')
-  const [identifier, setIdentifier] = useState(location.state?.identifier || '')
+  const contact = useContactMethod(location.state?.identifier)
+  const identifier = contact.identifier
   const [code, setCode] = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
@@ -31,9 +34,9 @@ export default function ForgotPasswordPage() {
   async function ask(event) {
     event?.preventDefault()
     setError('')
-    const problem = identifierProblem(identifier)
-    if (problem) {
-      setError(problem)
+    if (contact.problem) {
+      setError(contact.problem)
+      document.getElementById(`reset-${contact.method}`)?.focus()
       return
     }
     setBusy(true)
@@ -55,8 +58,8 @@ export default function ForgotPasswordPage() {
       setError('Enter the 6-digit code we sent you.')
       return
     }
-    const weak = passwordProblem(password, { phone: identifier.includes('@') ? '' : identifier,
-      email: identifier.includes('@') ? identifier : '' })
+    const weak = passwordProblem(password, { phone: contact.method === 'phone' ? identifier : '',
+      email: contact.method === 'email' ? identifier : '' })
     if (weak) {
       setError(weak)
       return
@@ -67,7 +70,7 @@ export default function ForgotPasswordPage() {
     }
     setBusy(true)
     try {
-      await confirmPasswordReset({ identifier: identifier.trim(), code: code.replace(/\D/g, ''), new_password: password })
+      await confirmPasswordReset({ identifier, code: code.replace(/\D/g, ''), new_password: password })
       navigate('/login', { replace: true, state: { passwordReset: true, identifier } })
     } catch (err) {
       setError(err.message || 'Could not change your password. Please try again.')
@@ -96,13 +99,16 @@ export default function ForgotPasswordPage() {
         </div>
       ) : step === 'ask' ? (
         <form className="form" onSubmit={ask}>
-          <label className="field" htmlFor="reset-identifier">
-            <span className="field-label">Phone number or email</span>
-            <input id="reset-identifier" className="input" type="text" inputMode="email" autoComplete="username"
-              autoCapitalize="none" spellCheck={false} value={identifier} minLength={3} maxLength={254} required
-              placeholder="0803 000 0000 or you@example.com"
-              onChange={(event) => setIdentifier(event.target.value.replace(/[^\w@.%+\-() ]/g, '').slice(0, 254))} />
-          </label>
+          <ContactMethodField
+            idPrefix="reset"
+            label="Send the code to my"
+            method={contact.method}
+            onMethod={(next) => { contact.setMethod(next); setError('') }}
+            phone={contact.phone}
+            onPhone={contact.setPhone}
+            email={contact.email}
+            onEmail={contact.setEmail}
+          />
           <Alert tone="error">{error}</Alert>
           <button className="btn btn-primary btn-lg btn-block" type="submit" disabled={busy || !options}>
             {busy ? 'Sending…' : 'Send me a code'}

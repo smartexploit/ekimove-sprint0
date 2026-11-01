@@ -9,7 +9,8 @@ import Alert from '../../components/ui/Alert.jsx'
 import { IDLE_MINUTES } from '../../utils/session.js'
 import PasswordInput from '../../components/ui/PasswordInput.jsx'
 import { homePathForRole } from '../../utils/roles.js'
-import { identifierProblem } from '../../utils/inputRules.js'
+import ContactMethodField from '../../components/auth/ContactMethodField.jsx'
+import useContactMethod from '../../hooks/useContactMethod.js'
 
 /** Only follow internal passenger paths saved by the route guard. */
 function safeReturnPath(value) {
@@ -22,7 +23,7 @@ export default function LoginPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const returnTo = safeReturnPath(location.state?.from)
-  const [identifier, setIdentifier] = useState(location.state?.identifier || '')
+  const contact = useContactMethod(location.state?.identifier)
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -30,16 +31,15 @@ export default function LoginPage() {
   async function submit(event) {
     event.preventDefault()
     setError('')
-    const problem = identifierProblem(identifier)
-    if (problem) {
-      setError(problem)
-      document.getElementById('login-identifier')?.focus()
+    if (contact.problem) {
+      setError(contact.problem)
+      document.getElementById(`login-${contact.method}`)?.focus()
       return
     }
     setLoading(true)
 
     try {
-      await loginPassenger({ identifier: identifier.trim(), password })
+      await loginPassenger({ identifier: contact.identifier, password })
       const user = await getCurrentUser()
       const home = homePathForRole(user.role)
       const destination =
@@ -76,32 +76,24 @@ export default function LoginPage() {
       )}
 
       <form className="form" onSubmit={submit}>
-        <label className="field" htmlFor="login-identifier">
-          <span className="field-label">Phone number or email</span>
-          <input
-            id="login-identifier"
-            className="input"
-            name="username"
-            type="text"
-            inputMode="email"
-            autoComplete="username"
-            autoCapitalize="none"
-            spellCheck={false}
-            value={identifier}
-            onChange={(event) => setIdentifier(event.target.value.replace(/[^\w@.%+\-() ]/g, '').slice(0, 254))}
-            minLength={3}
-            maxLength={254}
-            placeholder="0803 000 0000 or you@example.com"
-            required
-          />
-        </label>
+        <ContactMethodField
+          idPrefix="login"
+          label="Sign in with"
+          method={contact.method}
+          onMethod={(next) => { contact.setMethod(next); setError('') }}
+          phone={contact.phone}
+          onPhone={contact.setPhone}
+          email={contact.email}
+          onEmail={contact.setEmail}
+        />
 
         <div className="field">
           <div className="field-label-row">
             <label className="field-label" htmlFor="login-password">
               Password
             </label>
-            <Link className="text-link small" to="/forgot-password" state={{ identifier }}>
+            <Link className="text-link small" to="/forgot-password"
+              state={{ identifier: contact.method === 'phone' ? contact.phone : contact.email }}>
               Forgot password?
             </Link>
           </div>
