@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
 import AdminShell from '../../layouts/AdminShell.jsx'
 import Alert from '../../components/ui/Alert.jsx'
 import StatusBadge from '../../components/ui/StatusBadge.jsx'
 import { apiRequest } from '../../services/authService.js'
 import BookingRulesCard from '../../components/admin/BookingRulesCard.jsx'
+import RemovePanel from '../../components/admin/RemovePanel.jsx'
 
 const emptyArea = { name: '', slug: '', description: '', status: 'draft' }
 const emptyPlace = {
@@ -16,6 +17,8 @@ const emptyFare = {
   base_amount: '0', vehicle_multiplier: '1.000',
   extra_passenger_amount: '0', is_active: false,
 }
+
+const jsonBody = (method, body) => ({ method, body: JSON.stringify(body) })
 
 const money = (value) =>
   new Intl.NumberFormat('en-NG', {
@@ -40,6 +43,7 @@ export default function AdminLocationsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [removal, setRemoval] = useState(null)
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -86,6 +90,75 @@ export default function AdminLocationsPage() {
       setBusy(false)
     }
   }
+
+  // Removing: check first (what goes with it, or why it must stay), then confirm.
+  const REMOVE_PATHS = {
+    area: (id) => `/api/v1/admin/locations/areas/${id}`,
+    zone: (id) => `/api/v1/admin/locations/zones/${id}`,
+    place: (id) => `/api/v1/admin/locations/places/${id}`,
+    fare: (id) => `/api/v1/admin/locations/place-fares/${id}`,
+  }
+
+  const startRemove = async (kind, id, name) => {
+    setError('')
+    setNotice('')
+    if (kind === 'fare') {
+      setRemoval({ kind, id, summary: { kind: 'route fare', name, can_remove: true } })
+      return
+    }
+    try {
+      const summary = await apiRequest(`${REMOVE_PATHS[kind](id)}/removal`)
+      setRemoval({ kind, id, summary })
+    } catch (e) {
+      setError(e.message || 'Could not check this item.')
+    }
+  }
+
+  const confirmRemove = async () => {
+    const { kind, id, summary } = removal
+    setBusy(true)
+    setError('')
+    try {
+      await apiRequest(REMOVE_PATHS[kind](id), { method: 'DELETE' })
+      setRemoval(null)
+      if (kind === 'zone' && editingZone === id) setEditingZone(null)
+      if (kind === 'area' && editingArea === id) setEditingArea(null)
+      if (kind === 'place' && editingPlace === id) setEditingPlace(null)
+      if (kind === 'fare' && editingFare === id) setEditingFare(null)
+      await loadData()
+      setNotice(`Removed ${summary.kind} “${summary.name}”.`)
+    } catch (e) {
+      setError(e.message || 'Could not remove it.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const deactivate = () => {
+    const { kind, id, summary } = removal
+    const request = {
+      area: () => apiRequest(`/api/v1/admin/locations/areas/${id}`, jsonBody('PATCH', { status: 'inactive' })),
+      place: () => apiRequest(`/api/v1/admin/locations/places/${id}`, jsonBody('PATCH', { status: 'inactive' })),
+      zone: () => apiRequest(`/api/v1/admin/zones/${id}`, jsonBody('PATCH', { is_active: false })),
+    }[kind]
+    setRemoval(null)
+    runSave(async () => {
+      await request()
+    }).then(() => setNotice(`“${summary.name}” is now inactive and hidden from booking.`))
+  }
+
+  const removeButton = (kind, id, name) => (
+    <button type="button" className="btn btn-sm btn-danger-outline" disabled={busy}
+      onClick={() => startRemove(kind, id, name)}>
+      Remove
+    </button>
+  )
+
+  const removePanelFor = (kind, id) =>
+    removal && removal.kind === kind && removal.id === id ? (
+      <RemovePanel summary={removal.summary} busy={busy} onConfirm={confirmRemove}
+        onDeactivate={kind === 'fare' ? null : deactivate} onClose={() => setRemoval(null)} />
+    ) : null
 
   const saveZone = (e) => {
     e.preventDefault()
@@ -383,7 +456,8 @@ export default function AdminLocationsPage() {
                   </div>
                 </form>
                 {recordList('Zones', zones, (zone) => (
-                  <div className="record" key={zone.id}>
+                  <Fragment key={zone.id}>
+                  <div className="record">
                     <div>
                       <p className="record-title">{zone.name}</p>
                       <p className="record-meta">Zone #{zone.id}</p>
@@ -391,8 +465,11 @@ export default function AdminLocationsPage() {
                     <div className="row" style={{ gap: 8 }}>
                       <StatusBadge status={zone.is_active ? 'active' : 'inactive'} kind="area" />
                       <button type="button" className="btn btn-sm" onClick={() => editZone(zone)}>Edit</button>
+                      {removeButton('zone', zone.id, zone.name)}
                     </div>
                   </div>
+                  {removePanelFor('zone', zone.id)}
+                  </Fragment>
                 ))}
               </div>
             )}
@@ -427,7 +504,8 @@ export default function AdminLocationsPage() {
                   </div>
                 </form>
                 {recordList('Service areas', areas, (a) => (
-                  <div className="record" key={a.id}>
+                  <Fragment key={a.id}>
+                  <div className="record">
                     <div>
                       <p className="record-title">{a.name}</p>
                       <p className="record-meta">#{a.id} · {a.slug || 'No slug'}</p>
@@ -435,8 +513,11 @@ export default function AdminLocationsPage() {
                     <div className="row" style={{ gap: 8 }}>
                       <StatusBadge status={a.status} kind="area" />
                       <button type="button" className="btn btn-sm" onClick={() => editArea(a)}>Edit</button>
+                      {removeButton('area', a.id, a.name)}
                     </div>
                   </div>
+                  {removePanelFor('area', a.id)}
+                  </Fragment>
                 ))}
               </div>
             )}
@@ -502,7 +583,8 @@ export default function AdminLocationsPage() {
                   </div>
                 </form>
                 {recordList('Places', places, (p) => (
-                  <div className="record" key={p.id}>
+                  <Fragment key={p.id}>
+                  <div className="record">
                     <div>
                       <p className="record-title">{p.name}</p>
                       <p className="record-meta">#{p.id} · {areaName(p.service_area_id)} · Zone #{p.zone_id}</p>
@@ -510,8 +592,11 @@ export default function AdminLocationsPage() {
                     <div className="row" style={{ gap: 8 }}>
                       <StatusBadge status={p.status} kind="area" />
                       <button type="button" className="btn btn-sm" onClick={() => editPlace(p)}>Edit</button>
+                      {removeButton('place', p.id, p.name)}
                     </div>
                   </div>
+                  {removePanelFor('place', p.id)}
+                  </Fragment>
                 ))}
               </div>
             )}
@@ -632,7 +717,8 @@ export default function AdminLocationsPage() {
                   </div>
                 </form>
                 {recordList('Route fares', fares, (f) => (
-                  <div className="record" key={f.id}>
+                  <Fragment key={f.id}>
+                  <div className="record">
                     <div>
                       <p className="record-title">{placeName(f.origin_place_id)} → {placeName(f.destination_place_id)}</p>
                       <p className="record-meta">
@@ -642,8 +728,11 @@ export default function AdminLocationsPage() {
                     <div className="row" style={{ gap: 8 }}>
                       <StatusBadge status={f.is_active ? 'active' : 'inactive'} kind="area" />
                       <button type="button" className="btn btn-sm" onClick={() => editFare(f)}>Edit</button>
+                      {removeButton('fare', f.id, `${placeName(f.origin_place_id)} → ${placeName(f.destination_place_id)} (${f.vehicle_type})`)}
                     </div>
                   </div>
+                  {removePanelFor('fare', f.id)}
+                  </Fragment>
                 ))}
               </div>
             )}

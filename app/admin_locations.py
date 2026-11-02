@@ -3,13 +3,13 @@ import re
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth import require_super_admin
 from app.database import get_db
-from app.models import AuditLog, Fare, Place, PlaceFare, ServiceArea, User, Zone
+from app.models import AuditLog, Fare, Place, PlaceFare, RideRequest, SavedPlace, ServiceArea, User, Zone
 
 router = APIRouter(prefix="/api/v1/admin/locations", tags=["admin", "locations"])
 
@@ -549,3 +549,165 @@ def update_place_fare(
     db.refresh(fare)
     return _place_fare_dict(fare)
 
+
+
+# --------------------------------------------------------------------------
+# Removing areas, zones, places and route fares
+#
+# Anything a trip has used stays, so receipts, reports and ride history
+# keep their place names: those can only be switched to Inactive (hidden
+# from booking). Everything else can be removed for good. Each "removal"
+# check says what would go before anything is deleted.
+# --------------------------------------------------------------------------
+
+
+def _trips_using(db: Session, place_ids: list[int]) -> int:
+    if not place_ids:
+        return 0
+    return db.scalar(select(func.count(RideRequest.id)).where(or_(
+        RideRequest.origin_place_id.in_(place_ids), RideRequest.destination_place_id.in_(place_ids)))) or 0
+
+
+def _fares_for(db: Session, place_ids: list[int]) -> list[int]:
+    if not place_ids:
+        return []
+    return list(db.scalars(select(PlaceFare.id).where(or_(
+        PlaceFare.origin_place_id.in_(place_ids), PlaceFare.destination_place_id.in_(place_ids)))).all())
+
+
+def _saved_for(db: Session, place_ids: list[int]) -> int:
+    if not place_ids:
+        return 0
+    return db.scalar(select(func.count(SavedPlace.id)).where(SavedPlace.place_id.in_(place_ids))) or 0
+
+
+def _remove_places(db: Session, place_ids: list[int]) -> None:
+    if not place_ids:
+        return
+    db.execute(delete(PlaceFare).where(or_(
+        PlaceFare.origin_place_id.in_(place_ids), PlaceFare.destination_place_id.in_(place_ids))))
+    db.execute(delete(SavedPlace).where(SavedPlace.place_id.in_(place_ids)))
+    db.execute(delete(Place).where(Place.id.in_(place_ids)))
+
+
+def _plural(count: int, word: str) -> str:
+    return f"{count} {word}{'' if count == 1 else 's'}"
+
+
+def _area_removal(db: Session, area: ServiceArea) -> dict:
+    place_ids = list(db.scalars(select(Place.id).where(Place.service_area_id == area.id)).all())
+    trips = _trips_using(db, place_ids)
+    summary = {
+        "kind": "service area", "name": area.name, "places": len(place_ids),
+        "route_fares": len(_fares_for(db, place_ids)), "saved_places": _saved_for(db, place_ids), "trips": trips,
+        "can_remove": trips == 0,
+    }
+    summary["reason"] = None if trips == 0 else (
+        f"Its places have been used in {_plural(trips, 'trip')}. Set the area to Inactive instead: it disappears "
+        "from booking, and past receipts keep their place names.")
+    return summary
+
+
+def _zone_removal(db: Session, zone: Zone) -> dict:
+    places = db.scalar(select(func.count(Place.id)).where(Place.zone_id == zone.id)) or 0
+    zone_fares = db.scalar(select(func.count(Fare.id)).where(
+        or_(Fare.origin_zone_id == zone.id, Fare.destination_zone_id == zone.id))) or 0
+    return {
+        "kind": "zone", "name": zone.name, "places": places, "zone_fares": zone_fares, "can_remove": places == 0,
+        "reason": None if places == 0 else (
+            f"{_plural(places, 'place')} still use this zone. Move them to another zone or remove them first, "
+            "or set the zone to Inactive."),
+    }
+
+
+def _place_removal(db: Session, place: Place) -> dict:
+    trips = _trips_using(db, [place.id])
+    return {
+        "kind": "place", "name": place.name, "route_fares": len(_fares_for(db, [place.id])),
+        "saved_places": _saved_for(db, [place.id]), "trips": trips, "can_remove": trips == 0,
+        "reason": None if trips == 0 else (
+            f"It has been used in {_plural(trips, 'trip')}. Set it to Inactive instead: it disappears from "
+            "booking, and past receipts keep its name."),
+    }
+
+
+def _get(db: Session, model, item_id: int, label: str):
+    item = db.get(model, item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail=f"{label} not found")
+    return item
+
+
+def _refuse(summary: dict) -> None:
+    if not summary["can_remove"]:
+        raise HTTPException(status_code=409, detail=f"This {summary['kind']} can't be removed. {summary['reason']}")
+
+
+@router.get("/areas/{area_id}/removal")
+def check_area_removal(area_id: int, db: Session = Depends(get_db),
+                       _admin: User = Depends(require_super_admin)) -> dict:
+    return _area_removal(db, _get(db, ServiceArea, area_id, "Service area"))
+
+
+@router.delete("/areas/{area_id}")
+def remove_area(area_id: int, db: Session = Depends(get_db), admin: User = Depends(require_super_admin)) -> dict:
+    area = _get(db, ServiceArea, area_id, "Service area")
+    summary = _area_removal(db, area)
+    _refuse(summary)
+    place_ids = list(db.scalars(select(Place.id).where(Place.service_area_id == area.id)).all())
+    _remove_places(db, place_ids)
+    db.delete(area)
+    _audit(db, admin, "location.area_removed", "service_area", area_id,
+           f"Removed area {summary['name']} with {_plural(summary['places'], 'place')} and "
+           f"{_plural(summary['route_fares'], 'route fare')}")
+    db.commit()
+    return {"removed": True, **summary}
+
+
+@router.get("/zones/{zone_id}/removal")
+def check_zone_removal(zone_id: int, db: Session = Depends(get_db),
+                       _admin: User = Depends(require_super_admin)) -> dict:
+    return _zone_removal(db, _get(db, Zone, zone_id, "Zone"))
+
+
+@router.delete("/zones/{zone_id}")
+def remove_zone(zone_id: int, db: Session = Depends(get_db), admin: User = Depends(require_super_admin)) -> dict:
+    zone = _get(db, Zone, zone_id, "Zone")
+    summary = _zone_removal(db, zone)
+    _refuse(summary)
+    db.execute(delete(Fare).where(or_(Fare.origin_zone_id == zone.id, Fare.destination_zone_id == zone.id)))
+    db.delete(zone)
+    _audit(db, admin, "location.zone_removed", "zone", zone_id, f"Removed zone {summary['name']}")
+    db.commit()
+    return {"removed": True, **summary}
+
+
+@router.get("/places/{place_id}/removal")
+def check_place_removal(place_id: int, db: Session = Depends(get_db),
+                        _admin: User = Depends(require_super_admin)) -> dict:
+    return _place_removal(db, _get(db, Place, place_id, "Place"))
+
+
+@router.delete("/places/{place_id}")
+def remove_place(place_id: int, db: Session = Depends(get_db), admin: User = Depends(require_super_admin)) -> dict:
+    place = _get(db, Place, place_id, "Place")
+    summary = _place_removal(db, place)
+    _refuse(summary)
+    _remove_places(db, [place.id])
+    _audit(db, admin, "location.place_removed", "place", place_id,
+           f"Removed place {summary['name']} and {_plural(summary['route_fares'], 'route fare')}")
+    db.commit()
+    return {"removed": True, **summary}
+
+
+@router.delete("/place-fares/{fare_id}")
+def remove_place_fare(fare_id: int, db: Session = Depends(get_db),
+                      admin: User = Depends(require_super_admin)) -> dict:
+    fare = _get(db, PlaceFare, fare_id, "Route fare")
+    origin, destination = db.get(Place, fare.origin_place_id), db.get(Place, fare.destination_place_id)
+    label = f"{origin.name if origin else fare.origin_place_id} to " \
+            f"{destination.name if destination else fare.destination_place_id} ({fare.vehicle_type})"
+    db.delete(fare)
+    _audit(db, admin, "location.place_fare_removed", "place_fare", fare_id, f"Removed route fare {label}")
+    db.commit()
+    return {"removed": True, "kind": "route fare", "name": label}

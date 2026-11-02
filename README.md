@@ -28,6 +28,8 @@ A fare is selected by `origin_zone_id`, `destination_zone_id`, and `vehicle_type
 
 The final amount is rounded to two decimal places and returned in NGN. Only configured, active fares are used.
 
+**Removing locations.** In *Places & fares*, every service area, zone, place and route fare has a **Remove** button. It first shows what would go with it (an area takes its places, their route fares and passengers' saved shortcuts; a zone takes its zone fares) and asks to confirm. Anything a trip has used can't be removed, so receipts and reports keep their place names: set it to **Inactive** instead (one tap from the same panel), which hides it from booking. A zone still used by places must have them moved or removed first. Every removal is recorded in the audit log.
+
 ## Windows + PowerShell setup
 
 Activate your virtual environment and install dependencies:

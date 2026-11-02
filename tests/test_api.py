@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from app.rate_limit import RateLimitUnavailable
@@ -5428,3 +5428,103 @@ def test_atona_still_answers_ekimove_questions(client, monkeypatch, message):
     assert "What you help with (and nothing else)" in prompt
     assert atona_module.OFF_TOPIC_REPLY in prompt
     assert "call 112" in prompt
+
+
+# --------------------------------------------------------------------------
+# Removing service areas, zones, places and route fares
+# --------------------------------------------------------------------------
+
+LOC = "/api/v1/admin/locations"
+
+
+def _count(client, model):
+    with session_for(client) as db:
+        return db.scalar(select(func.count(model.id)))
+
+
+def test_unused_area_is_removed_with_its_places_and_fares(client):
+    from app.models import SavedPlace
+
+    seeded = _seed_place_route(client)
+    with session_for(client) as db:
+        db.add(SavedPlace(user_id=1, label="Hostel", place_id=seeded["origin_id"]))
+        db.commit()
+    admin = login(client, *ADMIN_LOGIN)
+    check = client.get(f"{LOC}/areas/{seeded['area_id']}/removal", headers=admin).json()
+    assert check["can_remove"] is True and check["places"] == 3 and check["route_fares"] == 1
+    assert check["saved_places"] == 1 and check["trips"] == 0
+    removed = client.delete(f"{LOC}/areas/{seeded['area_id']}", headers=admin)
+    assert removed.status_code == 200, removed.text
+    with session_for(client) as db:
+        assert db.get(ServiceArea, seeded["area_id"]) is None
+        assert db.get(Place, seeded["origin_id"]) is None
+        assert db.get(PlaceFare, seeded["fare_id"]) is None
+        assert db.scalar(select(func.count(SavedPlace.id))) == 0
+        assert db.scalar(select(AuditLog).where(AuditLog.action == "location.area_removed")) is not None
+
+
+def test_area_or_place_used_by_a_trip_cannot_be_removed(client):
+    seeded = _seed_place_route(client)
+    with session_for(client) as db:
+        db.add(RideRequest(passenger_user_id=1, origin_place_id=seeded["origin_id"],
+                           destination_place_id=seeded["destination_id"], origin_text="A", destination_text="B",
+                           vehicle_type="standard", passenger_count=1, quoted_fare=Decimal("2100"),
+                           status="completed"))
+        db.commit()
+    admin = login(client, *ADMIN_LOGIN)
+    check = client.get(f"{LOC}/areas/{seeded['area_id']}/removal", headers=admin).json()
+    assert check["can_remove"] is False and check["trips"] == 1 and "Inactive" in check["reason"]
+    refused = client.delete(f"{LOC}/areas/{seeded['area_id']}", headers=admin)
+    assert refused.status_code == 409 and "Inactive" in refused.json()["detail"]
+    assert client.delete(f"{LOC}/places/{seeded['origin_id']}", headers=admin).status_code == 409
+    # Nothing was removed.
+    with session_for(client) as db:
+        assert db.get(ServiceArea, seeded["area_id"]) is not None
+        assert db.get(Place, seeded["origin_id"]) is not None
+        assert db.get(PlaceFare, seeded["fare_id"]) is not None
+    # A place no trip used can still go, with its fares.
+    hidden = client.delete(f"{LOC}/places/{seeded['hidden_id']}", headers=admin)
+    assert hidden.status_code == 200, hidden.text
+
+
+def test_place_removal_takes_its_route_fares(client):
+    seeded = _seed_place_route(client)
+    admin = login(client, *ADMIN_LOGIN)
+    check = client.get(f"{LOC}/places/{seeded['destination_id']}/removal", headers=admin).json()
+    assert check == {"kind": "place", "name": "Test Destination Point", "route_fares": 1, "saved_places": 0,
+                     "trips": 0, "can_remove": True, "reason": None}
+    assert client.delete(f"{LOC}/places/{seeded['destination_id']}", headers=admin).status_code == 200
+    with session_for(client) as db:
+        assert db.get(PlaceFare, seeded["fare_id"]) is None
+        assert db.get(Place, seeded["origin_id"]) is not None
+
+
+def test_zone_in_use_cannot_be_removed_but_an_empty_one_can(client):
+    seeded = _seed_place_route(client)
+    admin = login(client, *ADMIN_LOGIN)
+    used = client.get(f"{LOC}/zones/1/removal", headers=admin).json()
+    assert used["can_remove"] is False and used["places"] == 2 and "Move them" in used["reason"]
+    assert client.delete(f"{LOC}/zones/1", headers=admin).status_code == 409
+    created = client.post("/api/v1/admin/zones", json={"name": "Spare zone", "is_active": False}, headers=admin)
+    zone_id = created.json()["id"]
+    with session_for(client) as db:
+        db.add(Fare(origin_zone_id=zone_id, destination_zone_id=1, vehicle_type="car", base_amount=Decimal("500")))
+        db.commit()
+    check = client.get(f"{LOC}/zones/{zone_id}/removal", headers=admin).json()
+    assert check["can_remove"] is True and check["zone_fares"] == 1
+    assert client.delete(f"{LOC}/zones/{zone_id}", headers=admin).status_code == 200
+    with session_for(client) as db:
+        assert db.get(Zone, zone_id) is None
+        assert db.scalar(select(func.count(Fare.id)).where(Fare.origin_zone_id == zone_id)) == 0
+    assert seeded
+
+
+def test_route_fare_can_be_removed_and_only_by_staff(client):
+    seeded = _seed_place_route(client)
+    passenger = login(client, *PASSENGER_LOGIN)
+    assert client.delete(f"{LOC}/place-fares/{seeded['fare_id']}", headers=passenger).status_code == 403
+    assert client.delete(f"{LOC}/areas/{seeded['area_id']}").status_code == 401
+    admin = login(client, *ADMIN_LOGIN)
+    removed = client.delete(f"{LOC}/place-fares/{seeded['fare_id']}", headers=admin)
+    assert removed.status_code == 200 and "Test Pickup Point to Test Destination Point" in removed.json()["name"]
+    assert client.delete(f"{LOC}/place-fares/{seeded['fare_id']}", headers=admin).status_code == 404
