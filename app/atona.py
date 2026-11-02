@@ -694,6 +694,18 @@ def atona_status() -> dict:
     }
 
 
+def model_options(model: str) -> dict:
+    """Settings that depend on the AI model.
+
+    GPT OSS models think before answering, and that thinking counts toward
+    the reply length: keep it brief, leave room for the answer, and never
+    send the thinking back (it is not meant for passengers).
+    """
+    if str(model).startswith("openai/gpt-oss"):
+        return {"max_completion_tokens": 1500, "reasoning_effort": "low", "include_reasoning": False}
+    return {"max_completion_tokens": 700}
+
+
 @router.post("/chat")
 def atona_chat(
     payload: AtonaChatMessage,
@@ -730,8 +742,8 @@ def atona_chat(
             kwargs = {
                 "model": settings.groq_model,
                 "temperature": 0.3,
-                "max_completion_tokens": 700,
                 "messages": messages,
+                **model_options(settings.groq_model),
             }
             if allow_tools:
                 kwargs["tools"] = TOOL_SCHEMAS
@@ -781,7 +793,21 @@ def atona_chat(
 
         if not reply or not str(reply).strip():
             raise ValueError("Empty reply")
-    except (APIConnectionError, APIStatusError) as exc:
+    except APIStatusError as exc:
+        logger.warning("Atọ́nà AI request failed: HTTP %s", getattr(exc, "status_code", "?"))
+        if getattr(exc, "status_code", None) == 429:
+            # The AI plan's per-minute allowance is used up (likely on
+            # Groq's free plan); it frees up within a minute.
+            raise HTTPException(
+                status_code=429,
+                detail="Atọ́nà is busy right now. Please try again in a minute.",
+                headers={"Retry-After": "30"},
+            ) from None
+        raise HTTPException(
+            status_code=502,
+            detail="Atọ́nà couldn't reach its AI service. Please try again.",
+        ) from None
+    except APIConnectionError as exc:
         logger.warning("Atọ́nà AI request failed: %s", type(exc).__name__)
         raise HTTPException(
             status_code=502,

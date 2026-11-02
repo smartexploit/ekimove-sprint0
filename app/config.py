@@ -38,7 +38,9 @@ class Settings(BaseSettings):
 
     # Atọ́nà AI booking assistant
     groq_api_key: str | None = None
-    groq_model: str = "llama-3.3-70b-versatile"
+    # GPT OSS 120B: open to every Groq account, including the free plan.
+    # (Groq made the Llama models enterprise-only on 26 August 2026.)
+    groq_model: str = "openai/gpt-oss-120b"
     atona_enabled: bool = False
     # Messages allowed per rolling window, per signed-in account or per
     # guest IP address. Protects the paid AI service from abuse.

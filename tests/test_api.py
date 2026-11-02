@@ -5326,3 +5326,50 @@ def test_support_conversations_are_limited_per_hour(client):
     blocked = client.post("/api/v1/support/threads", json={"subject": "One more", "message": "Hello"},
                           headers=headers)
     assert blocked.status_code == 429
+
+
+def test_atona_uses_gpt_oss_with_brief_hidden_thinking(client, monkeypatch):
+    from types import SimpleNamespace
+    import app.atona as atona_module
+    from app.config import Settings
+
+    assert Settings().groq_model == "openai/gpt-oss-120b"
+    monkeypatch.setattr(settings, "atona_enabled", True)
+    monkeypatch.setattr(settings, "groq_api_key", "test-key")
+    monkeypatch.setattr(settings, "groq_model", "openai/gpt-oss-120b")
+    seen = {}
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            seen.update(kwargs)
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="Hello from Atọ́nà"))])
+
+    monkeypatch.setattr(atona_module, "Groq", lambda **kwargs: SimpleNamespace(
+        chat=SimpleNamespace(completions=FakeCompletions())))
+    response = client.post("/api/v1/atona/chat", json={"message": "Hi"})
+    assert response.status_code == 200, response.text
+    assert seen["reasoning_effort"] == "low" and seen["include_reasoning"] is False
+    assert seen["max_completion_tokens"] >= 1000
+    # Other models don't get the reasoning settings.
+    assert atona_module.model_options("other-model") == {"max_completion_tokens": 700}
+
+
+def test_atona_says_busy_when_the_ai_allowance_is_used_up(client, monkeypatch):
+    from types import SimpleNamespace
+    import httpx
+    import app.atona as atona_module
+    from groq import RateLimitError
+
+    monkeypatch.setattr(settings, "atona_enabled", True)
+    monkeypatch.setattr(settings, "groq_api_key", "test-key")
+
+    class Busy:
+        def create(self, **kwargs):
+            request = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
+            raise RateLimitError("rate limited", response=httpx.Response(429, request=request), body=None)
+
+    monkeypatch.setattr(atona_module, "Groq", lambda **kwargs: SimpleNamespace(
+        chat=SimpleNamespace(completions=Busy())))
+    response = client.post("/api/v1/atona/chat", json={"message": "Hi"})
+    assert response.status_code == 429
+    assert "try again in a minute" in response.json()["detail"]
