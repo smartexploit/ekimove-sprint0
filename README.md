@@ -110,7 +110,7 @@ EkiMove keeps `COMMISSION_PERCENT` (10% by default) of every fare; the driver ke
 - **Drivers** see their balance, today and this week, an itemised list ("₦600 − ₦60 EkiMove = +₦540") and their payouts on *Earnings*, and add the bank account to be paid into. With Paystack configured, the account name is confirmed with the bank.
 - **Admins** see fares, EkiMove's commission, what's owed and what's been paid on *Admin → Earnings*, and can press **Pay drivers now**.
 - **Payouts:** every balance of at least `PAYOUT_MINIMUM` is paid out. The debit is saved before any money moves. With `PAYSTACK_TRANSFERS_ENABLED=true`, Paystack Transfers sends it to verified accounts and the `transfer.success` / `transfer.failed` / `transfer.reversed` webhooks (same URL as above) settle it. Otherwise the payout waits for staff to send it from the bank and mark it sent. A failed or reversed payout returns the money to the driver's balance.
-- **Daily schedule:** create a Render **Cron Job** (e.g. schedule `0 17 * * *`, 6 pm in Lagos) with command `curl -fsS -X POST -H "X-Cron-Token: $PAYOUT_CRON_TOKEN" https://ekimove-api.onrender.com/api/v1/internal/payouts/run`, and set the same `PAYOUT_CRON_TOKEN` on the API.
+- **Daily schedule:** create a Render **Cron Job** (e.g. schedule `0 17 * * *`, 6 pm in Lagos) with command `curl -fsS -X POST -H "X-Cron-Token: $PAYOUT_CRON_TOKEN" https://api.ekimove.com.ng/api/v1/internal/payouts/run`, and set the same `PAYOUT_CRON_TOKEN` on the API.
 - Before automatic transfers: turn off the transfer OTP in the Paystack dashboard, keep the Paystack balance funded, and confirm VAT on commission with an accountant. Trips completed before this release have no earnings entries.
 
 ## Vehicles and passenger limits
@@ -169,7 +169,7 @@ Customers choose *Send a package*: pickup and drop-off places, size, what's insi
 - **Price:** small and medium go by motorcycle (by car where the route has no motorcycle fare), large by car. Price = that route fare + an extra for medium and large (default ₦200 and ₦300; *Places & fares → Booking rules*, where deliveries can also be switched off).
 - **Hand-over safety:** the rider collects with the sender's pickup PIN and can finish only with the recipient's 4-digit delivery code (5 wrong tries lock it). The sender sees the code in *My rides* and can forward it; when text messages are set up, the recipient is texted the code and a tracking link (`/t/…`, no sign-in) the moment the package is picked up. The rider never sees the code.
 - **Payment, dispatch, earnings, chat, receipts and reports** work as for rides. If the recipient got the package but can't give the code, staff can mark it delivered from *Live map* after calling them (kept in the log).
-- `FRONTEND_URL` (default `https://ekimove.onrender.com`) is used in the recipient's text; change it when the custom domain is live.
+- `FRONTEND_URL` (default `https://ekimove.com.ng`) is used in the recipient's text.
 
 ## Data rights
 From *Profile → Your data*, anyone can download a copy of their data (JSON) or ask for their account to be deleted (password needed, can be cancelled). Requests open a support chat and appear under *People → Deletion requested*; staff settle refunds or driver balances, then use **Remove account**, which erases the name, contacts, sign-in, saved places and devices and keeps trips and payments anonymised.
@@ -218,7 +218,7 @@ The frontend is a Progressive Web App: people can add EkiMove to their phone's h
 - PWAs need HTTPS (Render provides it). Icons live in `frontend/public/brand/`.
 
 ## Custom domain (ekimove.com.ng)
-Bought from Truehost; DNS can be managed at Cloudflare (free) or at Truehost.
+**Live since 3 November 2026.** Bought from Truehost; DNS is managed at Cloudflare (free plan, nameservers `elle` and `yisroel.ns.cloudflare.com`).
 
 | DNS record | Points to | Serves |
 | --- | --- | --- |
@@ -236,13 +236,13 @@ On Cloudflare, keep these records **DNS only** (grey cloud) so Render can issue 
 The API already accepts requests from the new domain, and the old `onrender.com` addresses keep working, so links people already have don't break.
 
 ## Deploying the frontend on Render
-The frontend is a separate Render **Static Site** (`ekimove.onrender.com`), not part of `render.yaml`. Its settings should be:
+The frontend is a separate Render **Static Site** (`ekimove.com.ng`, also `ekimove.onrender.com`), not part of `render.yaml`. Its settings should be:
 
 - **Branch:** `master`, with **Auto-Deploy** on
 - **Root directory:** `frontend`
 - **Build command:** `npm ci && npm run build`
 - **Publish directory:** `dist`
-- **Environment:** `VITE_API_BASE_URL=https://ekimove-api.onrender.com`
+- **Environment:** `VITE_API_BASE_URL=https://api.ekimove.com.ng`
 - **Redirects/Rewrites:** source `/*`, destination `/index.html`, action **Rewrite**, so links such as `/login` or `/my-rides` open directly.
 - **Headers** (Settings → Headers, path `/*`): `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `Strict-Transport-Security: max-age=31536000`, and `Content-Security-Policy: frame-ancestors 'none'`. These stop other sites showing EkiMove inside a frame to trick people into tapping. The full content security policy is already built into the page itself.
 

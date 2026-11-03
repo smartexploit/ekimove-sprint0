@@ -5036,7 +5036,7 @@ def test_delivery_end_to_end_with_code(client, outbox, monkeypatch, quiet_messag
     assert started.status_code == 200, started.text
     # The recipient is texted a tracking link and the code.
     assert len(texts) == 1 and texts[0][0] == "08035551234"
-    assert code in texts[0][1] and "https://ekimove.onrender.com/t/" in texts[0][1] and texts[0][1].isascii()
+    assert code in texts[0][1] and "https://ekimove.com.ng/t/" in texts[0][1] and texts[0][1].isascii()
     token = texts[0][1].split("/t/")[1].split()[0]
     shared = client.get(f"/api/v1/share/{token}").json()
     assert shared["service_type"] == "delivery" and code not in json.dumps(shared)
