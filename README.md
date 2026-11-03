@@ -217,6 +217,24 @@ The frontend is a Progressive Web App: people can add EkiMove to their phone's h
 - The service worker (built by `vite-plugin-pwa`) caches only the app itself, so it opens instantly and works on a weak connection. Ride, fare and payment data always come live from the API and are never cached. New releases install in the background and apply on the next launch.
 - PWAs need HTTPS (Render provides it). Icons live in `frontend/public/brand/`.
 
+## Custom domain (ekimove.com.ng)
+Bought from Truehost; DNS can be managed at Cloudflare (free) or at Truehost.
+
+| DNS record | Points to | Serves |
+| --- | --- | --- |
+| `@` (CNAME on Cloudflare, or A `216.24.57.1` elsewhere) | `ekimove.onrender.com` | the app, ekimove.com.ng |
+| CNAME `www` | `ekimove.onrender.com` | www.ekimove.com.ng |
+| CNAME `api` | `ekimove-api.onrender.com` | the API, api.ekimove.com.ng |
+
+On Cloudflare, keep these records **DNS only** (grey cloud) so Render can issue the HTTPS certificates. Remove AAAA records and any registrar forwarding or parking. In Render, add `ekimove.com.ng` and `www.ekimove.com.ng` to the static site and `api.ekimove.com.ng` to the API service (Settings → Custom Domains). Once all three show **Verified**:
+
+1. API service → Environment: `FRONTEND_URL=https://ekimove.com.ng` (links in texts and receipts).
+2. Static site → Environment: `VITE_API_BASE_URL=https://api.ekimove.com.ng`, then **Manual Deploy → Clear build cache & deploy**.
+3. Paystack dashboard → Settings → API Keys & Webhooks: webhook URL `https://api.ekimove.com.ng/api/v1/payments/paystack/webhook`.
+4. Uptime monitor: `https://api.ekimove.com.ng/health`.
+
+The API already accepts requests from the new domain, and the old `onrender.com` addresses keep working, so links people already have don't break.
+
 ## Deploying the frontend on Render
 The frontend is a separate Render **Static Site** (`ekimove.onrender.com`), not part of `render.yaml`. Its settings should be:
 

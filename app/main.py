@@ -1718,6 +1718,8 @@ class SecurityHeaders:
 application = OuterCORSMiddleware(
     app=SecurityHeaders(app),
     allow_origins=[
+        "https://ekimove.com.ng",
+        "https://www.ekimove.com.ng",
         "https://ekimove.onrender.com",
         "http://localhost:5173",
         "http://localhost:5175",

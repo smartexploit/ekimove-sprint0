@@ -5528,3 +5528,17 @@ def test_route_fare_can_be_removed_and_only_by_staff(client):
     removed = client.delete(f"{LOC}/place-fares/{seeded['fare_id']}", headers=admin)
     assert removed.status_code == 200 and "Test Pickup Point to Test Destination Point" in removed.json()["name"]
     assert client.delete(f"{LOC}/place-fares/{seeded['fare_id']}", headers=admin).status_code == 404
+
+
+def test_api_accepts_the_custom_domain_and_the_render_address():
+    from fastapi.testclient import TestClient as PlainClient
+
+    with PlainClient(main_module.application) as plain:
+        for origin in ("https://ekimove.com.ng", "https://www.ekimove.com.ng", "https://ekimove.onrender.com"):
+            response = plain.options("/api/v1/auth/login", headers={
+                "Origin": origin, "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type"})
+            assert response.headers.get("access-control-allow-origin") == origin, origin
+        stranger = plain.options("/api/v1/auth/login", headers={
+            "Origin": "https://ekimove-fake.com", "Access-Control-Request-Method": "POST"})
+        assert stranger.headers.get("access-control-allow-origin") is None

@@ -48,7 +48,7 @@ PUSH_HOSTS = (
     "push.services.mozilla.com",
     "notify.windows.com",
 )
-DEFAULT_SUBJECT = "https://ekimove.onrender.com"
+DEFAULT_SUBJECT = "https://ekimove.com.ng"
 
 
 # --------------------------------------------------------------------------

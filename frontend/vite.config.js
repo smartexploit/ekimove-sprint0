@@ -10,7 +10,7 @@ import { VitePWA } from 'vite-plugin-pwa'
  */
 function contentSecurityPolicy(mode) {
   const env = loadEnv(mode, '.', 'VITE_')
-  const api = new Set(['https://ekimove-api.onrender.com'])
+  const api = new Set(['https://api.ekimove.com.ng', 'https://ekimove-api.onrender.com'])
   try {
     if (env.VITE_API_BASE_URL) api.add(new URL(env.VITE_API_BASE_URL).origin)
   } catch {

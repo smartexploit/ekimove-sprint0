@@ -173,7 +173,9 @@ class Settings(BaseSettings):
     vapid_subject: str | None = None
 
     # Public address of the app, used in links sent by text (e.g. a
-    # delivery's tracking link). Change it when the custom domain is live.
+    # delivery's tracking link). Set FRONTEND_URL=https://ekimove.com.ng in
+    # Render once that domain shows "Verified"; until then the Render
+    # address keeps working.
     frontend_url: str = "https://ekimove.onrender.com"
 
     # Optional error monitoring with Sentry.
