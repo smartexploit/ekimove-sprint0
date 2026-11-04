@@ -11,6 +11,7 @@ import {
   Truck,
   Users,
   MapPin,
+  Rocket,
   Route,
   ShieldCheck,
   Wallet,
@@ -21,6 +22,7 @@ import { logoutPassenger } from '../services/authService.js'
 
 const NAV = [
   ['/admin/overview', 'Overview', LayoutDashboard],
+  ['/admin/launch', 'Launch checklist', Rocket],
   ['/admin/map', 'Live map', MapIcon],
   ['/admin/dispatch', 'Dispatch', Route],
   ['/admin/loads', 'Loads', Truck],

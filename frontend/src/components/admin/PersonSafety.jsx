@@ -6,6 +6,11 @@ import { fetchImageUrl } from '../../services/authService.js'
 import { getRideTrail, reviewVerification } from '../../services/tripService.js'
 import { formatDateTime } from '../../utils/format.js'
 
+const CALL_OUTCOMES = {
+  ended: 'answered', active: 'in progress', ringing: 'ringing', missed: 'not answered', declined: 'declined',
+  cancelled: 'cancelled before answer', failed: "couldn't connect",
+}
+
 /** ID verification review for a passenger (admin). */
 export function VerificationReview({ person, onChanged }) {
   const v = person.verification
@@ -140,6 +145,23 @@ export function TrailViewer({ rideId, onClose }) {
                   </li>
                 ))}
               </ul>
+            </details>
+          )}
+          {trail.calls?.length > 0 && (
+            <details>
+              <summary className="small" style={{ cursor: 'pointer', fontWeight: 700 }}>
+                In-app calls ({trail.calls.length})
+              </summary>
+              <ul className="plain-list small" style={{ marginTop: 8 }}>
+                {trail.calls.map((call) => (
+                  <li key={call.created_at}>
+                    {formatDateTime(call.created_at)} · <strong>{call.from === 'driver' ? 'Driver' : 'Passenger'} called</strong>{' '}
+                    · {CALL_OUTCOMES[call.status] || call.status}
+                    {call.duration_seconds != null && ` · ${Math.floor(call.duration_seconds / 60)}m ${call.duration_seconds % 60}s`}
+                  </li>
+                ))}
+              </ul>
+              <p className="muted small">Calls are never recorded; only these details are kept.</p>
             </details>
           )}
         </>

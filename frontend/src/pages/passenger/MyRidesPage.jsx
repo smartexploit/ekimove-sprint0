@@ -10,6 +10,7 @@ import CancelRide from '../../components/CancelRide.jsx'
 import TripTracker from '../../components/trips/TripTracker.jsx'
 import RateTrip from '../../components/trips/RateTrip.jsx'
 import TripChat from '../../components/trips/TripChat.jsx'
+import CallButton from '../../components/calls/CallButton.jsx'
 import DeliveryCode from '../../components/trips/DeliveryCode.jsx'
 import { formatPickupTime } from '../../utils/schedule.js'
 import { getProfile } from '../../services/accountService.js'
@@ -135,7 +136,10 @@ function LiveRide({ ride, onChanged, emergencyContact }) {
 
       {ride.assigned_ride_id && ['assigned', 'driver_arriving', 'in_progress'].includes(ride.ride_status) && (
         <>
-          <TripChat rideId={ride.assigned_ride_id} who="passenger" unread={ride.chat_unread || 0} />
+          <div className="trip-contact">
+            <CallButton rideId={ride.assigned_ride_id} other="driver" name={ride.driver_name} />
+            <TripChat rideId={ride.assigned_ride_id} who="passenger" unread={ride.chat_unread || 0} />
+          </div>
           <TripTracker rideId={ride.assigned_ride_id} emergencyContact={emergencyContact} />
         </>
       )}

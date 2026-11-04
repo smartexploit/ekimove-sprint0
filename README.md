@@ -246,6 +246,14 @@ The frontend is a separate Render **Static Site** (`ekimove.com.ng`, also `ekimo
 - **Redirects/Rewrites:** source `/*`, destination `/index.html`, action **Rewrite**, so links such as `/login` or `/my-rides` open directly.
 - **Headers** (Settings → Headers, path `/*`): `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `Strict-Transport-Security: max-age=31536000`, and `Content-Security-Policy: frame-ancestors 'none'`. These stop other sites showing EkiMove inside a frame to trick people into tapping. The full content security policy is already built into the page itself.
 
+## In-app calls
+During a trip (from driver assignment until it ends), the passenger and driver can call each other with **Call driver** / **Call passenger**, next to the trip chat. Calls use WebRTC: the audio goes directly between the two phones, numbers stay private, and nothing is recorded. The API (`app/calls.py`) only passes the connection details between the phones and deletes them when the call ends; it keeps who called, when and for how long (shown in the admin trip record and in "Download my data"). Unanswered calls ring for 45 seconds (`CALL_RING_SECONDS`), calls end after 30 minutes (`CALL_MAX_MINUTES`), and `CALLS_ENABLED=false` switches calls off. The other phone is notified by push even if EkiMove is closed.
+
+Most networks connect directly. Some Nigerian mobile networks block direct connections, so add a relay: Cloudflare dashboard → **Realtime** → **TURN Server** → **Create**, then set `CLOUDFLARE_TURN_KEY_ID` and `CLOUDFLARE_TURN_API_TOKEN` on the API (keep the token secret). The first 1,000 GB a month is free, then $0.05/GB; a voice call uses roughly 0.5–1 MB a minute.
+
+## Launch checklist
+**Launch checklist** in the console (`/admin/launch`) checks production settings, messaging, payments, support contacts, website, places, fares, drivers and calls, and says what to do for each gap. It only reports whether a setting is present; keys are never shown.
+
 ## Search engines and link previews (SEO)
 The public pages are `/`, `/fares`, `/faq`, `/areas/<name>` (for example `/areas/eksu-iworoko`), `/driver/apply` and `/policies`. Their search titles, descriptions, area pages and FAQ are edited by the super-admin under **SEO & website** in the console (`/admin/website`). Starting text is in `app/site_defaults.json` (kept identical to `frontend/src/content/siteDefaults.json`; a test checks this).
 

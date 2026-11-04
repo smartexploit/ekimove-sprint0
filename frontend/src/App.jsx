@@ -10,6 +10,7 @@ import PaymentsPage from './pages/passenger/PaymentsPage.jsx'
 import ProtectedRoute from './routes/ProtectedRoute.jsx'
 import OfflineBanner from './components/pwa/OfflineBanner.jsx'
 import PageMeta from './components/PageMeta.jsx'
+import { CallProvider } from './components/calls/CallManager.jsx'
 import ProfilePage from './pages/account/ProfilePage.jsx'
 import SupportPage from './pages/account/SupportPage.jsx'
 
@@ -26,6 +27,7 @@ const ReceiptPage = lazy(() => import('./pages/account/ReceiptPage.jsx'))
 const FaresPage = lazy(() => import('./pages/public/FaresPage.jsx'))
 const FaqPage = lazy(() => import('./pages/public/FaqPage.jsx'))
 const AreaPage = lazy(() => import('./pages/public/AreaPage.jsx'))
+const AdminLaunchPage = lazy(() => import('./pages/admin/AdminLaunchPage.jsx'))
 const AdminWebsitePage = lazy(() => import('./pages/admin/AdminWebsitePage.jsx'))
 const PoliciesPage = lazy(() => import('./pages/public/PoliciesPage.jsx'))
 const ForgotPasswordPage = lazy(() => import('./pages/auth/ForgotPasswordPage.jsx'))
@@ -52,7 +54,7 @@ const loading = (
 
 export default function App() {
   return (
-    <>
+    <CallProvider>
       <OfflineBanner />
       <PageMeta />
       <Suspense fallback={loading}>
@@ -93,6 +95,7 @@ export default function App() {
           <Route path="/admin/incidents" element={<AdminIncidentsPage />} />
           <Route path="/admin/locations" element={<AdminLocationsPage />} />
           <Route path="/admin/website" element={<AdminWebsitePage />} />
+          <Route path="/admin/launch" element={<AdminLaunchPage />} />
           <Route path="/admin/drivers" element={<AdminDriverVerificationPage />} />
         </Route>
 
@@ -111,7 +114,7 @@ export default function App() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       </Suspense>
-    </>
+    </CallProvider>
   )
 }
 

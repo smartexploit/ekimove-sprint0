@@ -11,6 +11,10 @@
         value: "EkiMove API"
       - key: APP_ENV
         value: production
+      - key: CLOUDFLARE_TURN_KEY_ID
+        sync: false
+      - key: CLOUDFLARE_TURN_API_TOKEN
+        sync: false
       - key: RENDER_DEPLOY_HOOK_URL
         sync: false
       - key: DATABASE_URL

@@ -33,6 +33,7 @@ from app.models import (
 )
 from app.photo_storage import PhotoStorageError, delete_driver_photo, download_driver_photo, upload_driver_photo
 from app.trip_chat import messages_for
+from app.calls import calls_for_ride
 from app.trips import ACTIVE, short_name, trail_points
 
 router = APIRouter(prefix="/api/v1", tags=["verification"])
@@ -376,5 +377,6 @@ def admin_ride_trail(ride_id: int, db: Session = Depends(get_db), _admin: User =
         "destination": _coords(db.get(Place, request.destination_place_id) if request.destination_place_id else None),
         "trail": trail_points(db, ride.id, 2000),
         "messages": messages_for(db, ride),
+        "calls": calls_for_ride(db, ride),
         "passenger_name_short": short_name(passenger.full_name if passenger else None),
     }

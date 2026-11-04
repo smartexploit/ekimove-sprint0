@@ -686,3 +686,42 @@ class TripMessage(Base):
     sender_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     body: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class TripCall(Base):
+    """An in-app voice call between a passenger and their driver.
+
+    Audio goes directly between the two phones (WebRTC) and is never
+    recorded. Only who called, when and for how long is kept.
+    """
+
+    __tablename__ = "trip_calls"
+    __table_args__ = (
+        CheckConstraint("status IN ('ringing', 'active', 'ended', 'declined', 'missed', 'cancelled', 'failed')",
+                        name="ck_trip_calls_status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    ride_id: Mapped[int] = mapped_column(ForeignKey("rides.id", ondelete="CASCADE"), index=True)
+    caller_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    callee_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(12), default="ringing", nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    answered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ended_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+
+class TripCallSignal(Base):
+    """Connection details exchanged while a call is set up. Deleted as soon
+    as the call ends (they contain network addresses)."""
+
+    __tablename__ = "trip_call_signals"
+    __table_args__ = (CheckConstraint("kind IN ('offer', 'answer', 'candidates')", name="ck_trip_call_signals_kind"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    call_id: Mapped[str] = mapped_column(ForeignKey("trip_calls.id", ondelete="CASCADE"), index=True)
+    sender_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    kind: Mapped[str] = mapped_column(String(12))
+    payload: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

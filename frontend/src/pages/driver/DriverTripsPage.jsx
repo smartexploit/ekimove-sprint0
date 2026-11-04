@@ -9,6 +9,7 @@ import ProfileStrip from '../../components/ProfileStrip.jsx'
 import { TRIPS_CHANGED_EVENT } from '../../services/dispatchService.js'
 import RateTrip from '../../components/trips/RateTrip.jsx'
 import TripChat from '../../components/trips/TripChat.jsx'
+import CallButton from '../../components/calls/CallButton.jsx'
 import { formatPickupTime } from '../../utils/schedule.js'
 import { BadgeCheck, Star } from 'lucide-react'
 import { apiRequest } from '../../services/authService.js'
@@ -187,7 +188,10 @@ function CurrentTrip({ ride, busy, onAdvance }) {
         <SOSButton rideId={ride.id} rideStatus={ride.status} />
       </div>
       {['assigned', 'driver_arriving', 'in_progress'].includes(ride.status) && (
-        <TripChat rideId={ride.id} who="driver" unread={ride.chat_unread || 0} />
+        <div className="trip-contact">
+          <CallButton rideId={ride.id} other="passenger" name={ride.passenger_name} />
+          <TripChat rideId={ride.id} who="driver" unread={ride.chat_unread || 0} />
+        </div>
       )}
     </section>
   )

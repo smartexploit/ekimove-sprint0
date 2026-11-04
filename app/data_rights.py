@@ -41,6 +41,7 @@ from app.models import (
     SavedPlace,
     SupportMessage,
     SupportThread,
+    TripCall,
     TripMessage,
     User,
     Vehicle,
@@ -109,6 +110,10 @@ def export_data(db: Session, user: User) -> dict:
         "trip_messages": [_row(m, ["ride_id", "body", "created_at"]) | {"sent_by_me": m.sender_user_id == user.id}
                           for m in (db.scalars(select(TripMessage).where(TripMessage.ride_id.in_(ride_ids)))
                                     if ride_ids else [])],
+        "trip_calls": [_row(c, ["ride_id", "status", "created_at", "answered_at", "ended_at"])
+                       | {"i_called": c.caller_user_id == user.id}
+                       for c in (db.scalars(select(TripCall).where(TripCall.ride_id.in_(ride_ids)))
+                                 if ride_ids else [])],
         "support_conversations": [
             _row(t, ["id", "subject", "status", "created_at"]) | {
                 "messages": [_row(m, ["body", "from_staff", "created_at"])

@@ -181,13 +181,25 @@ class Settings(BaseSettings):
     # so the public pages are rebuilt with the latest text. Keep it secret.
     render_deploy_hook_url: str | None = None
 
+    # In-app voice calls between a passenger and their driver (WebRTC).
+    # Calls work without a relay on most networks; for networks that block
+    # direct connections, add a free Cloudflare TURN key (Cloudflare >
+    # Realtime > TURN Server) as CLOUDFLARE_TURN_KEY_ID and
+    # CLOUDFLARE_TURN_API_TOKEN. Keep the token secret.
+    calls_enabled: bool = True
+    call_ring_seconds: int = 45
+    call_max_minutes: int = 30
+    cloudflare_turn_key_id: str | None = None
+    cloudflare_turn_api_token: str | None = None
+
     # Optional error monitoring with Sentry.
     sentry_dsn: str | None = None
 
     @field_validator(
         "sms_provider", "bulksms_api_token", "termii_api_key", "email_provider", "email_from_address",
         "brevo_api_key", "smtp_host", "smtp_username", "smtp_password", "vapid_public_key",
-        "vapid_private_key", "vapid_subject", "sentry_dsn", "render_deploy_hook_url",
+        "vapid_private_key", "vapid_subject", "sentry_dsn", "render_deploy_hook_url", "cloudflare_turn_key_id",
+        "cloudflare_turn_api_token",
         mode="before",
     )
     @classmethod

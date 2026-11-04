@@ -17,6 +17,11 @@ self.addEventListener('push', (event) => {
     options.tag = data.tag
     options.renotify = true
   }
+  if (data.call) {
+    // Incoming call: keep it on screen and vibrate like a phone call.
+    options.requireInteraction = true
+    options.vibrate = [600, 300, 600, 300, 600, 300, 600]
+  }
   event.waitUntil(self.registration.showNotification(data.title || 'EkiMove', options))
 })
 

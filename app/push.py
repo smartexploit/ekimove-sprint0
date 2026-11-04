@@ -127,6 +127,7 @@ def notify(
     tag: str | None = None,
     urgent: bool = False,
     ttl: int = 3600,
+    extra: dict | None = None,
 ) -> None:
     """Queue a notification to everyone in user_ids. Sent after commit."""
     if not settings.push_enabled:
@@ -144,7 +145,7 @@ def notify(
         return
     if not (public and private):
         return
-    payload = json.dumps({"title": title, "body": body, "url": url, "tag": tag}, ensure_ascii=False)
+    payload = json.dumps({"title": title, "body": body, "url": url, "tag": tag, **(extra or {})}, ensure_ascii=False)
     queue = db.info.setdefault("push_queue", [])
     for sub in subs:
         queue.append({"id": sub.id, "endpoint": sub.endpoint, "p256dh": sub.p256dh, "auth": sub.auth,

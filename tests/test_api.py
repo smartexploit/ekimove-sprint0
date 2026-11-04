@@ -5642,3 +5642,182 @@ def test_frontend_and_backend_share_the_same_default_website_text():
     root = Path(__file__).resolve().parent.parent
     assert (root / "app" / "site_defaults.json").read_text(encoding="utf-8") == \
         (root / "frontend" / "src" / "content" / "siteDefaults.json").read_text(encoding="utf-8")
+
+
+# ---------- In-app calls ----------
+import app.calls as calls_module
+from app.models import TripCall, TripCallSignal
+
+
+def _call_parties(client):
+    passenger, admin, request_id = create_assigned_ride(client)
+    ride_id = get_ride_id_from_request(client, request_id, passenger)
+    driver = login(client, *DRIVER_LOGIN)
+    return passenger, driver, admin, ride_id
+
+
+def test_call_between_passenger_and_driver(client, quiet_messaging_and_push, monkeypatch):
+    monkeypatch.setattr(settings, "cloudflare_turn_key_id", None)
+    monkeypatch.setattr(settings, "cloudflare_turn_api_token", None)
+    passenger, driver, admin, ride_id = _call_parties(client)
+    subscribe(client, driver, "https://fcm.googleapis.com/fcm/send/driver-call")
+    started = client.post(f"/api/v1/rides/{ride_id}/calls", headers=passenger)
+    assert started.status_code == 201, started.text
+    call = started.json()["call"]
+    assert call["status"] == "ringing" and call["role"] == "caller" and call["other"]["role"] == "driver"
+    assert started.json()["ice_servers"] == calls_module.PUBLIC_STUN
+    pushed = [json.loads(p["payload"]) for p in quiet_messaging_and_push if "driver-call" in p["endpoint"]]
+    assert pushed[-1]["call"] is True and pushed[-1]["url"] == "/driver/trips" and "calling" in pushed[-1]["title"]
+    # A second call on the same trip is refused while this one rings.
+    assert client.post(f"/api/v1/rides/{ride_id}/calls", headers=passenger).status_code == 409
+    assert client.post(f"/api/v1/rides/{ride_id}/calls", headers=driver).status_code == 409
+    # The caller sends the offer; the driver can't answer before accepting.
+    offer = client.post(f"/api/v1/calls/{call['id']}/signal", json={"kind": "offer", "payload": '{"type":"offer","sdp":"v=0"}'},
+                        headers=passenger)
+    assert offer.status_code == 201
+    assert client.post(f"/api/v1/calls/{call['id']}/signal", json={"kind": "answer", "payload": "{}"},
+                       headers=driver).status_code == 409
+    incoming = client.get("/api/v1/calls/incoming", headers=driver).json()["call"]
+    assert incoming["id"] == call["id"] and incoming["role"] == "callee" and incoming["other"]["role"] == "passenger"
+    assert client.get("/api/v1/calls/incoming", headers=passenger).json()["call"] is None
+    accepted = client.post(f"/api/v1/calls/{call['id']}/accept", headers=driver)
+    assert accepted.status_code == 200 and accepted.json()["call"]["status"] == "active"
+    state = client.get(f"/api/v1/calls/{call['id']}", headers=driver).json()
+    assert [s["kind"] for s in state["signals"]] == ["offer"]
+    after = state["signals"][-1]["id"]
+    assert client.post(f"/api/v1/calls/{call['id']}/signal", json={"kind": "answer", "payload": '{"type":"answer"}'},
+                       headers=driver).status_code == 201
+    assert client.post(f"/api/v1/calls/{call['id']}/signal", json={"kind": "candidates", "payload": "not json"},
+                       headers=driver).status_code == 422
+    # Each side only receives the other side's details.
+    assert [s["kind"] for s in client.get(f"/api/v1/calls/{call['id']}", headers=passenger).json()["signals"]] == ["answer"]
+    assert client.get(f"/api/v1/calls/{call['id']}?after={after}", headers=driver).json()["signals"] == []
+    # Strangers can't see or join the call.
+    other = login(client, "08000000002", "Second-Test-Password-2!")
+    assert client.get(f"/api/v1/calls/{call['id']}", headers=other).status_code == 404
+    assert client.post(f"/api/v1/calls/{call['id']}/accept", headers=other).status_code == 404
+    ended = client.post(f"/api/v1/calls/{call['id']}/end", headers=driver).json()["call"]
+    assert ended["status"] == "ended" and ended["duration_seconds"] is not None
+    with session_for(client) as db:
+        assert db.scalar(select(func.count(TripCallSignal.id))) == 0  # connection details deleted
+    trail = client.get(f"/api/v1/admin/rides/{ride_id}/trail", headers=admin).json()
+    assert trail["calls"] == [{**trail["calls"][0], "from": "passenger", "status": "ended"}]
+    export = client.get("/api/v1/me/export", headers=passenger).json()
+    assert export["trip_calls"][0]["i_called"] is True
+
+
+def test_unanswered_declined_and_closed_calls(client, quiet_messaging_and_push, monkeypatch):
+    passenger, driver, _admin, ride_id = _call_parties(client)
+    subscribe(client, passenger, "https://fcm.googleapis.com/fcm/send/passenger-call")
+    call_id = client.post(f"/api/v1/rides/{ride_id}/calls", headers=driver).json()["call"]["id"]
+    # Rings out after the ring time and the passenger gets a missed-call notice.
+    with session_for(client) as db:
+        row = db.get(TripCall, call_id)
+        row.created_at = row.created_at - timedelta(seconds=settings.call_ring_seconds + 5)
+        db.commit()
+    assert client.get("/api/v1/calls/incoming", headers=passenger).json()["call"] is None
+    assert client.get(f"/api/v1/calls/{call_id}", headers=driver).json()["call"]["status"] == "missed"
+    pushed = [json.loads(p["payload"]) for p in quiet_messaging_and_push if "passenger-call" in p["endpoint"]]
+    assert pushed[-1]["title"].startswith("Missed call from") and pushed[-1]["url"] == "/my-rides"
+    assert client.post(f"/api/v1/calls/{call_id}/accept", headers=passenger).status_code == 409
+    # Declined calls end straight away.
+    call_id = client.post(f"/api/v1/rides/{ride_id}/calls", headers=driver).json()["call"]["id"]
+    declined = client.post(f"/api/v1/calls/{call_id}/decline", headers=passenger).json()["call"]
+    assert declined["status"] == "declined"
+    # The caller hanging up before an answer counts as cancelled.
+    call_id = client.post(f"/api/v1/rides/{ride_id}/calls", headers=passenger).json()["call"]["id"]
+    assert client.post(f"/api/v1/calls/{call_id}/end", headers=passenger).json()["call"]["status"] == "cancelled"
+    # A call that couldn't connect is recorded as failed.
+    call_id = client.post(f"/api/v1/rides/{ride_id}/calls", headers=passenger).json()["call"]["id"]
+    client.post(f"/api/v1/calls/{call_id}/accept", headers=driver)
+    assert client.post(f"/api/v1/calls/{call_id}/end", json={"failed": True},
+                       headers=driver).json()["call"]["status"] == "failed"
+    # A live call ends when the trip ends, and no new calls can start.
+    call_id = client.post(f"/api/v1/rides/{ride_id}/calls", headers=passenger).json()["call"]["id"]
+    with session_for(client) as db:
+        db.get(Ride, ride_id).status = "completed"
+        db.commit()
+    assert client.get(f"/api/v1/calls/{call_id}", headers=passenger).json()["call"]["status"] == "cancelled"
+    assert client.post(f"/api/v1/rides/{ride_id}/calls", headers=passenger).status_code == 409
+    other = login(client, "08000000002", "Second-Test-Password-2!")
+    assert client.post(f"/api/v1/rides/{ride_id}/calls", headers=other).status_code == 404
+
+
+def test_call_limits_and_switch(client, quiet_messaging_and_push, monkeypatch):
+    passenger, driver, _admin, ride_id = _call_parties(client)
+    for _ in range(8):
+        call_id = client.post(f"/api/v1/rides/{ride_id}/calls", headers=passenger).json()["call"]["id"]
+        client.post(f"/api/v1/calls/{call_id}/end", headers=passenger)
+    assert client.post(f"/api/v1/rides/{ride_id}/calls", headers=passenger).status_code == 429
+    monkeypatch.setattr(settings, "calls_enabled", False)
+    assert client.post(f"/api/v1/rides/{ride_id}/calls", headers=driver).status_code == 503
+    assert client.get("/api/v1/calls/config", headers=driver).json()["enabled"] is False
+    assert client.get("/api/v1/calls/config").status_code == 401
+
+
+def test_call_relay_credentials(monkeypatch):
+    calls_module._turn_cache.update(servers=None, until=0.0)
+    monkeypatch.setattr(settings, "cloudflare_turn_key_id", "key123")
+    monkeypatch.setattr(settings, "cloudflare_turn_api_token", "token456")
+    seen = {}
+
+    class Reply:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"iceServers": [{"urls": ["stun:stun.cloudflare.com:3478", "stun:stun.cloudflare.com:53"]},
+                                   {"urls": ["turn:turn.cloudflare.com:3478?transport=udp",
+                                             "turn:turn.cloudflare.com:53?transport=udp",
+                                             "turns:turn.cloudflare.com:443?transport=tcp"],
+                                    "username": "u", "credential": "c"}]}
+
+    def fake_post(url, headers, json, timeout):
+        seen.update(url=url, auth=headers["Authorization"], ttl=json["ttl"])
+        return Reply()
+
+    monkeypatch.setattr(calls_module.requests, "post", fake_post)
+    servers = calls_module.ice_servers()
+    assert seen["url"].endswith("/keys/key123/credentials/generate-ice-servers") and seen["auth"] == "Bearer token456"
+    assert seen["ttl"] > settings.call_max_minutes * 60
+    assert servers[1]["urls"] == ["turn:turn.cloudflare.com:3478?transport=udp",
+                                  "turns:turn.cloudflare.com:443?transport=tcp"]
+    assert all(":53" not in url for server in servers for url in server["urls"])
+    seen.clear()
+    assert calls_module.ice_servers() == servers and seen == {}  # reused for a while
+
+    def broken(*args, **kwargs):
+        raise calls_module.requests.ConnectionError("down")
+
+    calls_module._turn_cache.update(servers=None, until=0.0)
+    monkeypatch.setattr(calls_module.requests, "post", broken)
+    assert calls_module.ice_servers() == calls_module.PUBLIC_STUN
+    calls_module._turn_cache.update(servers=None, until=0.0)
+
+
+# ---------- Launch checklist ----------
+def test_launch_checklist_reports_without_secrets(client, monkeypatch):
+    admin = login(client, *ADMIN_LOGIN)
+    passenger = login(client, *PASSENGER_LOGIN)
+    assert client.get("/api/v1/admin/launch-checklist", headers=passenger).status_code == 403
+    monkeypatch.setattr(settings, "paystack_secret_key", "sk_test_supersecretvalue123")
+    monkeypatch.setattr(settings, "app_env", "development")
+    monkeypatch.setattr(settings, "cloudflare_turn_api_token", "turn-secret-token-999")
+    monkeypatch.setattr(settings, "cloudflare_turn_key_id", "turn-key-id-888")
+    data = client.get("/api/v1/admin/launch-checklist", headers=admin)
+    assert data.status_code == 200
+    body = data.json()
+    items = {i["key"]: i for i in body["items"]}
+    assert items["production"]["status"] == "fail" and body["ready"] is False
+    assert items["paystack"]["status"] == "warn" and "test mode" in items["paystack"]["detail"]
+    assert items["jwt"]["status"] in ("ok", "fail") and (items["jwt"]["status"] != "ok" or items["jwt"]["fix"] == "")
+    assert items["relay"]["status"] == "ok"
+    assert items["database_plan"]["status"] == "manual"
+    assert set(body["counts"]) == {"ok", "warn", "fail", "manual"}
+    assert sum(body["counts"].values()) == len(body["items"])
+    text = data.text
+    for secret in ("sk_test_supersecretvalue123", settings.jwt_secret_key, "turn-secret-token-999", "turn-key-id-888"):
+        assert secret not in text
+    monkeypatch.setattr(settings, "paystack_secret_key", "sk_live_abc")
+    assert {i["key"]: i for i in client.get("/api/v1/admin/launch-checklist", headers=admin).json()["items"]}[
+        "paystack"]["status"] == "ok"
