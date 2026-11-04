@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { CheckCircle2, Package } from 'lucide-react'
 import AppShell from '../../layouts/AppShell.jsx'
 import Alert from '../../components/ui/Alert.jsx'
+import PlacePicker from '../../components/booking/PlacePicker.jsx'
 import Select from '../../components/ui/Select.jsx'
 import WhenPicker from '../../components/booking/WhenPicker.jsx'
 import PromoField from '../../components/booking/PromoField.jsx'
@@ -155,22 +156,12 @@ export default function SendPackagePage() {
               <div className="route-rail" aria-hidden="true">
                 <span className="route-dot" /><span className="route-line" /><span className="route-end" />
               </div>
-              <label className="field">
-                <span className="field-label">Pickup</span>
-                <Select name="origin_place_id" value={form.origin_place_id} onChange={field('origin_place_id')}
-                  disabled={!trip.effectiveAreaId || loadingPlaces} required>
-                  <option value="">{loadingPlaces ? 'Loading places…' : 'Where the rider collects it'}</option>
-                  {places.map((place) => <option key={place.id} value={String(place.id)}>{place.name}</option>)}
-                </Select>
-              </label>
-              <label className="field">
-                <span className="field-label">Drop-off</span>
-                <Select name="destination_place_id" value={form.destination_place_id} onChange={field('destination_place_id')}
-                  disabled={!trip.effectiveAreaId || loadingPlaces} required>
-                  <option value="">Where it goes</option>
-                  {places.map((place) => <option key={place.id} value={String(place.id)}>{place.name}</option>)}
-                </Select>
-              </label>
+              <PlacePicker label="Pickup" name="origin_place_id" value={form.origin_place_id} places={places}
+                onChange={(id) => set('origin_place_id', id)} disabled={!trip.effectiveAreaId || loadingPlaces}
+                loading={loadingPlaces} placeholder="Where the rider collects it" required />
+              <PlacePicker label="Drop-off" name="destination_place_id" value={form.destination_place_id} places={places}
+                onChange={(id) => set('destination_place_id', id)} disabled={!trip.effectiveAreaId || loadingPlaces}
+                loading={loadingPlaces} placeholder="Where it goes" required />
             </div>
             <SavedPlacesBar saved={saved} places={places} originId={form.origin_place_id}
               destinationId={form.destination_place_id} onPick={(name, id) => set(name, id)}

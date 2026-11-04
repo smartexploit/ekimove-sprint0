@@ -288,6 +288,18 @@ def test_passenger_places_exclude_non_active_places(client):
     assert ids["hidden_id"] not in returned_ids
 
 
+def test_passenger_places_include_search_names(client):
+    ids = _seed_place_route(client)
+    with session_for(client) as db:
+        db.get(Place, ids["origin_id"]).aliases = "Main Gate, EKSU gate,\n  , Gate"
+        db.commit()
+    places = client.get("/api/v1/locations/places", params={"service_area_id": ids["area_id"]}).json()
+    origin = next(p for p in places if p["id"] == ids["origin_id"])
+    assert origin["aliases"] == ["Main Gate", "EKSU gate", "Gate"]
+    assert isinstance(origin["zone"], str) and origin["zone"]
+    assert next(p for p in places if p["id"] == ids["destination_id"])["aliases"] == []
+
+
 def test_place_fare_options_quote_configured_exact_route(client):
     ids = _seed_place_route(client)
 

@@ -9,6 +9,7 @@ import { vehicleBlurb, vehicleLabel } from '../../utils/vehicles.js'
 import useTripOptions from '../../hooks/useTripOptions.js'
 import { apiRequest } from '../../services/authService.js'
 import { formatNaira, isMotorcycle } from '../../utils/format.js'
+import PlacePicker from '../../components/booking/PlacePicker.jsx'
 import Select from '../../components/ui/Select.jsx'
 import useBookingRules from '../../hooks/useBookingRules.js'
 import WhenPicker from '../../components/booking/WhenPicker.jsx'
@@ -352,48 +353,15 @@ export default function BookRidePage() {
                 <span className="route-line" />
                 <span className="route-end" />
               </div>
-              <label className="field">
-                <span className="field-label">Pickup</span>
-                <Select
-                  name="origin_place_id"
-                  value={form.origin_place_id}
-                  onChange={updateField}
-                  disabled={!areaId || loadingPlaces}
-                  required
-                >
-                  <option value="">
-                    {loadingPlaces ? 'Loading places…' : 'Choose pickup'}
-                  </option>
-                  {places.map((place) => (
-                    <option key={place.id} value={String(place.id)}>
-                      {place.name}
-                    </option>
-                  ))}
-                </Select>
-                {form.origin_text && !form.origin_place_id && (
-                  <span className="field-hint">You said: “{form.origin_text}”</span>
-                )}
-              </label>
-              <label className="field">
-                <span className="field-label">Destination</span>
-                <Select
-                  name="destination_place_id"
-                  value={form.destination_place_id}
-                  onChange={updateField}
-                  disabled={!areaId || loadingPlaces}
-                  required
-                >
-                  <option value="">Choose destination</option>
-                  {places.map((place) => (
-                    <option key={place.id} value={String(place.id)}>
-                      {place.name}
-                    </option>
-                  ))}
-                </Select>
-                {form.destination_text && !form.destination_place_id && (
-                  <span className="field-hint">You said: “{form.destination_text}”</span>
-                )}
-              </label>
+              <PlacePicker label="Pickup" name="origin_place_id" value={form.origin_place_id} places={places}
+                onChange={(id) => updateField({ target: { name: 'origin_place_id', value: id } })}
+                disabled={!areaId || loadingPlaces} loading={loadingPlaces} required
+                hint={form.origin_text && !form.origin_place_id ? `You said: “${form.origin_text}”` : undefined} />
+              <PlacePicker label="Destination" name="destination_place_id" value={form.destination_place_id}
+                places={places}
+                onChange={(id) => updateField({ target: { name: 'destination_place_id', value: id } })}
+                disabled={!areaId || loadingPlaces} loading={loadingPlaces} required
+                hint={form.destination_text && !form.destination_place_id ? `You said: “${form.destination_text}”` : undefined} />
             </div>
 
             <SavedPlacesBar saved={saved} places={places} originId={form.origin_place_id}

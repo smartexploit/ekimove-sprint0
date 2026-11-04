@@ -4422,3 +4422,115 @@ a.chip {
   color: var(--ink-500);
   font-size: 14px;
 }
+
+/* ---------- Place search (pickup / destination) ---------- */
+.place-picker {
+  position: relative;
+}
+
+.place-picker .input {
+  scroll-margin-top: 96px;
+}
+
+.place-input {
+  position: relative;
+}
+
+.place-input .input {
+  padding-right: 40px;
+  padding-left: 40px;
+  text-overflow: ellipsis;
+}
+
+.place-input-icon {
+  position: absolute;
+  top: 50%;
+  left: 14px;
+  color: var(--ink-400);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.place-clear {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--ink-500);
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.place-clear:hover {
+  background: var(--line);
+}
+
+.place-list {
+  position: absolute;
+  z-index: 30;
+  top: 100%;
+  right: 0;
+  left: 0;
+  overflow-y: auto;
+  max-height: min(320px, 50vh);
+  margin: 6px 0 0;
+  padding: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--white);
+  box-shadow: 0 16px 40px rgba(16, 32, 26, 0.18);
+  color: var(--ink);
+  list-style: none;
+  overscroll-behavior: contain;
+}
+
+.place-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.place-option svg {
+  flex-shrink: 0;
+  margin-top: 3px;
+  color: var(--green-600);
+}
+
+.place-option.is-active {
+  background: var(--green-50);
+}
+
+.place-option[aria-selected='true'] .place-name {
+  color: var(--green-800);
+}
+
+.place-name {
+  display: block;
+  font-weight: 700;
+}
+
+.place-meta {
+  display: block;
+  color: var(--ink-500);
+  font-size: 13px;
+}
+
+.place-meta:empty {
+  display: none;
+}
+
+.place-empty {
+  padding: 12px;
+  color: var(--ink-500);
+  font-size: 14px;
+}

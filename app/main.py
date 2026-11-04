@@ -872,6 +872,9 @@ def list_passenger_places(
             "address_text": place.address_text,
             "service_area_id": place.service_area_id,
             "zone_id": place.zone_id,
+            # For the search box: other names people use and the zone.
+            "aliases": [a.strip() for a in (place.aliases or "").replace("\n", ",").split(",") if a.strip()][:20],
+            "zone": zone.name,
         }
         for place, zone in rows
     ]

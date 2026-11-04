@@ -17,6 +17,7 @@ import InstallAppCard from '../../components/pwa/InstallAppCard.jsx'
 import useTripOptions from '../../hooks/useTripOptions.js'
 import { PublicFooter, PublicHeader } from '../../layouts/PublicChrome.jsx'
 import { formatNaira, isMotorcycle } from '../../utils/format.js'
+import PlacePicker from '../../components/booking/PlacePicker.jsx'
 import Select from '../../components/ui/Select.jsx'
 
 function TripPlanner() {
@@ -112,40 +113,12 @@ function TripPlanner() {
           <span className="route-line" />
           <span className="route-end" />
         </div>
-        <label className="field">
-          <span className="field-label">Pickup</span>
-          <Select
-            value={trip.from}
-            onChange={(event) => update('from', event.target.value)}
-            disabled={!areaId || tripOptions.loadingPlaces}
-          >
-            <option value="">
-              {tripOptions.loadingAreas || tripOptions.loadingPlaces
-                ? 'Loading places…'
-                : 'Choose pickup'}
-            </option>
-            {tripOptions.places.map((place) => (
-              <option key={place.id} value={String(place.id)}>
-                {place.name}
-              </option>
-            ))}
-          </Select>
-        </label>
-        <label className="field">
-          <span className="field-label">Destination</span>
-          <Select
-            value={trip.to}
-            onChange={(event) => update('to', event.target.value)}
-            disabled={!areaId || tripOptions.loadingPlaces}
-          >
-            <option value="">Choose destination</option>
-            {tripOptions.places.map((place) => (
-              <option key={place.id} value={String(place.id)}>
-                {place.name}
-              </option>
-            ))}
-          </Select>
-        </label>
+        <PlacePicker label="Pickup" value={trip.from} places={tripOptions.places}
+          onChange={(id) => update('from', id)} disabled={!areaId || tripOptions.loadingPlaces}
+          loading={tripOptions.loadingAreas || tripOptions.loadingPlaces} />
+        <PlacePicker label="Destination" value={trip.to} places={tripOptions.places}
+          onChange={(id) => update('to', id)} disabled={!areaId || tripOptions.loadingPlaces}
+          loading={tripOptions.loadingAreas || tripOptions.loadingPlaces} />
       </div>
 
       {sameplace && (
