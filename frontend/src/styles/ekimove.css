@@ -3880,3 +3880,277 @@ a.chip {
   letter-spacing: 0.2em;
   font-variant-numeric: tabular-nums;
 }
+
+/* ---------- Public content pages (fares, FAQ, areas) ---------- */
+.content-page {
+  min-height: 100vh;
+}
+
+.content-main {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: 32px 16px 56px;
+}
+
+.content-head h1 {
+  margin: 6px 0 10px;
+  font-family: var(--font-display);
+  font-size: clamp(30px, 6vw, 46px);
+  letter-spacing: -0.02em;
+  line-height: 1.08;
+}
+
+.content-head .lead {
+  margin: 0;
+  max-width: 62ch;
+  color: var(--ink-700);
+  font-size: 18px;
+  line-height: 1.55;
+}
+
+.content-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.content-body p {
+  margin: 0;
+  max-width: 68ch;
+  color: var(--ink-700);
+  font-size: 17px;
+  line-height: 1.65;
+}
+
+.content-search {
+  max-width: 420px;
+}
+
+.input-icon {
+  position: relative;
+  display: block;
+}
+
+.input-icon svg {
+  position: absolute;
+  top: 50%;
+  left: 14px;
+  color: var(--ink-400);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.input-icon .input {
+  padding-left: 42px;
+}
+
+.fares-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fares-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fares-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.fares-list li:last-child {
+  border-bottom: 0;
+}
+
+.fares-route {
+  font-weight: 700;
+}
+
+.fares-prices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+
+.fares-price small {
+  color: var(--ink-500);
+  font-size: 13px;
+}
+
+.fares-price strong {
+  color: var(--green-800);
+}
+
+.faq-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.faq-item {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--white, #fff);
+}
+
+.faq-item summary {
+  min-height: 48px;
+  padding: 14px 18px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.faq-item summary:focus-visible {
+  outline: 3px solid var(--gold-500);
+  outline-offset: 2px;
+  border-radius: var(--radius);
+}
+
+.faq-item p {
+  margin: 0;
+  padding: 0 18px 16px;
+  color: var(--ink-700);
+  line-height: 1.6;
+}
+
+.content-cta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 12px;
+  padding: 24px;
+  border-radius: var(--radius-lg);
+  background: var(--green-800);
+  color: var(--white, #fff);
+}
+
+.content-cta h2 {
+  margin: 0 0 4px;
+  font-family: var(--font-display);
+  font-size: 24px;
+}
+
+.content-cta p {
+  margin: 0;
+  opacity: 0.88;
+}
+
+.content-cta-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* ---------- Console: SEO & website ---------- */
+.site-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.site-status {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.site-status a {
+  overflow-wrap: anywhere;
+}
+
+.site-warn {
+  margin: 4px 0 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--gold-100);
+  color: var(--gold-700);
+}
+
+.site-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.site-card-head a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.site-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.site-field-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.site-count {
+  color: var(--ink-400);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.site-count.is-bad {
+  color: var(--laterite-700);
+}
+
+.site-issues {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.search-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--white);
+  font-family: Arial, sans-serif;
+}
+
+.search-preview-url {
+  color: #4d5156;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.search-preview-title {
+  color: #1a0dab;
+  font-size: 19px;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-preview-text {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #4d5156;
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}

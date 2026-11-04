@@ -3,14 +3,16 @@ import { Link } from 'react-router-dom'
 import { Menu, X } from 'lucide-react'
 import Logo from '../components/brand/Logo.jsx'
 import SupportContacts from '../components/SupportContacts.jsx'
+import useSiteContent from '../hooks/useSiteContent.js'
 import { getAccessToken, getStoredUser } from '../services/authService.js'
 import { homePathForRole } from '../utils/roles.js'
 
 // Homepage sections; the leading "/" makes them work from any page.
 const SECTION_LINKS = [
   ['/#rides', 'Rides'],
-  ['/#how-it-works', 'How it works'],
+  ['/fares', 'Fares'],
   ['/#safety', 'Safety'],
+  ['/faq', 'FAQ'],
   ['/#drive', 'Drive with us'],
 ]
 
@@ -43,11 +45,15 @@ export function PublicHeader({ dark = false }) {
           className={`site-links ${open ? 'is-open' : ''}`}
           aria-label="Main"
         >
-          {SECTION_LINKS.map(([href, label]) => (
+          {SECTION_LINKS.map(([href, label]) => (href.startsWith('/#') ? (
             <a key={href} href={href} onClick={close}>
               {label}
             </a>
-          ))}
+          ) : (
+            <Link key={href} to={href} onClick={close}>
+              {label}
+            </Link>
+          )))}
 
           {signedIn ? (
             <Link
@@ -74,6 +80,9 @@ export function PublicHeader({ dark = false }) {
 }
 
 export function PublicFooter() {
+  const { content } = useSiteContent()
+  const areas = content.areas.filter((area) => area.published !== false).slice(0, 6)
+
   return (
     <footer className="site-footer">
       <div className="container">
@@ -88,6 +97,15 @@ export function PublicFooter() {
             <a href="/#plan">Book a ride</a>
             <a href="/#how-it-works">How it works</a>
             <a href="/#safety">Safety</a>
+          </nav>
+
+          <nav className="footer-col" aria-label="Explore">
+            <h2 className="footer-heading">Explore</h2>
+            <Link to="/fares">Fares</Link>
+            {areas.map((area) => (
+              <Link key={area.slug} to={`/areas/${area.slug}`}>{area.heading}</Link>
+            ))}
+            <Link to="/faq">Questions</Link>
           </nav>
 
           <nav className="footer-col" aria-label="Company">

@@ -18,6 +18,7 @@ from app.promos import router as promos_router
 from app.scheduling import router as scheduling_router
 from app.trip_chat import router as trip_chat_router
 from app.data_rights import router as data_rights_router
+from app.site_content import router as site_content_router
 from app import deliveries as deliveries_module
 from app.deliveries import check_delivery_code, recipient_text, router as deliveries_router
 from app.support import router as support_router
@@ -109,6 +110,7 @@ app.include_router(scheduling_router)
 app.include_router(trip_chat_router)
 app.include_router(data_rights_router)
 app.include_router(deliveries_router)
+app.include_router(site_content_router)
 
 class LoginRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")

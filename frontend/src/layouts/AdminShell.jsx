@@ -4,6 +4,7 @@ import {
   Banknote,
   FileBarChart,
   Gift,
+  Globe,
   LayoutDashboard,
   LifeBuoy,
   Map as MapIcon,
@@ -32,6 +33,7 @@ const NAV = [
   ['/admin/incidents', 'Incidents', AlertTriangle],
   ['/admin/drivers', 'Driver verification', ShieldCheck],
   ['/admin/locations', 'Places & fares', MapPin],
+  ['/admin/website', 'SEO & website', Globe],
 ]
 
 /** Operations console layout: dark sidebar (a scrolling top bar on phones). */

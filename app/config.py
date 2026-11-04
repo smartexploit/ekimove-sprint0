@@ -176,13 +176,18 @@ class Settings(BaseSettings):
     # delivery's tracking link). Render sets FRONTEND_URL too.
     frontend_url: str = "https://ekimove.com.ng"
 
+    # The static site's Render Deploy Hook (Render > ekimove static site >
+    # Settings > Deploy Hook). "Publish to website" in the console calls it
+    # so the public pages are rebuilt with the latest text. Keep it secret.
+    render_deploy_hook_url: str | None = None
+
     # Optional error monitoring with Sentry.
     sentry_dsn: str | None = None
 
     @field_validator(
         "sms_provider", "bulksms_api_token", "termii_api_key", "email_provider", "email_from_address",
         "brevo_api_key", "smtp_host", "smtp_username", "smtp_password", "vapid_public_key",
-        "vapid_private_key", "vapid_subject", "sentry_dsn",
+        "vapid_private_key", "vapid_subject", "sentry_dsn", "render_deploy_hook_url",
         mode="before",
     )
     @classmethod

@@ -246,6 +246,13 @@ The frontend is a separate Render **Static Site** (`ekimove.com.ng`, also `ekimo
 - **Redirects/Rewrites:** source `/*`, destination `/index.html`, action **Rewrite**, so links such as `/login` or `/my-rides` open directly.
 - **Headers** (Settings → Headers, path `/*`): `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `Strict-Transport-Security: max-age=31536000`, and `Content-Security-Policy: frame-ancestors 'none'`. These stop other sites showing EkiMove inside a frame to trick people into tapping. The full content security policy is already built into the page itself.
 
+## Search engines and link previews (SEO)
+The public pages are `/`, `/fares`, `/faq`, `/areas/<name>` (for example `/areas/eksu-iworoko`), `/driver/apply` and `/policies`. Their search titles, descriptions, area pages and FAQ are edited by the super-admin under **SEO & website** in the console (`/admin/website`). Starting text is in `app/site_defaults.json` (kept identical to `frontend/src/content/siteDefaults.json`; a test checks this).
+
+`npm run build` runs `scripts/prerender.mjs` after Vite. It reads `GET /api/v1/public/site` (from `VITE_API_BASE_URL`) and writes a ready-made HTML file for each public page with its own title, description, link-preview image (`public/brand/ekimove-share.png`), canonical address and Google structured data (business, FAQ, service areas), plus `sitemap.xml` and `robots.txt`. If the API can't be reached, it uses the starting text and the build still succeeds. App screens are marked `noindex`.
+
+**Publish to website** rebuilds the static site through its Deploy Hook. To turn it on: Render → the static site → Settings → **Deploy Hook** → copy it, then on the `ekimove-api` service add the environment variable `RENDER_DEPLOY_HOOK_URL` with that value. Keep it secret (anyone with it can trigger rebuilds).
+
 ## Brand assets
 - Logo, app icon and favicon: `frontend/public/favicon.svg`, `frontend/public/brand/`
 - Design system (colours, type, components): `frontend/src/styles/ekimove.css`

@@ -1,0 +1,91 @@
+{
+  "site": {
+    "name": "EkiMove",
+    "tagline": "Move around Ekiti, the easy way.",
+    "description": "Book an okada (motorcycle) or car ride, send a package or move a load in Ado-Ekiti. Fixed fares shown before you book, verified drivers, cashless payment."
+  },
+  "pages": {
+    "home": {
+      "title": "EkiMove: Okada and car rides in Ado-Ekiti",
+      "description": "Book an okada (motorcycle) or car ride, send a package or move a load in Ado-Ekiti. Fixed fares before you book, verified drivers, cashless payment."
+    },
+    "fares": {
+      "title": "EkiMove fares in Ado-Ekiti: okada and car prices",
+      "description": "See EkiMove's fixed okada and car fares between popular places in Ado-Ekiti, including EKSU and Iworoko. No haggling: the price is set before you book.",
+      "heading": "Fares",
+      "intro": "Every EkiMove trip has a fixed price for its route, shown before you book. No haggling and no surprise charges. These are the current fares for one passenger."
+    },
+    "faq": {
+      "title": "EkiMove FAQ: payments, safety and booking",
+      "description": "Answers about booking EkiMove rides in Ado-Ekiti: how to pay, the pickup PIN, safety, sending packages, moving loads and becoming a driver.",
+      "heading": "Frequently asked questions",
+      "intro": "Quick answers about riding, sending packages and driving with EkiMove."
+    },
+    "drive": {
+      "title": "Drive with EkiMove: earn in Ado-Ekiti",
+      "description": "Apply to drive with EkiMove in Ado-Ekiti with your motorcycle, car, tricycle or van. Get verified, go online when you want, and get paid by bank transfer."
+    },
+    "policies": {
+      "title": "EkiMove policies: terms, privacy and safety",
+      "description": "EkiMove's Terms of Service, Privacy Policy, safety guidelines, cancellation and refund policy, and Driver Agreement."
+    }
+  },
+  "areas": [
+    {
+      "slug": "ado-ekiti",
+      "title": "Okada and car rides in Ado-Ekiti | EkiMove",
+      "description": "Book a verified okada or car ride anywhere in Ado-Ekiti with EkiMove. See the fixed fare before you book and pay by bank transfer, no cash needed.",
+      "heading": "Rides in Ado-Ekiti",
+      "intro": "Get around Ado-Ekiti on a motorcycle (okada) or in a car, with the fare fixed before you book.",
+      "body": "Choose your pickup and destination from places people actually use, like Fajuyi Park, Oja Oba, Okesa, Adebayo and Ajilosun, and see the price straight away.\n\nEvery driver is checked by EkiMove before their first trip. When your driver arrives, check the plate, then give them your 4-digit pickup PIN. You can share your trip live with family and press SOS if anything feels wrong.\n\nPay by bank transfer into your own EkiMove account number, by card, or by transfer. No cash changes hands.",
+      "published": true
+    },
+    {
+      "slug": "eksu-iworoko",
+      "title": "Rides to and from EKSU and Iworoko | EkiMove",
+      "description": "Okada and car rides between EKSU, Iworoko, Osekita, Phase 2 and Ado-Ekiti town. Fixed fares before you book, verified drivers, cashless payment.",
+      "heading": "Rides to and from EKSU and Iworoko",
+      "intro": "Made for EKSU students and staff: quick rides between campus, the hostels and town.",
+      "body": "Book a ride from EKSU Main Gate, the hostels, Osekita, Phase 2 or Iworoko to anywhere in Ado-Ekiti, and see the fixed fare before you confirm.\n\nRiding late or alone? Share your trip live with a friend, check the plate and use your pickup PIN, so you only ever get on with the right driver.\n\nNeed to move your things at the start or end of a session? Book a van or bus on Move a load, or send a package across town.",
+      "published": true
+    }
+  ],
+  "faq": [
+    {
+      "question": "How do I pay for an EkiMove ride?",
+      "answer": "EkiMove is cashless. You can transfer to your own EkiMove account number (it confirms automatically), pay by card, or pay by bank transfer. You pay after a driver has been assigned."
+    },
+    {
+      "question": "Is the fare fixed?",
+      "answer": "Yes. Each route has a fixed price that you see before you book. There is no haggling with the driver."
+    },
+    {
+      "question": "What is the pickup PIN?",
+      "answer": "Every trip has a 4-digit PIN in My rides. Tell it to the driver only once you have checked the plate number. The trip cannot start without it."
+    },
+    {
+      "question": "How does EkiMove keep me safe?",
+      "answer": "Every driver is checked by EkiMove before their first trip. You can see the driver's name, vehicle and plate, share your trip live with someone you trust, and press SOS during a trip. In an emergency, call 112."
+    },
+    {
+      "question": "Can I book a ride for later?",
+      "answer": "Yes. You can book up to 7 days ahead. EkiMove starts looking for a driver shortly before your pickup time."
+    },
+    {
+      "question": "How do I send a package?",
+      "answer": "Use Send a package in the app. Choose small, medium or large and enter the recipient's name and phone number. They get a tracking link and a 4-digit code by text, and give the code to the rider on delivery."
+    },
+    {
+      "question": "Can EkiMove move furniture or a room?",
+      "answer": "Yes. Book a big car, van, bus or dyna truck on Move a load. EkiMove agrees the price with you in chat before a driver is sent."
+    },
+    {
+      "question": "How do I become an EkiMove driver?",
+      "answer": "Apply on the Drive with EkiMove page with your details, a face photo and your vehicle. EkiMove checks you and your vehicle before you can take trips. Earnings are paid to your bank account."
+    },
+    {
+      "question": "Do I need to download an app?",
+      "answer": "No app store download is needed. EkiMove works in your phone's browser at ekimove.com.ng, and you can add it to your home screen so it opens like an app."
+    }
+  ]
+}

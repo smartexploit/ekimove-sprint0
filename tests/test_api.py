@@ -5542,3 +5542,103 @@ def test_api_accepts_the_custom_domain_and_the_render_address():
         stranger = plain.options("/api/v1/auth/login", headers={
             "Origin": "https://ekimove-fake.com", "Access-Control-Request-Method": "POST"})
         assert stranger.headers.get("access-control-allow-origin") is None
+
+
+# --------------------------------------------------------------------------
+# Website content for SEO (editable from the console)
+# --------------------------------------------------------------------------
+
+
+def test_public_site_has_defaults_published_areas_and_live_fares(client):
+    seeded = _seed_place_route(client)
+    site = client.get("/api/v1/public/site").json()
+    assert site["pages"]["home"]["title"].startswith("EkiMove")
+    assert [a["slug"] for a in site["areas"]] == ["ado-ekiti", "eksu-iworoko"]
+    assert len(site["faq"]) >= 5
+    assert {"area": "Test Pilot Area", "from": "Test Pickup Point", "to": "Test Destination Point",
+            "vehicle_type": "standard", "amount": "2100.00"} in site["fares"]
+    assert site["site_url"] == "https://ekimove.com.ng"
+    assert seeded
+
+
+def test_inactive_fares_and_hidden_places_stay_off_the_public_fare_list(client):
+    _seed_place_route(client, fare_active=False)
+    assert client.get("/api/v1/public/site").json()["fares"] == []
+
+
+def test_admin_edits_website_text_and_unpublished_areas_stay_hidden(client):
+    admin = login(client, *ADMIN_LOGIN)
+    content = client.get("/api/v1/admin/site", headers=admin).json()["content"]
+    content["pages"]["home"]["title"] = "EkiMove: rides in Ado-Ekiti and EKSU"
+    content["areas"][1]["published"] = False
+    content["faq"].append({"question": "Do you work at night?", "answer": "Yes, drivers go online at night too."})
+    saved = client.put("/api/v1/admin/site", json=content, headers=admin)
+    assert saved.status_code == 200, saved.text
+    site = client.get("/api/v1/public/site").json()
+    assert site["pages"]["home"]["title"] == "EkiMove: rides in Ado-Ekiti and EKSU"
+    assert [a["slug"] for a in site["areas"]] == ["ado-ekiti"]
+    assert site["faq"][-1]["question"] == "Do you work at night?"
+    with session_for(client) as db:
+        assert db.scalar(select(AuditLog).where(AuditLog.action == "website.saved")) is not None
+
+
+@pytest.mark.parametrize("change,where", [
+    (lambda c: c["areas"][0].update(slug="Bad Slug!"), "slug"),
+    (lambda c: c["areas"][0].update(slug="fares"), "slug"),
+    (lambda c: c["areas"][1].update(slug=c["areas"][0]["slug"]), "areas"),
+    (lambda c: c["pages"]["home"].update(title="x" * 71), "title"),
+    (lambda c: c["pages"]["faq"].update(description="too short"), "description"),
+    (lambda c: c.update(extra="nope"), "extra"),
+])
+def test_website_text_is_checked_before_saving(client, change, where):
+    admin = login(client, *ADMIN_LOGIN)
+    content = client.get("/api/v1/admin/site", headers=admin).json()["content"]
+    change(content)
+    response = client.put("/api/v1/admin/site", json=content, headers=admin)
+    assert response.status_code == 422, (where, response.text)
+
+
+def test_website_text_is_saved_as_plain_text(client):
+    admin = login(client, *ADMIN_LOGIN)
+    content = client.get("/api/v1/admin/site", headers=admin).json()["content"]
+    content["faq"][0]["answer"] = "Pay   by <b>transfer</b>\u0007 only."
+    client.put("/api/v1/admin/site", json=content, headers=admin)
+    answer = client.get("/api/v1/public/site").json()["faq"][0]["answer"]
+    assert answer == "Pay by <b>transfer</b> only."  # kept as text; pages escape it
+
+
+def test_publish_needs_a_render_deploy_hook_and_calls_only_render(client, monkeypatch):
+    import app.site_content as site_module
+
+    admin = login(client, *ADMIN_LOGIN)
+    assert client.post("/api/v1/admin/site/publish", headers=admin).status_code == 503
+    calls = []
+
+    class Ok:
+        def raise_for_status(self):
+            return None
+
+    monkeypatch.setattr(site_module.requests, "post", lambda url, timeout: (calls.append(url), Ok())[1])
+    monkeypatch.setattr(settings, "render_deploy_hook_url", "https://evil.example.com/deploy/x?key=y")
+    assert client.post("/api/v1/admin/site/publish", headers=admin).status_code == 503
+    assert calls == []
+    hook = "https://api.render.com/deploy/srv-abc123?key=Zx9_k"
+    monkeypatch.setattr(settings, "render_deploy_hook_url", hook)
+    assert client.get("/api/v1/admin/site", headers=admin).json()["publish_available"] is True
+    published = client.post("/api/v1/admin/site/publish", headers=admin)
+    assert published.status_code == 200, published.text
+    assert calls == [hook]
+    assert client.get("/api/v1/public/site").json()["published_at"] == published.json()["published_at"]
+
+
+def test_website_editing_is_staff_only(client):
+    passenger = login(client, *PASSENGER_LOGIN)
+    assert client.get("/api/v1/admin/site", headers=passenger).status_code == 403
+    assert client.put("/api/v1/admin/site", json={}, headers=passenger).status_code == 403
+    assert client.post("/api/v1/admin/site/publish").status_code == 401
+
+
+def test_frontend_and_backend_share_the_same_default_website_text():
+    root = Path(__file__).resolve().parent.parent
+    assert (root / "app" / "site_defaults.json").read_text(encoding="utf-8") == \
+        (root / "frontend" / "src" / "content" / "siteDefaults.json").read_text(encoding="utf-8")

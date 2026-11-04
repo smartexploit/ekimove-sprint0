@@ -11,6 +11,8 @@
         value: "EkiMove API"
       - key: APP_ENV
         value: production
+      - key: RENDER_DEPLOY_HOOK_URL
+        sync: false
       - key: DATABASE_URL
         sync: false
       - key: JWT_SECRET_KEY

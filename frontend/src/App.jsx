@@ -9,6 +9,7 @@ import MyRidesPage from './pages/passenger/MyRidesPage.jsx'
 import PaymentsPage from './pages/passenger/PaymentsPage.jsx'
 import ProtectedRoute from './routes/ProtectedRoute.jsx'
 import OfflineBanner from './components/pwa/OfflineBanner.jsx'
+import PageMeta from './components/PageMeta.jsx'
 import ProfilePage from './pages/account/ProfilePage.jsx'
 import SupportPage from './pages/account/SupportPage.jsx'
 
@@ -22,6 +23,10 @@ const HaulagePage = lazy(() => import('./pages/passenger/HaulagePage.jsx'))
 const InvitePage = lazy(() => import('./pages/passenger/InvitePage.jsx'))
 const SendPackagePage = lazy(() => import('./pages/passenger/SendPackagePage.jsx'))
 const ReceiptPage = lazy(() => import('./pages/account/ReceiptPage.jsx'))
+const FaresPage = lazy(() => import('./pages/public/FaresPage.jsx'))
+const FaqPage = lazy(() => import('./pages/public/FaqPage.jsx'))
+const AreaPage = lazy(() => import('./pages/public/AreaPage.jsx'))
+const AdminWebsitePage = lazy(() => import('./pages/admin/AdminWebsitePage.jsx'))
 const PoliciesPage = lazy(() => import('./pages/public/PoliciesPage.jsx'))
 const ForgotPasswordPage = lazy(() => import('./pages/auth/ForgotPasswordPage.jsx'))
 const TrackSharePage = lazy(() => import('./pages/public/TrackSharePage.jsx'))
@@ -49,6 +54,7 @@ export default function App() {
   return (
     <>
       <OfflineBanner />
+      <PageMeta />
       <Suspense fallback={loading}>
       <Routes>
         <Route path="/" element={<HomePage />} />
@@ -57,6 +63,9 @@ export default function App() {
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/driver/apply" element={<DriverApplicationPage />} />
         <Route path="/t/:token" element={<TrackSharePage />} />
+        <Route path="/fares" element={<FaresPage />} />
+        <Route path="/faq" element={<FaqPage />} />
+        <Route path="/areas/:slug" element={<AreaPage />} />
         <Route path="/policies" element={<PoliciesPage />} />
         <Route path="/policies/:slug" element={<PoliciesPage />} />
 
@@ -83,6 +92,7 @@ export default function App() {
           <Route path="/admin/promos" element={<AdminPromosPage />} />
           <Route path="/admin/incidents" element={<AdminIncidentsPage />} />
           <Route path="/admin/locations" element={<AdminLocationsPage />} />
+          <Route path="/admin/website" element={<AdminWebsitePage />} />
           <Route path="/admin/drivers" element={<AdminDriverVerificationPage />} />
         </Route>
 
