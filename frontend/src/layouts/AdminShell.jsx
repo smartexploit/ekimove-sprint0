@@ -2,6 +2,7 @@ import { NavLink, useNavigate, useOutletContext } from 'react-router-dom'
 import {
   AlertTriangle,
   Banknote,
+  Calculator,
   FileBarChart,
   Gift,
   Globe,
@@ -35,6 +36,7 @@ const NAV = [
   ['/admin/incidents', 'Incidents', AlertTriangle],
   ['/admin/drivers', 'Driver verification', ShieldCheck],
   ['/admin/locations', 'Places & fares', MapPin],
+  ['/admin/fares', 'Fare calculator', Calculator],
   ['/admin/website', 'SEO & website', Globe],
 ]
 

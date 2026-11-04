@@ -21,6 +21,7 @@ from app.data_rights import router as data_rights_router
 from app.site_content import router as site_content_router
 from app.calls import router as calls_router
 from app.launch_checklist import router as launch_checklist_router
+from app.fare_calculator import router as fare_calculator_router
 from app import deliveries as deliveries_module
 from app.deliveries import check_delivery_code, recipient_text, router as deliveries_router
 from app.support import router as support_router
@@ -115,6 +116,7 @@ app.include_router(deliveries_router)
 app.include_router(site_content_router)
 app.include_router(calls_router)
 app.include_router(launch_checklist_router)
+app.include_router(fare_calculator_router)
 
 class LoginRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")

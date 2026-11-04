@@ -5833,3 +5833,154 @@ def test_launch_checklist_reports_without_secrets(client, monkeypatch):
     monkeypatch.setattr(settings, "paystack_secret_key", "sk_live_abc")
     assert {i["key"]: i for i in client.get("/api/v1/admin/launch-checklist", headers=admin).json()["items"]}[
         "paystack"]["status"] == "ok"
+
+
+# ---------- Fare calculator ----------
+import app.fare_calculator as fare_calc_module
+from app.models import PlaceDistance
+
+
+def _calc_area(client):
+    """Area with three pinned places ~1.1 km apart in a line, one unpinned."""
+    with session_for(client) as db:
+        area = ServiceArea(name="Calc Area", slug="calc-area", status="active")
+        db.add(area)
+        db.flush()
+        places = []
+        for i, name in enumerate(["Calc A", "Calc B", "Calc C"]):
+            place = Place(service_area_id=area.id, zone_id=1, name=name, status="active",
+                          latitude=7.6000 + i * 0.01, longitude=5.2200)
+            db.add(place)
+            places.append(place)
+        db.add(Place(service_area_id=area.id, zone_id=1, name="Calc No Pin", status="active"))
+        db.flush()
+        manual = PlaceFare(origin_place_id=places[0].id, destination_place_id=places[1].id, vehicle_type="car",
+                           base_amount=Decimal("5000.00"), vehicle_multiplier=Decimal("1.000"),
+                           extra_passenger_amount=Decimal("0.00"), is_active=True)
+        db.add(manual)
+        db.commit()
+        return area.id, [p.id for p in places], manual.id
+
+
+def test_fare_calculator_prices_routes_by_distance(client, monkeypatch):
+    monkeypatch.setattr(settings, "geoapify_api_key", None)
+    admin = login(client, *ADMIN_LOGIN)
+    passenger = login(client, *PASSENGER_LOGIN)
+    area_id, (a, b, c), manual_id = _calc_area(client)
+    assert client.get(f"/api/v1/admin/fare-calculator?service_area_id={area_id}", headers=passenger).status_code == 403
+    data = client.get(f"/api/v1/admin/fare-calculator?service_area_id={area_id}", headers=admin).json()
+    assert [p["name"] for p in data["missing_pins"]] == ["Calc No Pin"]
+    assert len(data["routes"]) == 6 and data["estimated_distances"] == 6
+    ab = next(r for r in data["routes"] if r["origin"]["id"] == a and r["destination"]["id"] == b)
+    # 0.01° latitude ≈ 1.11 km straight, × 1.35 ≈ 1.5 km by road.
+    assert 1.4 < ab["km"] < 1.6
+    assert ab["prices"]["motorcycle"] == {**ab["prices"]["motorcycle"], "calculated": "450.00", "action": "new"}
+    assert ab["prices"]["car"]["action"] == "manual" and ab["prices"]["car"]["current"] == "5000.00"
+    # Formula: minimums apply and prices round to the step.
+    formula = data["formula"]
+    formula["vehicles"][0].update(base=200, per_km=150, minimum=500, round_to=100)
+    saved = client.put("/api/v1/admin/fare-calculator/formula", json=formula, headers=admin)
+    assert saved.status_code == 200, saved.text
+    bad = {**formula, "vehicles": formula["vehicles"] + [formula["vehicles"][0]]}
+    assert client.put("/api/v1/admin/fare-calculator/formula", json=bad, headers=admin).status_code == 422
+    data = client.get(f"/api/v1/admin/fare-calculator?service_area_id={area_id}", headers=admin).json()
+    ab = next(r for r in data["routes"] if r["origin"]["id"] == a and r["destination"]["id"] == b)
+    ac = next(r for r in data["routes"] if r["origin"]["id"] == a and r["destination"]["id"] == c)
+    assert ab["prices"]["motorcycle"]["calculated"] == "500.00"  # 200 + 150×1.5 = 425 → minimum 500
+    assert ac["prices"]["motorcycle"]["calculated"] == "700.00"  # 200 + 150×3.0 = 650, rounded up to 700
+    # Apply: new fares created, the hand-set car fare kept, an edited price saved as hand-set.
+    applied = client.post("/api/v1/admin/fare-calculator/apply", headers=admin, json={
+        "service_area_id": area_id,
+        "edits": [{"origin_place_id": b, "destination_place_id": c, "vehicle_type": "car", "amount": 1500}]})
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["result"] == {"created": 11, "updated": 0, "kept": 1, "unchanged": 0}
+    with session_for(client) as db:
+        assert db.get(PlaceFare, manual_id).base_amount == Decimal("5000.00")
+        bc = db.scalar(select(PlaceFare).where(PlaceFare.origin_place_id == b, PlaceFare.destination_place_id == c,
+                                               PlaceFare.vehicle_type == "car"))
+        assert bc.base_amount == Decimal("1500.00") and bc.pricing_source == "manual" and bc.is_active
+    # Riders get the calculated price when booking.
+    options = client.get("/api/v1/place-fare-options", params={"origin_place_id": a, "destination_place_id": c}).json()
+    assert {o["vehicle_type"]: o["quoted_fare"] for o in options}["motorcycle"] == "700.00"
+    # Applying again with nothing changed touches nothing.
+    again = client.post("/api/v1/admin/fare-calculator/apply", headers=admin, json={"service_area_id": area_id}).json()
+    assert again["result"]["unchanged"] == 10 and again["result"]["created"] == 0 and again["result"]["kept"] == 2
+    # A hand-set fare can be replaced on request.
+    replaced = client.post("/api/v1/admin/fare-calculator/apply", headers=admin, json={
+        "service_area_id": area_id,
+        "replace_manual": [{"origin_place_id": a, "destination_place_id": b, "vehicle_type": "car"}]}).json()
+    assert replaced["result"]["updated"] == 1
+    with session_for(client) as db:
+        fare = db.get(PlaceFare, manual_id)
+        assert fare.pricing_source == "auto" and fare.base_amount != Decimal("5000.00")
+    # Editing a calculated fare by hand protects it from the calculator.
+    patched = client.patch(f"/api/v1/admin/locations/place-fares/{manual_id}", json={"base_amount": "900.00"},
+                           headers=admin)
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["pricing_source"] == "manual"
+
+
+def test_fare_calculator_measures_road_distances(client, monkeypatch):
+    admin = login(client, *ADMIN_LOGIN)
+    area_id, (a, b, c), _manual = _calc_area(client)
+    monkeypatch.setattr(settings, "geoapify_api_key", "geo-key")
+    calls = []
+
+    class Reply:
+        def __init__(self, n_sources, n_targets):
+            self.n_sources, self.n_targets = n_sources, n_targets
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"sources_to_targets": [[{"distance": 2000 + 1000 * (i + j), "time": 300}
+                                            for j in range(self.n_targets)] for i in range(self.n_sources)]}
+
+    def fake_post(url, params, timeout, json):
+        calls.append(json)
+        assert params == {"apiKey": "geo-key"} and json["mode"] == "drive"
+        return Reply(len(json["sources"]), len(json["targets"]))
+
+    monkeypatch.setattr(fare_calc_module.requests, "post", fake_post)
+    measured = client.post("/api/v1/admin/fare-calculator/distances", json={"service_area_id": area_id},
+                           headers=admin).json()
+    assert measured["counts"]["road"] == 6 and len(calls) == 1
+    data = client.get(f"/api/v1/admin/fare-calculator?service_area_id={area_id}", headers=admin).json()
+    assert data["road_distances"] == 6
+    ab = next(r for r in data["routes"] if r["origin"]["id"] == a and r["destination"]["id"] == b)
+    assert ab["km"] == 3.0 and ab["distance_source"] == "road"
+    # Measured once; only a moved pin is measured again.
+    client.post("/api/v1/admin/fare-calculator/distances", json={"service_area_id": area_id}, headers=admin)
+    assert len(calls) == 1
+    with session_for(client) as db:
+        db.get(Place, c).latitude = 7.65
+        db.commit()
+    client.post("/api/v1/admin/fare-calculator/distances", json={"service_area_id": area_id}, headers=admin)
+    assert len(calls) == 2
+    # If the map service fails, straight-line estimates are used.
+    monkeypatch.setattr(fare_calc_module.requests, "post",
+                        lambda *a, **k: (_ for _ in ()).throw(fare_calc_module.requests.ConnectionError("down")))
+    failed = client.post("/api/v1/admin/fare-calculator/distances",
+                         json={"service_area_id": area_id, "refresh": True}, headers=admin).json()
+    assert failed["counts"]["estimate"] == 6
+
+
+def test_fare_calculator_suggests_formula_from_todays_prices(client, monkeypatch):
+    monkeypatch.setattr(settings, "geoapify_api_key", None)
+    admin = login(client, *ADMIN_LOGIN)
+    area_id, (a, b, c), _manual = _calc_area(client)
+    # Today's okada prices: ~1.5 km → ₦500, ~3 km → ₦700.
+    suggested = client.post("/api/v1/admin/fare-calculator/suggest", headers=admin, json={"samples": [
+        {"origin_place_id": a, "destination_place_id": b, "vehicle_type": "motorcycle", "amount": 500},
+        {"origin_place_id": a, "destination_place_id": c, "vehicle_type": "motorcycle", "amount": 700},
+    ]})
+    assert suggested.status_code == 200, suggested.text
+    tip = suggested.json()["suggestions"][0]
+    assert tip["vehicle_type"] == "motorcycle" and 120 <= tip["per_km"] <= 140 and 280 <= tip["base"] <= 320
+    assert all(abs(e["with_formula"] - e["today"]) <= 20 for e in tip["examples"])
+    with session_for(client) as db:
+        unpinned = db.scalar(select(Place.id).where(Place.name == "Calc No Pin"))
+    missing = client.post("/api/v1/admin/fare-calculator/suggest", headers=admin, json={"samples": [
+        {"origin_place_id": a, "destination_place_id": unpinned, "vehicle_type": "car", "amount": 900}]})
+    assert missing.status_code == 422 and "map pins" in missing.json()["detail"]

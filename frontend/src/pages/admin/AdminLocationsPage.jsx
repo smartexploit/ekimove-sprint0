@@ -4,6 +4,7 @@ import Alert from '../../components/ui/Alert.jsx'
 import StatusBadge from '../../components/ui/StatusBadge.jsx'
 import { apiRequest } from '../../services/authService.js'
 import BookingRulesCard from '../../components/admin/BookingRulesCard.jsx'
+import PinPicker from '../../components/admin/PinPicker.jsx'
 import RemovePanel from '../../components/admin/RemovePanel.jsx'
 
 const emptyArea = { name: '', slug: '', description: '', status: 'draft' }
@@ -560,6 +561,8 @@ export default function AdminLocationsPage() {
                     {input('Other names (comma-separated)', placeForm.aliases, (v) => setPlaceForm({ ...placeForm, aliases: v }), { required: false })}
                     {input('Latitude (optional)', placeForm.latitude, (v) => setPlaceForm({ ...placeForm, latitude: v }), { required: false, type: 'number', step: 'any' })}
                     {input('Longitude (optional)', placeForm.longitude, (v) => setPlaceForm({ ...placeForm, longitude: v }), { required: false, type: 'number', step: 'any' })}
+                    <PinPicker latitude={placeForm.latitude} longitude={placeForm.longitude} name={placeForm.name}
+                      onChange={(latitude, longitude) => setPlaceForm((f) => ({ ...f, latitude, longitude }))} />
                     {input('Notes (optional)', placeForm.notes, (v) => setPlaceForm({ ...placeForm, notes: v }), { required: false })}
                     {select(
                       'Status',

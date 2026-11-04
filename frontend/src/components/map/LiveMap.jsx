@@ -43,12 +43,17 @@ function escapeHtml(text) {
  * and an optional trail (array of [lat, lng]). Fits everything in view the
  * first time, then keeps the view unless `follow` is set.
  */
-export default function LiveMap({ markers = [], trail = [], height = 280, follow = false, label = 'Map' }) {
+export default function LiveMap({ markers = [], trail = [], height = 280, follow = false, label = 'Map', onPick = null }) {
   const box = useRef(null)
   const map = useRef(null)
   const layer = useRef(null)
   const fitted = useRef(false)
+  const pickRef = useRef(onPick)
   const [ready, setReady] = useState(false)
+
+  useEffect(() => {
+    pickRef.current = onPick
+  }, [onPick])
 
   useEffect(() => {
     let active = true
@@ -58,6 +63,8 @@ export default function LiveMap({ markers = [], trail = [], height = 280, follow
         .setView([config.center.latitude, config.center.longitude], 13)
       L.tileLayer(config.tile_url, { attribution: config.attribution, maxZoom: 19 }).addTo(map.current)
       layer.current = L.layerGroup().addTo(map.current)
+      // Tap the map to choose a point (used for place pins in the console).
+      map.current.on('click', (event) => pickRef.current?.(event.latlng))
       setReady(true)
     })
     return () => {

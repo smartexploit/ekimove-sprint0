@@ -405,6 +405,7 @@ def _place_fare_dict(fare: PlaceFare) -> dict:
         "vehicle_multiplier": fare.vehicle_multiplier,
         "extra_passenger_amount": fare.extra_passenger_amount,
         "is_active": fare.is_active,
+        "pricing_source": fare.pricing_source,
         "currency": "NGN",
     }
 
@@ -533,6 +534,8 @@ def update_place_fare(
 
     for field, value in changes.items():
         setattr(fare, field, value)
+    # Edited by hand, so the fare calculator leaves it alone from now on.
+    fare.pricing_source = "manual"
 
     _audit(
         db, admin, "location.place_fare_updated", "place_fare", fare.id,

@@ -4534,3 +4534,172 @@ a.chip {
   color: var(--ink-500);
   font-size: 14px;
 }
+
+/* ---------- Console: fare calculator ---------- */
+.fc-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.fc-head .section-title,
+#fc-pins,
+#fc-suggest {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fc-vehicles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.fc-vehicle {
+  margin: 0;
+  padding: 12px 14px 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.fc-vehicle.is-off .fc-grid {
+  opacity: 0.5;
+}
+
+.fc-vehicle legend {
+  padding: 0 6px;
+  font-weight: 800;
+}
+
+.fc-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.fc-num-wrap {
+  position: relative;
+  display: block;
+}
+
+.fc-num-wrap > span {
+  position: absolute;
+  top: 50%;
+  left: 12px;
+  color: var(--ink-500);
+  font-weight: 700;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.fc-num-wrap .input {
+  padding-left: 30px;
+}
+
+.fc-samples {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.fc-sample {
+  display: grid;
+  grid-template-columns: 1fr 1fr 0.8fr 0.8fr auto;
+  align-items: center;
+  gap: 8px;
+}
+
+@media (max-width: 720px) {
+  .fc-sample {
+    grid-template-columns: 1fr 1fr;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--line);
+  }
+}
+
+.fc-tip {
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--green-50);
+}
+
+.fc-tip p {
+  margin: 0 0 6px;
+}
+
+.fc-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.fc-filters .input {
+  flex: 1 1 220px;
+  max-width: 360px;
+}
+
+.fc-routes {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fc-route {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.fc-route-name {
+  margin: 0 0 8px;
+}
+
+.fc-prices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+}
+
+.fc-price {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-left: 4px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2, #f4f7f5);
+}
+
+.fc-price.is-new { border-left-color: var(--green-600); }
+.fc-price.is-change { border-left-color: var(--gold-500); }
+.fc-price.is-manual { border-left-color: var(--ink-400); }
+
+.fc-price-label {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.fc-price .input {
+  max-width: 140px;
+}
+
+.fc-price .input::placeholder {
+  color: var(--ink);
+  font-weight: 700;
+  opacity: 0.85;
+}
+
+.fc-tag {
+  color: var(--ink-500);
+  font-size: 12px;
+}
+
+.pin-picker .live-map {
+  margin: 6px 0 8px;
+  cursor: crosshair;
+}

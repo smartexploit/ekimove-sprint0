@@ -567,6 +567,11 @@ class PlaceFare(Base):
     is_active: Mapped[bool] = mapped_column(
         Boolean, default=False, nullable=False
     )
+    # "manual": set by hand in the console (the fare calculator never
+    # changes it); "auto": filled in by the fare calculator.
+    pricing_source: Mapped[str] = mapped_column(
+        String(8), default="manual", server_default="manual", nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -575,6 +580,28 @@ class PlaceFare(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+
+
+class PlaceDistance(Base):
+    """Road distance from one place to another, measured once and reused
+    by the fare calculator. "road" comes from the map service; "estimate"
+    is the straight-line distance with an allowance for bends."""
+
+    __tablename__ = "place_distances"
+    __table_args__ = (
+        UniqueConstraint("origin_place_id", "destination_place_id", name="uq_place_distances_route"),
+        CheckConstraint("source IN ('road', 'estimate')", name="ck_place_distances_source"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    origin_place_id: Mapped[int] = mapped_column(ForeignKey("places.id", ondelete="CASCADE"), index=True)
+    destination_place_id: Mapped[int] = mapped_column(ForeignKey("places.id", ondelete="CASCADE"), index=True)
+    meters: Mapped[int] = mapped_column(Integer)
+    seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source: Mapped[str] = mapped_column(String(8))
+    # The pins the distance was measured from, so a moved pin is re-measured.
+    pins: Mapped[str] = mapped_column(String(80))
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class VerificationCode(Base):

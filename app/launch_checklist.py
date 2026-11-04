@@ -158,8 +158,13 @@ def checklist(db: Session) -> list[dict]:
               "Add the service area in Places & fares."))
     add(_item(g, "places", "Pickup and drop-off places", OK if places >= 10 else (WARN if places >= 2 else FAIL),
               f"{places} active places.", "Add the places people use most (at least 10) in Places & fares."))
+    unpinned = _count(db, select(func.count(Place.id)).where(Place.status == "active",
+                                                            (Place.latitude.is_(None)) | (Place.longitude.is_(None))))
+    add(_item(g, "pins", "Map pins", OK if places and not unpinned else WARN,
+              f"{places - unpinned} of {places} active places have a map pin.",
+              "Add a map pin to every place in Places & fares, so the Fare calculator can price its routes."))
     add(_item(g, "fares", "Fares", OK if fares >= 20 else (WARN if fares else FAIL), f"{fares} active fares.",
-              "Set fares for the popular routes in Places & fares."))
+              "Price every route at once in Fare calculator."))
     drivers = _count(db, select(func.count(func.distinct(Driver.id)))
                      .join(User, User.id == Driver.user_id)
                      .join(Vehicle, Vehicle.driver_id == Driver.id)

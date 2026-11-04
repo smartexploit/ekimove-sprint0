@@ -27,6 +27,7 @@ const ReceiptPage = lazy(() => import('./pages/account/ReceiptPage.jsx'))
 const FaresPage = lazy(() => import('./pages/public/FaresPage.jsx'))
 const FaqPage = lazy(() => import('./pages/public/FaqPage.jsx'))
 const AreaPage = lazy(() => import('./pages/public/AreaPage.jsx'))
+const AdminFaresPage = lazy(() => import('./pages/admin/AdminFaresPage.jsx'))
 const AdminLaunchPage = lazy(() => import('./pages/admin/AdminLaunchPage.jsx'))
 const AdminWebsitePage = lazy(() => import('./pages/admin/AdminWebsitePage.jsx'))
 const PoliciesPage = lazy(() => import('./pages/public/PoliciesPage.jsx'))
@@ -96,6 +97,7 @@ export default function App() {
           <Route path="/admin/locations" element={<AdminLocationsPage />} />
           <Route path="/admin/website" element={<AdminWebsitePage />} />
           <Route path="/admin/launch" element={<AdminLaunchPage />} />
+          <Route path="/admin/fares" element={<AdminFaresPage />} />
           <Route path="/admin/drivers" element={<AdminDriverVerificationPage />} />
         </Route>
 
