@@ -15,6 +15,7 @@ import { vehicleBlurb, vehicleLabel } from '../../utils/vehicles.js'
 import AtonaFloatingAssistant from '../../components/AtonaFloatingAssistant.jsx'
 import InstallAppCard from '../../components/pwa/InstallAppCard.jsx'
 import useTripOptions from '../../hooks/useTripOptions.js'
+import useSiteContent from '../../hooks/useSiteContent.js'
 import { PublicFooter, PublicHeader } from '../../layouts/PublicChrome.jsx'
 import { formatNaira, isMotorcycle } from '../../utils/format.js'
 import PlacePicker from '../../components/booking/PlacePicker.jsx'
@@ -176,6 +177,7 @@ function TripPlanner() {
 }
 
 export default function HomePage() {
+  const { content: siteContent } = useSiteContent()
   return (
     <div>
       <a className="skip-link" href="#plan">
@@ -186,7 +188,9 @@ export default function HomePage() {
       <section className="hero">
         <div className="container hero-inner">
           <div className="hero-copy">
-            <p className="eyebrow hero-eyebrow">Now piloting in Ado-Ekiti</p>
+            <p className="eyebrow hero-eyebrow">
+              {siteContent.site.launch_status === 'live' ? 'Now live in Ado-Ekiti' : 'Coming soon to Ado-Ekiti'}
+            </p>
             <h1 className="display hero-title">
               Move around Ekiti, <em>the easy way.</em>
             </h1>

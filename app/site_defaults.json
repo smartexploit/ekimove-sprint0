@@ -2,7 +2,8 @@
   "site": {
     "name": "EkiMove",
     "tagline": "Move around Ekiti, the easy way.",
-    "description": "Book an okada (motorcycle) or car ride, send a package or move a load in Ado-Ekiti. Fixed fares shown before you book, verified drivers, cashless payment."
+    "description": "Book an okada (motorcycle) or car ride, send a package or move a load in Ado-Ekiti. Fixed fares shown before you book, verified drivers, cashless payment.",
+    "launch_status": "coming_soon"
   },
   "pages": {
     "home": {

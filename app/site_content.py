@@ -14,6 +14,7 @@ import logging
 import re
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 
 import requests
 from fastapi import APIRouter, Depends, HTTPException
@@ -62,6 +63,8 @@ class SiteInfo(Text):
     name: str = Field(min_length=2, max_length=40)
     tagline: str = Field(min_length=5, max_length=90)
     description: str = Field(min_length=50, max_length=170)
+    # "coming_soon" before launch, "live" from launch day (shown on the home page).
+    launch_status: Literal["coming_soon", "live"] = "coming_soon"
 
 
 class PageMeta(Text):

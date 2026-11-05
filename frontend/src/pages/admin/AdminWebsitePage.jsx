@@ -205,6 +205,20 @@ export default function AdminWebsitePage() {
               Last saved {data.saved_at ? formatShortDate(data.saved_at) : 'never (showing the starting text)'} ·
               Last published {data.published_at ? formatShortDate(data.published_at) : 'never'}
             </div>
+            <div className="site-launch">
+              <span className="field-label" id="launch-status-label">Launch status</span>
+              <div className="chip-row" role="radiogroup" aria-labelledby="launch-status-label">
+                {[['coming_soon', 'Coming soon'], ['live', 'Now live']].map(([value, text]) => (
+                  <button key={value} type="button" role="radio" aria-checked={content.site.launch_status === value}
+                    className={`chip ${content.site.launch_status === value ? 'is-active' : ''}`}
+                    onClick={() => setSite('launch_status')(value)}>{text}</button>
+                ))}
+              </div>
+              <span className="muted small">
+                The home page says “{content.site.launch_status === 'live' ? 'Now live in Ado-Ekiti' : 'Coming soon to Ado-Ekiti'}”.
+                Switch to “Now live” on launch day, then Save changes.
+              </span>
+            </div>
             {!data.publish_available && (
               <p className="small site-warn">
                 Publishing isn’t set up yet. In Render, open the ekimove static site, Settings, Deploy Hook, copy it,

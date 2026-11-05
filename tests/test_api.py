@@ -5984,3 +5984,14 @@ def test_fare_calculator_suggests_formula_from_todays_prices(client, monkeypatch
     missing = client.post("/api/v1/admin/fare-calculator/suggest", headers=admin, json={"samples": [
         {"origin_place_id": a, "destination_place_id": unpinned, "vehicle_type": "car", "amount": 900}]})
     assert missing.status_code == 422 and "map pins" in missing.json()["detail"]
+
+
+def test_launch_status_switch(client):
+    admin = login(client, *ADMIN_LOGIN)
+    assert client.get("/api/v1/public/site").json()["site"]["launch_status"] == "coming_soon"
+    content = client.get("/api/v1/admin/site", headers=admin).json()["content"]
+    content["site"]["launch_status"] = "live"
+    assert client.put("/api/v1/admin/site", json=content, headers=admin).status_code == 200
+    assert client.get("/api/v1/public/site").json()["site"]["launch_status"] == "live"
+    content["site"]["launch_status"] = "launched"
+    assert client.put("/api/v1/admin/site", json=content, headers=admin).status_code == 422

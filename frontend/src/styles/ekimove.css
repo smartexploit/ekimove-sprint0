@@ -4703,3 +4703,12 @@ a.chip {
   margin: 6px 0 8px;
   cursor: crosshair;
 }
+
+.site-launch {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
