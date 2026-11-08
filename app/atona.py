@@ -631,7 +631,7 @@ def system_prompt(user: User | None) -> str:
     if user is None:
         who = "The person is a guest who is not signed in."
     else:
-        role = {"passenger": "passenger", "driver": "driver", "super_admin": "EkiMove administrator"}.get(user.role, user.role)
+        role = {"passenger": "passenger", "driver": "driver", "super_admin": "EkiMove administrator", "staff": "EkiMove staff member"}.get(user.role, user.role)
         who = f"The person is signed in as a {role} named {first_name(user.full_name) or 'there'}."
 
     return (

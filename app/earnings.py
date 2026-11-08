@@ -25,7 +25,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user, require_super_admin
+from app.auth import get_current_user, require_staff
 from app.config import settings
 from app.database import get_db
 from app.instant_payments import PaystackError, _paystack, paystack_configured
@@ -475,7 +475,7 @@ def set_payout_account(
 
 
 @router.get("/admin/earnings/summary")
-def admin_earnings_summary(db: Session = Depends(get_db), _admin: User = Depends(require_super_admin)) -> dict:
+def admin_earnings_summary(db: Session = Depends(get_db), _admin: User = Depends(require_staff("finance"))) -> dict:
     totals = db.execute(
         select(func.coalesce(func.sum(EarningEntry.gross), 0), func.coalesce(func.sum(EarningEntry.commission), 0),
                func.coalesce(func.sum(EarningEntry.amount), 0), func.count(EarningEntry.id))
@@ -522,7 +522,7 @@ def admin_earnings_summary(db: Session = Depends(get_db), _admin: User = Depends
 def admin_list_payouts(
     status: Literal["open", "queued", "processing", "paid", "failed", "all"] = Query("open"),
     db: Session = Depends(get_db),
-    _admin: User = Depends(require_super_admin),
+    _admin: User = Depends(require_staff("finance")),
 ) -> list[dict]:
     query = select(DriverPayout, User.full_name, User.phone, DriverPayoutAccount) \
         .join(Driver, DriverPayout.driver_id == Driver.id).join(User, Driver.user_id == User.id) \
@@ -540,7 +540,7 @@ def admin_list_payouts(
 
 
 @router.post("/admin/payouts/run")
-def admin_run_payouts(db: Session = Depends(get_db), admin: User = Depends(require_super_admin)) -> dict:
+def admin_run_payouts(db: Session = Depends(get_db), admin: User = Depends(require_staff("finance"))) -> dict:
     return run_payouts(db, admin.id)
 
 
@@ -579,7 +579,7 @@ def _open_payout(db: Session, payout_id: int) -> DriverPayout:
 
 @router.post("/admin/payouts/{payout_id}/mark-paid")
 def admin_mark_payout_paid(payout_id: int, payload: PayoutPaid, db: Session = Depends(get_db),
-                           admin: User = Depends(require_super_admin)) -> dict:
+                           admin: User = Depends(require_staff("finance"))) -> dict:
     payout = _open_payout(db, payout_id)
     _mark_paid(db, payout, payload.bank_reference, admin.id)
     db.commit()
@@ -588,7 +588,7 @@ def admin_mark_payout_paid(payout_id: int, payload: PayoutPaid, db: Session = De
 
 @router.post("/admin/payouts/{payout_id}/mark-failed")
 def admin_mark_payout_failed(payout_id: int, payload: PayoutFailed, db: Session = Depends(get_db),
-                             admin: User = Depends(require_super_admin)) -> dict:
+                             admin: User = Depends(require_staff("finance"))) -> dict:
     payout = _open_payout(db, payout_id)
     _fail_payout(db, payout, payload.reason, admin.id)
     try:

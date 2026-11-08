@@ -17,7 +17,7 @@ from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.auth import require_super_admin
+from app.auth import require_staff
 from app.database import get_db
 from app.models import Driver, DriverPayout, EarningEntry, Payment, Ride, RideRequest, User, Vehicle
 
@@ -138,7 +138,7 @@ def report_summary(
     start: date | None = Query(default=None),
     end: date | None = Query(default=None),
     db: Session = Depends(get_db),
-    _admin: User = Depends(require_super_admin),
+    _admin: User = Depends(require_staff("finance")),
 ) -> dict:
     return daily_report(db, *_range(start, end))
 
@@ -233,7 +233,7 @@ def report_export(
     start: date | None = Query(default=None),
     end: date | None = Query(default=None),
     db: Session = Depends(get_db),
-    _admin: User = Depends(require_super_admin),
+    _admin: User = Depends(require_staff("finance")),
 ) -> Response:
     start, end, begin, finish = _range(start, end)
     if kind == "daily":

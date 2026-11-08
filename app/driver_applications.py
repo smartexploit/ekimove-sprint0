@@ -167,7 +167,7 @@ async def submit_driver_application(
         due_label = onboarding.lagos_time(driver.review_due_at)
         notify_admins(db, f"New driver application · {full_name}",
                       f"{vehicle_type.replace('_', ' ').capitalize()} {plate_number}. Review by {due_label}.",
-                      url="/admin/drivers", tag=f"driver-app-{driver.id}")
+                      url="/admin/drivers", tag=f"driver-app-{driver.id}", permission="drivers")
         db.commit()
 
         return {

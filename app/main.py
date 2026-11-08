@@ -28,6 +28,7 @@ from app import deliveries as deliveries_module
 from app.deliveries import check_delivery_code, recipient_text, router as deliveries_router
 from app.support import router as support_router
 from app.onboarding import router as onboarding_router, welcome_passenger
+from app.staff import router as staff_router
 from app.haulage import router as haulage_router
 from app.verification import client_fingerprint, ensure_passenger_may_book, record_policy_acceptance, router as verification_router
 from app.trips import check_pickup_pin, my_rating, passenger_verified, rating_summary, router as trips_router, short_name as trip_short_name
@@ -43,6 +44,8 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.auth import (
+    staff_permissions,
+    require_staff,
     create_access_token,
     get_current_user,
     hash_password,
@@ -123,6 +126,7 @@ app.include_router(calls_router)
 app.include_router(launch_checklist_router)
 app.include_router(fare_calculator_router)
 app.include_router(onboarding_router)
+app.include_router(staff_router)
 
 class LoginRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
@@ -166,6 +170,7 @@ class CurrentUserResponse(BaseModel):
     role: str
     is_active: bool
     must_change_password: bool = False
+    staff_permissions: list[str] = []
 
 
 def current_user_response(user: User) -> CurrentUserResponse:
@@ -177,6 +182,7 @@ def current_user_response(user: User) -> CurrentUserResponse:
         role=user.role,
         is_active=user.is_active,
         must_change_password=bool(user.must_change_password),
+        staff_permissions=staff_permissions(user),
     )
 
 
@@ -432,7 +438,7 @@ def admin_list_fares(
 @app.get("/api/v1/admin/ride-requests/pending", tags=["admin"])
 def admin_list_pending_ride_requests(
     db: Session = Depends(get_db),
-    _admin: User = Depends(require_super_admin),
+    _admin: User = Depends(require_staff("dispatch")),
 ) -> list[dict[str, object]]:
     """List unassigned requests for the admin dispatch queue."""
     advance_dispatch(db)
@@ -470,7 +476,7 @@ def admin_list_pending_ride_requests(
 def admin_list_eligible_drivers(
     request_id: int,
     db: Session = Depends(get_db),
-    _admin: User = Depends(require_super_admin),
+    _admin: User = Depends(require_staff("dispatch")),
 ) -> list[dict[str, object]]:
     """List approved, online drivers with a suitable approved vehicle."""
     ride_request = db.get(RideRequest, request_id)
@@ -523,7 +529,7 @@ def assign_ride_request(
     request_id: int,
     payload: RideAssignment,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_super_admin),
+    admin: User = Depends(require_staff("dispatch")),
 ) -> dict[str, object]:
     """Assign a requested booking to an approved, online driver by hand.
 
@@ -1489,7 +1495,7 @@ def report_ride_sos(
 @app.get("/api/v1/admin/incidents", tags=["admin", "safety"])
 def admin_list_incidents(
     db: Session = Depends(get_db),
-    _admin: User = Depends(require_super_admin),
+    _admin: User = Depends(require_staff("dispatch", "support")),
 ):
     """List incident reports for authorized admin review."""
     incidents = db.scalars(
@@ -1514,7 +1520,7 @@ def admin_list_incidents(
 def admin_review_incident(
     incident_id: int,
     payload: IncidentReviewUpdate,
-    current_user: User = Depends(require_super_admin),
+    current_user: User = Depends(require_staff("dispatch", "support")),
     db: Session = Depends(get_db),
 ):
     """Allow a super-admin to record incident investigation or resolution."""

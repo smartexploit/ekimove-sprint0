@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { isSuperAdmin } from '../../utils/roles.js'
+import { useSearchParams, useOutletContext } from 'react-router-dom'
 import { Search, UserRound, X } from 'lucide-react'
 import AdminShell from '../../layouts/AdminShell.jsx'
 import Alert from '../../components/ui/Alert.jsx'
@@ -71,7 +72,8 @@ function PersonDetail({ id, onClose, onChanged }) {
   }
 
   const driver = person?.driver
-  const canAct = person && person.role !== 'super_admin' && person.status !== 'removed'
+  const { user } = useOutletContext() || {}
+  const canAct = isSuperAdmin(user) && person && !['super_admin', 'staff'].includes(person.role) && person.status !== 'removed'
 
   return (
     <section className="card stack person-detail" aria-label="Account details">

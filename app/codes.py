@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 
 from app import messaging
 from app.device_sessions import forget_all
-from app.auth import get_current_user, hash_password, verify_password
+from app.auth import get_current_user, hash_password, is_staff, verify_password
 from app.client_ip import client_ip
 from app.config import settings
 from app.contacts import (
@@ -83,7 +83,7 @@ def contact_status(db: Session, user: User) -> dict:
     phone_ok = bool(user.phone and user.phone_verified_at)
     email_ok = bool(user.email and user.email_verified_at)
     needs = None
-    if user.role != "super_admin" and not (phone_ok or email_ok) and require_contact_verification(db):
+    if not is_staff(user) and not (phone_ok or email_ok) and require_contact_verification(db):
         if user.phone and messaging.sms_configured():
             needs = "sms"
         elif user.email and messaging.email_configured():

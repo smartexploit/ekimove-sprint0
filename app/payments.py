@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.promos import payable_amount
-from app.auth import get_current_user, require_super_admin
+from app.auth import get_current_user, has_permission, require_staff
 from app.database import get_db
 from app.models import AuditLog, Payment, Ride, RideRequest, User
 
@@ -191,7 +191,7 @@ def get_payment_status(
         raise HTTPException(status_code=404, detail="Ride not found.")
 
     request = db.get(RideRequest, ride.request_id)
-    if user.role != "super_admin" and (
+    if not has_permission(user, "finance", "support", "dispatch") and (
         not request or request.passenger_user_id != user.id
     ):
         raise HTTPException(status_code=404, detail="Ride not found.")
@@ -210,7 +210,7 @@ def reconcile_payment(
     payment_id: int,
     payload: ReconciliationDecision,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_super_admin),
+    admin: User = Depends(require_staff("finance")),
 ) -> dict:
     decision = payload.decision.strip().lower()
     if decision not in ("confirm", "reject"):
@@ -269,7 +269,7 @@ def reconcile_payment(
 @router.get("/admin/payments/pending")
 def list_pending_payments(
     db: Session = Depends(get_db),
-    admin: User = Depends(require_super_admin),
+    admin: User = Depends(require_staff("finance")),
 ) -> list[dict]:
     payments = db.scalars(
         select(Payment)

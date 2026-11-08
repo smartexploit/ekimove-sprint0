@@ -20,7 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user, verify_password
+from app.auth import get_current_user, is_staff, verify_password
 from app.database import get_db
 from app.rate_limit import enforce as enforce_rate_limit
 from app.models import (
@@ -177,8 +177,8 @@ class DeletionRequest(BaseModel):
 @router.post("/me/deletion-request")
 def request_deletion(payload: DeletionRequest, current_user: User = Depends(get_current_user),
                      db: Session = Depends(get_db)) -> dict:
-    if current_user.role == "super_admin":
-        raise HTTPException(status_code=409, detail="Super-admin accounts can't be deleted this way.")
+    if is_staff(current_user):
+        raise HTTPException(status_code=409, detail="EkiMove team accounts can't be deleted this way. Ask a super-admin.")
     if not verify_password(payload.password, current_user.password_hash):
         raise HTTPException(status_code=400, detail="Your password isn't right.")
     if current_user.deletion_requested_at is not None:

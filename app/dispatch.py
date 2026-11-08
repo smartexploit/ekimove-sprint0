@@ -43,7 +43,7 @@ from sqlalchemy.orm import Session
 
 from app import notifications
 from app.app_settings import seats_needed
-from app.auth import get_current_user, require_super_admin
+from app.auth import get_current_user, require_staff
 from app.config import settings
 from app.database import get_db
 from app.earnings import split_fare
@@ -516,7 +516,7 @@ def dispatch_summary(db: Session, ride_request: RideRequest) -> dict:
 
 
 @router.get("/admin/dispatch/drivers")
-def admin_driver_roster(db: Session = Depends(get_db), _admin: User = Depends(require_super_admin)) -> list[dict]:
+def admin_driver_roster(db: Session = Depends(get_db), _admin: User = Depends(require_staff("dispatch", "support"))) -> list[dict]:
     rows = db.execute(select(Driver, User).join(User, Driver.user_id == User.id)
                       .where(Driver.verification_status == "approved", User.is_active.is_(True))).all()
     busy = dict(db.execute(select(Ride.driver_id, Ride.id).where(Ride.status.in_(BUSY_RIDE_STATUSES))).all())

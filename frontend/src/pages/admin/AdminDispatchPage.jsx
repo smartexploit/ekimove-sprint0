@@ -1,3 +1,5 @@
+import { useOutletContext } from 'react-router-dom'
+import { isSuperAdmin } from '../../utils/roles.js'
 import { useCallback, useEffect, useState } from 'react'
 import { RefreshCw, Route } from 'lucide-react'
 import { formatPickupTime } from '../../utils/schedule.js'
@@ -58,6 +60,7 @@ function DispatchState({ request }) {
 }
 
 export default function AdminDispatchPage() {
+  const { user } = useOutletContext() || {}
   const [requests, setRequests] = useState([])
   const [driversByRequest, setDriversByRequest] = useState({})
   const [selectedDrivers, setSelectedDrivers] = useState({})
@@ -166,7 +169,7 @@ export default function AdminDispatchPage() {
       }
     >
       <div className="stack">
-        <AutoDispatchCard />
+        <AutoDispatchCard readOnly={!isSuperAdmin(user)} />
         <DriverRoster />
         <Alert tone="error">{error}</Alert>
         <Alert tone="success">{notice}</Alert>

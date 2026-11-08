@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from app import notifications
 from app.app_settings import HAULAGE_TYPES
-from app.auth import get_current_user, require_super_admin
+from app.auth import get_current_user, require_staff
 from app.database import get_db
 from app.models import AuditLog, RideRequest, SupportThread, User
 from app.support import open_thread, post_message
@@ -170,7 +170,7 @@ def decline_quote(request_id: int, current_user: User = Depends(get_current_user
 def admin_haulage_requests(
     status: Literal["quote_requested", "quoted", "requested", "all"] = Query("quote_requested"),
     db: Session = Depends(get_db),
-    _admin: User = Depends(require_super_admin),
+    _admin: User = Depends(require_staff("dispatch", "finance")),
 ) -> list[dict]:
     query = select(RideRequest).where(RideRequest.service_type == "haulage")
     if status != "all":
@@ -193,7 +193,7 @@ class QuoteInput(BaseModel):
 
 @router.post("/admin/haulage-requests/{request_id}/quote")
 def admin_send_quote(request_id: int, payload: QuoteInput, db: Session = Depends(get_db),
-                     admin: User = Depends(require_super_admin)) -> dict:
+                     admin: User = Depends(require_staff("dispatch"))) -> dict:
     request = db.get(RideRequest, request_id)
     if request is None or request.service_type != "haulage":
         raise HTTPException(status_code=404, detail="Load booking not found.")

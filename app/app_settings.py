@@ -18,7 +18,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
-from app.auth import require_super_admin
+from app.auth import require_super_admin, require_staff
 from app.database import get_db
 from app.models import AppSetting, AuditLog, User
 
@@ -167,7 +167,7 @@ def all_settings(db: Session) -> dict:
 
 
 @router.get("/admin/settings")
-def admin_get_settings(db: Session = Depends(get_db), _admin: User = Depends(require_super_admin)) -> dict:
+def admin_get_settings(db: Session = Depends(get_db), _admin: User = Depends(require_staff("dispatch"))) -> dict:
     return all_settings(db)
 
 

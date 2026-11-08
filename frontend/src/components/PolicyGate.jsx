@@ -13,7 +13,7 @@ export default function PolicyGate({ role }) {
   const [error, setError] = useState('')
 
   useEffect(() => {
-    if (role === 'super_admin') return undefined
+    if (role === 'super_admin' || role === 'staff') return undefined
     let active = true
     getPolicyStatus().then((status) => active && setNeeded(Boolean(status.needs_acceptance))).catch(() => {})
     return () => {

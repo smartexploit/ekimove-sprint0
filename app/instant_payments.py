@@ -24,7 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user, require_super_admin
+from app.auth import get_current_user, require_staff
 from app.config import settings
 from app.database import get_db
 from app.promos import payable_amount
@@ -385,7 +385,7 @@ def _deposit_result(deposit: BankDeposit, db: Session) -> dict:
 def admin_list_deposits(
     status: Literal["unmatched", "matched", "resolved"] = Query("unmatched"),
     db: Session = Depends(get_db),
-    _admin: User = Depends(require_super_admin),
+    _admin: User = Depends(require_staff("finance")),
 ) -> list[dict]:
     deposits = db.scalars(
         select(BankDeposit).where(BankDeposit.status == status).order_by(BankDeposit.id.desc()).limit(200)
@@ -418,7 +418,7 @@ def admin_match_deposit(
     deposit_id: int,
     payload: DepositMatch,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_super_admin),
+    admin: User = Depends(require_staff("finance")),
 ) -> dict:
     deposit = _unmatched_deposit(db, deposit_id)
     ride = db.get(Ride, payload.ride_id)
@@ -453,7 +453,7 @@ def admin_resolve_deposit(
     deposit_id: int,
     payload: DepositResolution,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_super_admin),
+    admin: User = Depends(require_staff("finance")),
 ) -> dict:
     """Close a deposit that is not a ride payment, e.g. after refunding it."""
     deposit = _unmatched_deposit(db, deposit_id)
@@ -493,7 +493,7 @@ def _refund_result(payment: Payment, db: Session) -> dict:
 def admin_list_refunds(
     status: Literal["due", "paid"] = Query("due"),
     db: Session = Depends(get_db),
-    _admin: User = Depends(require_super_admin),
+    _admin: User = Depends(require_staff("finance")),
 ) -> list[dict]:
     payments = db.scalars(
         select(Payment).where(Payment.refund_status == status).order_by(Payment.id).limit(200)
@@ -511,7 +511,7 @@ def admin_mark_refund_paid(
     payment_id: int,
     payload: RefundPaid,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_super_admin),
+    admin: User = Depends(require_staff("finance")),
 ) -> dict:
     payment = db.get(Payment, payment_id)
     if payment is None:

@@ -10,6 +10,7 @@ import {
   LifeBuoy,
   Map as MapIcon,
   Truck,
+  UserCog,
   Users,
   MapPin,
   Rocket,
@@ -20,6 +21,7 @@ import {
 import Logo from '../components/brand/Logo.jsx'
 import useSupportUnread from '../hooks/useSupportUnread.js'
 import { signOutCompletely } from '../services/authService.js'
+import { canOpen } from '../utils/roles.js'
 
 const NAV = [
   ['/admin/overview', 'Overview', LayoutDashboard],
@@ -38,6 +40,7 @@ const NAV = [
   ['/admin/locations', 'Places & fares', MapPin],
   ['/admin/fares', 'Fare calculator', Calculator],
   ['/admin/website', 'SEO & website', Globe],
+  ['/admin/team', 'Team & access', UserCog],
 ]
 
 /** Operations console layout: dark sidebar (a scrolling top bar on phones). */
@@ -45,7 +48,8 @@ export default function AdminShell({ eyebrow = 'Operations', title, description,
   const outlet = useOutletContext()
   const user = outlet?.user
   const navigate = useNavigate()
-  const unread = useSupportUnread(Boolean(user))
+  const unread = useSupportUnread(Boolean(user) && canOpen(user, '/admin/support'))
+  const nav = NAV.filter(([to]) => canOpen(user, to))
 
   function signOut() {
     signOutCompletely()
@@ -64,7 +68,7 @@ export default function AdminShell({ eyebrow = 'Operations', title, description,
         </div>
 
         <nav className="admin-nav" aria-label="Admin">
-          {NAV.map(([to, label, Icon]) => (
+          {nav.map(([to, label, Icon]) => (
             <NavLink key={to} to={to} end>
               <Icon size={19} aria-hidden="true" />
               {label}
@@ -76,7 +80,10 @@ export default function AdminShell({ eyebrow = 'Operations', title, description,
         </nav>
 
         <div className="admin-sidebar-foot">
-          <span>{user?.full_name || 'Administrator'}</span>
+          <span>
+            {user?.full_name || 'Administrator'}
+            <small style={{ display: 'block', opacity: 0.7 }}>{user?.role === 'staff' ? 'Staff' : 'Super-admin'}</small>
+          </span>
           <button type="button" className="admin-signout" onClick={signOut}>
             Sign out
           </button>

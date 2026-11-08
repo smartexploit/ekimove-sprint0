@@ -4,7 +4,7 @@ import Alert from '../ui/Alert.jsx'
 import { getAdminSettings, saveAdminSettings } from '../../services/accountService.js'
 
 /** Super-admin switch and timings for automatic driver offers. */
-export default function AutoDispatchCard() {
+export default function AutoDispatchCard({ readOnly = false }) {
   const [form, setForm] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -67,7 +67,7 @@ export default function AutoDispatchCard() {
       {form && (
         <>
           <label className="check-row">
-            <input type="checkbox" checked={form.enabled}
+            <input type="checkbox" checked={form.enabled} disabled={readOnly}
               onChange={(event) => setForm((f) => ({ ...f, enabled: event.target.checked }))} />
             Offer requests to drivers automatically
           </label>
@@ -76,7 +76,7 @@ export default function AutoDispatchCard() {
             {[['all', 'All free drivers at once (fastest)'], ['one', 'One driver at a time']].map(([value, label]) => (
               <label key={value} className={`chip ${form.mode === value ? 'is-active' : ''}`}>
                 <input type="radio" className="sr-only" name="dispatch-mode" value={value} checked={form.mode === value}
-                  disabled={!form.enabled} onChange={() => setForm((f) => ({ ...f, mode: value }))} />
+                  disabled={!form.enabled || readOnly} onChange={() => setForm((f) => ({ ...f, mode: value }))} />
                 {label}
               </label>
             ))}
@@ -84,15 +84,17 @@ export default function AutoDispatchCard() {
           <div className="row" style={{ gap: 12, alignItems: 'flex-end' }}>
             <label className="field" style={{ flex: '1 1 140px' }}>
               <span className="field-label">Seconds to accept</span>
-              <input className="input" inputMode="numeric" value={form.seconds} disabled={!form.enabled}
+              <input className="input" inputMode="numeric" value={form.seconds} disabled={!form.enabled || readOnly}
                 onChange={(event) => setForm((f) => ({ ...f, seconds: event.target.value.replace(/\D/g, '') }))} />
             </label>
             <label className="field" style={{ flex: '1 1 140px' }}>
               <span className="field-label">{form.mode === 'one' ? 'Drivers to try' : 'Rounds before it comes to you'}</span>
-              <input className="input" inputMode="numeric" value={form.offers} disabled={!form.enabled}
+              <input className="input" inputMode="numeric" value={form.offers} disabled={!form.enabled || readOnly}
                 onChange={(event) => setForm((f) => ({ ...f, offers: event.target.value.replace(/\D/g, '') }))} />
             </label>
-            <button type="submit" className="btn btn-primary" disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
+            {readOnly
+              ? <p className="muted small">Only a super-admin can change these.</p>
+              : <button type="submit" className="btn btn-primary" disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>}
           </div>
         </>
       )}

@@ -42,6 +42,8 @@ class User(Base):
     # Version of EkiMove's policies this person last accepted, and when.
     policies_version: Mapped[str | None] = mapped_column(String(20), nullable=True)
     policies_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # For role "staff": the parts of the admin console this person may use.
+    staff_permissions: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
 
 class Driver(Base):

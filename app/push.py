@@ -153,8 +153,15 @@ def notify(
     db.info["push_signing"] = (db.get_bind(), private)
 
 
-def notify_admins(db: Session, title: str, body: str, url: str, tag: str | None = None, urgent: bool = False) -> None:
-    ids = db.scalars(select(User.id).where(User.role == "super_admin", User.is_active.is_(True))).all()
+def notify_admins(db: Session, title: str, body: str, url: str, tag: str | None = None, urgent: bool = False,
+                  permission: str | tuple[str, ...] | None = None) -> None:
+    """Notify super-admins, plus staff who hold any of `permission` (if given)."""
+    ids = list(db.scalars(select(User.id).where(User.role == "super_admin", User.is_active.is_(True))).all())
+    wanted = {permission} if isinstance(permission, str) else set(permission or ())
+    if wanted:
+        for user in db.scalars(select(User).where(User.role == "staff", User.is_active.is_(True))).all():
+            if wanted.intersection(user.staff_permissions or []):
+                ids.append(user.id)
     notify(db, ids, title, body, url=url, tag=tag, urgent=urgent)
 
 

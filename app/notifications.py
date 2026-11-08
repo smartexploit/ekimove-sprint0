@@ -49,7 +49,7 @@ def offer_taken(db: Session, request_id: int, driver_ids: list[int]) -> None:
 def needs_admin(db: Session, request: RideRequest) -> None:
     notify_admins(db, f"No driver yet · request #{request.id}",
                   f"{_route(request)} ({request.vehicle_type}). Assign a driver in Dispatch.",
-                  url="/admin/dispatch", tag=f"dispatch-{request.id}", urgent=True)
+                  url="/admin/dispatch", tag=f"dispatch-{request.id}", urgent=True, permission="dispatch")
 
 
 def scheduled_search_started(db: Session, request: RideRequest) -> None:
@@ -123,12 +123,12 @@ def support_reply(db: Session, user_id: int, thread_id: int, body: str) -> None:
 
 def support_message(db: Session, thread_id: int, author: User, body: str) -> None:
     notify_admins(db, f"Support: {author.full_name}", body[:120], url=f"/admin/support?thread={thread_id}",
-                  tag=f"support-{thread_id}")
+                  tag=f"support-{thread_id}", permission="support")
 
 
 def sos_raised(db: Session, ride_id: int, reporter: User) -> None:
     notify_admins(db, "SOS on a live trip", f"Trip #{ride_id}, raised by {reporter.full_name}. Act now.",
-                  url="/admin/incidents", tag=f"sos-{ride_id}", urgent=True)
+                  url="/admin/incidents", tag=f"sos-{ride_id}", urgent=True, permission=("dispatch", "support"))
 
 
 def driver_reviewed(db: Session, driver: Driver, approved: bool) -> None:

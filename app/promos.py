@@ -26,7 +26,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user, require_super_admin
+from app.auth import get_current_user, require_staff
 from app.database import get_db
 from app.models import AppSetting, AuditLog, Payment, PromoCode, PromoRedemption, Ride, RideRequest, User
 
@@ -354,7 +354,7 @@ def _admin_row(db: Session, promo: PromoCode) -> dict:
 
 
 @router.get("/admin/promos")
-def admin_list_promos(db: Session = Depends(get_db), _admin: User = Depends(require_super_admin)) -> dict:
+def admin_list_promos(db: Session = Depends(get_db), _admin: User = Depends(require_staff("website"))) -> dict:
     promos = db.scalars(select(PromoCode).where(PromoCode.source == "admin")
                         .order_by(PromoCode.is_active.desc(), PromoCode.created_at.desc())).all()
     invites = db.scalars(select(PromoCode).where(PromoCode.source == "referral")).all()
@@ -373,7 +373,7 @@ def admin_list_promos(db: Session = Depends(get_db), _admin: User = Depends(requ
 
 @router.post("/admin/promos", status_code=201)
 def admin_create_promo(payload: PromoCreate, db: Session = Depends(get_db),
-                       admin: User = Depends(require_super_admin)) -> dict:
+                       admin: User = Depends(require_staff("website"))) -> dict:
     code = normalize_code(payload.code)
     if not CODE_RE.fullmatch(code) or code.startswith(("WELCOME-", "THANKS-")):
         raise HTTPException(status_code=422, detail="Use 3–32 letters, numbers or dashes (e.g. EKSU500).")
@@ -402,7 +402,7 @@ class PromoUpdate(BaseModel):
 
 @router.patch("/admin/promos/{promo_id}")
 def admin_update_promo(promo_id: int, payload: PromoUpdate, db: Session = Depends(get_db),
-                       admin: User = Depends(require_super_admin)) -> dict:
+                       admin: User = Depends(require_staff("website"))) -> dict:
     promo = db.get(PromoCode, promo_id)
     if promo is None or promo.source != "admin":
         raise HTTPException(status_code=404, detail="Promo code not found.")

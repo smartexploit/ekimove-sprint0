@@ -73,9 +73,12 @@ export async function apiRequest(path, options = {}) {
       ? detail
       : Array.isArray(detail)
         ? detail.map((item) => item.msg).join(', ')
-        : `Request failed (${response.status}). Please try again.`
+        : detail?.message || `Request failed (${response.status}). Please try again.`
 
-    throw new Error(message)
+    const error = new Error(message)
+    error.status = response.status
+    error.code = detail?.code
+    throw error
   }
 
   return data

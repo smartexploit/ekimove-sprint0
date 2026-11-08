@@ -128,3 +128,59 @@ def require_super_admin(
             detail="Super administrator access required",
         )
     return current_user
+
+
+# --------------------------------------------------------------------------
+# Staff: team members with limited admin access.
+# Super-admins can do everything. Staff accounts (role "staff") can only use
+# the parts of the console their permissions allow.
+# --------------------------------------------------------------------------
+
+STAFF_PERMISSIONS = {
+    "dispatch": "Dispatch: live requests, assigning drivers, driver list, live map and SOS",
+    "drivers": "Driver reviews: applications, vehicles, identity checks, inspections",
+    "support": "Support: support inbox, looking up people and trips, SOS",
+    "finance": "Finance: payments, deposits, refunds, payouts and reports",
+    "website": "Website and promotions: website text, launch status and promo codes",
+}
+
+
+def staff_permissions(user: User | None) -> list[str]:
+    """What this person may use in the console ([] for passengers/drivers)."""
+    if user is None:
+        return []
+    if user.role == "super_admin":
+        return list(STAFF_PERMISSIONS)
+    if user.role == "staff":
+        return [p for p in (user.staff_permissions or []) if p in STAFF_PERMISSIONS]
+    return []
+
+
+def is_staff(user: User | None) -> bool:
+    """Super-admins and staff: EkiMove's own team, not customers."""
+    return user is not None and user.role in ("super_admin", "staff")
+
+
+def has_permission(user: User | None, *permissions: str) -> bool:
+    if user is None:
+        return False
+    if user.role == "super_admin":
+        return True
+    granted = set(staff_permissions(user))
+    return bool(granted) and (not permissions or bool(granted.intersection(permissions)))
+
+
+def require_staff(*permissions: str):
+    """Dependency: a super-admin, or staff holding any of these permissions.
+
+    With no permissions given, any staff member with at least one
+    permission may use the route.
+    """
+    def dependency(current_user: User = Depends(get_current_user)) -> User:
+        if not has_permission(current_user, *permissions):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                                detail="Your EkiMove staff account doesn't have access to this.")
+        return current_user
+
+    dependency.__name__ = f"require_staff_{'_'.join(permissions) or 'any'}"
+    return dependency

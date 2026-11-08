@@ -248,6 +248,19 @@ The frontend is a separate Render **Static Site** (`ekimove.com.ng`, also `ekimo
 - **Redirects/Rewrites:** source `/*`, destination `/index.html`, action **Rewrite**, so links such as `/login` or `/my-rides` open directly.
 - **Headers** (Settings → Headers, path `/*`): `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `Strict-Transport-Security: max-age=31536000`, and `Content-Security-Policy: frame-ancestors 'none'`. These stop other sites showing EkiMove inside a frame to trick people into tapping. The full content security policy is already built into the page itself.
 
+## Team & access (staff accounts)
+Super-admins add team members under *Admin → Team & access*. Each gets their own sign-in (a phone number and a one-time temporary password they replace at first sign-in) and only the console areas they need:
+
+| Area | Opens |
+|---|---|
+| Dispatch | Dispatch, live map, loads, incidents (SOS), driver list with call and message |
+| Driver reviews | Driver applications and vehicles, identity checks, inspection and orientation invitations, People |
+| Support | Support inbox, People (look-up only), live map, incidents |
+| Finance | Payments, deposits, refunds, driver payouts and earnings, reports, load quotes |
+| Website and promotions | SEO & website text, launch status, promo codes |
+
+Presets: Dispatcher, Driver reviewer (reviews and dispatch), Support agent (support and dispatch), Finance, Website editor. Only super-admins can change fares, places and zones, the fare calculator, app settings (dispatchers can see the dispatch mode but not change it), suspend, remove or reset passwords for customers, see the launch checklist, or manage the team. Staff get phone notifications only for their own areas (for example, support staff for new support messages and SOS, driver reviewers for new applications). A passenger's number can be turned into a staff account if the super-admin confirms; drivers need a separate number. *Remove access* turns the account back into a passenger account and signs out remembered phones. Every change is in the audit log.
+
 ## Welcome messages and driver onboarding
 - **Welcome on sign-up (free):** every new passenger and driver gets a welcome message in their EkiMove inbox (Support), and a branded email if they gave an email address and email is set up (Brevo's free plan allows 300 emails a day). No welcome SMS is sent, because each text costs money. The inbox conversation starts closed, so it doesn't fill the staff support queue; it reopens if the person replies.
 - **Driver application:** besides name, phone, photo and vehicle, drivers must give gender, date of birth (18 or older), home address, town, an emergency contact, and tick six safety promises (documents, no alcohol or drugs, helmets or seat belts, road rules, respect, roadworthy vehicle). A driver's licence number is required for cars, minibuses, big cars, vans and dyna trucks, and optional for motorcycles and tricycles. Drivers who applied earlier are asked to complete these details on *My driver status*.

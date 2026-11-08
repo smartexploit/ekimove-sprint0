@@ -23,7 +23,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.app_settings import booking_rules, max_passengers, quote_amount
-from app.auth import require_super_admin
+from app.auth import require_staff
 from app.config import settings
 from app.database import get_db
 from app.models import AppSetting, AuditLog, Place, PlaceFare, ServiceArea, User, Zone
@@ -184,7 +184,7 @@ def _hook_configured() -> bool:
 
 
 @router.get("/admin/site")
-def admin_get_site(db: Session = Depends(get_db), _admin: User = Depends(require_super_admin)) -> dict:
+def admin_get_site(db: Session = Depends(get_db), _admin: User = Depends(require_staff("website"))) -> dict:
     published = db.get(AppSetting, PUBLISHED_KEY)
     saved = db.get(AppSetting, CONTENT_KEY)
     return {
@@ -198,7 +198,7 @@ def admin_get_site(db: Session = Depends(get_db), _admin: User = Depends(require
 
 @router.put("/admin/site")
 def admin_save_site(payload: SiteContent, db: Session = Depends(get_db),
-                    admin: User = Depends(require_super_admin)) -> dict:
+                    admin: User = Depends(require_staff("website"))) -> dict:
     value = json.dumps(payload.model_dump(), ensure_ascii=False)
     row = db.get(AppSetting, CONTENT_KEY)
     if row is None:
@@ -212,7 +212,7 @@ def admin_save_site(payload: SiteContent, db: Session = Depends(get_db),
 
 
 @router.post("/admin/site/publish")
-def admin_publish_site(db: Session = Depends(get_db), admin: User = Depends(require_super_admin)) -> dict:
+def admin_publish_site(db: Session = Depends(get_db), admin: User = Depends(require_staff("website"))) -> dict:
     if not _hook_configured():
         raise HTTPException(status_code=503, detail="Publishing isn't set up yet. In Render, copy the static site's "
                                                     "Deploy Hook and save it as RENDER_DEPLOY_HOOK_URL on the API.")

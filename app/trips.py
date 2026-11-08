@@ -13,7 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user
+from app.auth import get_current_user, has_permission
 from app.config import settings
 from app.database import get_db
 from app.dispatch import haversine_m
@@ -190,7 +190,7 @@ def _ride_for(db: Session, ride_id: int, user: User) -> tuple[Ride, RideRequest,
     if ride is None:
         raise HTTPException(status_code=404, detail="Ride not found.")
     request = db.get(RideRequest, ride.request_id)
-    if user.role == "super_admin":
+    if has_permission(user, "dispatch", "support"):
         return ride, request, "admin"
     if request.passenger_user_id == user.id:
         return ride, request, "passenger"

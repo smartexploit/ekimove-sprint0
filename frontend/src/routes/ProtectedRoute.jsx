@@ -2,7 +2,7 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { LogoMark } from '../components/brand/Logo.jsx'
 import { getCurrentUser, getAccessToken, logoutPassenger, signInPath, signOutCompletely } from '../services/authService.js'
-import { homePathForRole } from '../utils/roles.js'
+import { canOpen, homePathForRole } from '../utils/roles.js'
 import { syncNotifications } from '../utils/push.js'
 import SessionTimeout from '../components/SessionTimeout.jsx'
 import PolicyGate from '../components/PolicyGate.jsx'
@@ -72,8 +72,14 @@ export default function ProtectedRoute({ requiredRole = 'passenger' }) {
   if (!allowed.includes(state.user.role)) {
     // Send known roles to their own area; anything else goes to the
     // public homepage so an unexpected role can never loop.
-    const knownRole = ['passenger', 'driver', 'super_admin'].includes(state.user.role)
+    const knownRole = ['passenger', 'driver', 'super_admin', 'staff'].includes(state.user.role)
     return <Navigate to={knownRole ? homePathForRole(state.user.role) : '/'} replace />
+  }
+
+  // Team members only open the console pages their permissions allow.
+  if (location.pathname.startsWith('/admin') && location.pathname !== '/admin/overview'
+      && !canOpen(state.user, location.pathname)) {
+    return <Navigate to="/admin/overview" replace state={{ noAccess: location.pathname }} />
   }
 
   return (

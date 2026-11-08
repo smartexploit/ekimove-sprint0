@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.auth import require_super_admin
+from app.auth import require_staff
 from app.database import get_db
 from app.driver_applications import PRIVATE_UPLOAD_DIR
 from app.models import Driver, User, Vehicle
@@ -28,7 +28,7 @@ def pending_driver_applications(
         default="pending",
         pattern="^(pending|approved|rejected|all)$",
     ),
-    _admin=Depends(require_super_admin),
+    _admin=Depends(require_staff("drivers")),
     db: Session = Depends(get_db),
 ):
     statement = select(Driver)
@@ -80,7 +80,7 @@ def pending_driver_applications(
 @router.get("/driver-applications/{driver_id}/photo")
 def driver_application_photo(
     driver_id: int,
-    _admin=Depends(require_super_admin),
+    _admin=Depends(require_staff("drivers")),
     db: Session = Depends(get_db),
 ):
     driver = db.get(Driver, driver_id)
@@ -126,7 +126,7 @@ def decide_driver_application(
     driver_id: int,
     payload: DecisionRequest,
     background: BackgroundTasks,
-    _admin=Depends(require_super_admin),
+    _admin=Depends(require_staff("drivers")),
     db: Session = Depends(get_db),
 ):
     driver = db.get(Driver, driver_id)
@@ -164,7 +164,7 @@ def decide_driver_application(
 def decide_driver_vehicle(
     vehicle_id: int,
     payload: DecisionRequest,
-    _admin=Depends(require_super_admin),
+    _admin=Depends(require_staff("drivers")),
     db: Session = Depends(get_db),
 ):
     vehicle = db.get(Vehicle, vehicle_id)

@@ -26,7 +26,7 @@ from app.contacts import ContactError, clean_email, clean_name, email_taken, pas
 from app.rate_limit import enforce as enforce_rate_limit
 from app.messaging import email_configured
 from app.device_sessions import forget_all
-from app.auth import create_access_token, get_current_user, hash_password, require_super_admin, verify_password
+from app.auth import create_access_token, get_current_user, hash_password, require_super_admin, verify_password, require_staff
 from app.config import settings
 from app.database import get_db
 from app.earnings import driver_balance
@@ -268,7 +268,7 @@ def admin_list_people(
                     "deletion"] = Query("all"),
     q: str | None = Query(default=None, max_length=80),
     db: Session = Depends(get_db),
-    _admin: User = Depends(require_super_admin),
+    _admin: User = Depends(require_staff("support", "drivers")),
 ) -> list[dict]:
     query = select(User).where(User.role == role)
     if status == "active":
@@ -294,7 +294,7 @@ def admin_list_people(
 
 
 @router.get("/admin/people/{user_id}")
-def admin_get_person(user_id: int, db: Session = Depends(get_db), _admin: User = Depends(require_super_admin)) -> dict:
+def admin_get_person(user_id: int, db: Session = Depends(get_db), _admin: User = Depends(require_staff("support", "drivers"))) -> dict:
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="Account not found.")
@@ -459,7 +459,7 @@ def admin_reset_password(user_id: int, payload: AccountAction, db: Session = Dep
 
 
 @router.get("/admin/overview")
-def admin_overview(db: Session = Depends(get_db), _admin: User = Depends(require_super_admin)) -> dict:
+def admin_overview(db: Session = Depends(get_db), _admin: User = Depends(require_staff())) -> dict:
     now_local = datetime.now(LAGOS)
     today = now_local.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
     week = today - timedelta(days=6)

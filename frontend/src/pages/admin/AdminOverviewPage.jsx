@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { canOpen } from '../../utils/roles.js'
+import { Link, useOutletContext } from 'react-router-dom'
 import { RefreshCw } from 'lucide-react'
 import AdminShell from '../../layouts/AdminShell.jsx'
 import Alert from '../../components/ui/Alert.jsx'
@@ -34,6 +35,7 @@ const ACTION_LABELS = {
 }
 
 function Stat({ label, value, note, to, tone }) {
+  if (to === null) return null
   const body = (
     <>
       <p className="stat-label">{label}</p>
@@ -47,6 +49,9 @@ function Stat({ label, value, note, to, tone }) {
 }
 
 export default function AdminOverviewPage() {
+  const { user } = useOutletContext() || {}
+  // null hides a tile that leads to a page this person can't open.
+  const link = (to) => (canOpen(user, to.split('?')[0]) ? to : null)
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
 
@@ -87,16 +92,16 @@ export default function AdminOverviewPage() {
             <section className="stack stack-sm" aria-labelledby="needs-title">
               <h2 id="needs-title" className="section-title">Needs attention</h2>
               <div className="stat-grid">
-                <Stat label="Waiting for a driver" value={data.trips.waiting_for_driver} to="/admin/dispatch" tone="alert" />
-                <Stat label="Load quotes to send" value={data.trips.quotes_to_send} to="/admin/loads" tone="alert" />
+                <Stat label="Waiting for a driver" value={data.trips.waiting_for_driver} to={link('/admin/dispatch')} tone="alert" />
+                <Stat label="Load quotes to send" value={data.trips.quotes_to_send} to={link('/admin/loads')} tone="alert" />
                 <Stat label="Support chats to answer" value={data.support.awaiting_reply}
-                  note={`${data.support.open_threads} open`} to="/admin/support" tone="alert" />
-                <Stat label="Payments to confirm" value={data.money.payments_to_confirm} to="/admin/payments" tone="alert" />
-                <Stat label="Deposits to check" value={data.money.deposits_to_check} to="/admin/payments" tone="alert" />
-                <Stat label="Refunds to send" value={data.money.refunds_due} to="/admin/payments" tone="alert" />
-                <Stat label="Driver payouts open" value={data.money.payouts_open} to="/admin/earnings" tone="alert" />
-                <Stat label="Open safety incidents" value={data.safety.open_incidents} to="/admin/incidents" tone="alert" />
-                <Stat label="Drivers to verify" value={data.people.drivers_pending} to="/admin/drivers" tone="alert" />
+                  note={`${data.support.open_threads} open`} to={link('/admin/support')} tone="alert" />
+                <Stat label="Payments to confirm" value={data.money.payments_to_confirm} to={link('/admin/payments')} tone="alert" />
+                <Stat label="Deposits to check" value={data.money.deposits_to_check} to={link('/admin/payments')} tone="alert" />
+                <Stat label="Refunds to send" value={data.money.refunds_due} to={link('/admin/payments')} tone="alert" />
+                <Stat label="Driver payouts open" value={data.money.payouts_open} to={link('/admin/earnings')} tone="alert" />
+                <Stat label="Open safety incidents" value={data.safety.open_incidents} to={link('/admin/incidents')} tone="alert" />
+                <Stat label="Drivers to verify" value={data.people.drivers_pending} to={link('/admin/drivers')} tone="alert" />
               </div>
             </section>
 
@@ -109,7 +114,7 @@ export default function AdminOverviewPage() {
                 <Stat label="Requests today" value={data.trips.requests_today} />
                 <Stat label="Completed today" value={data.trips.completed_today} />
                 <Stat label="Cancelled today" value={data.trips.cancelled_today} />
-                <Stat label="Commission today" value={naira(data.money.commission_today)} to="/admin/earnings" />
+                <Stat label="Commission today" value={naira(data.money.commission_today)} to={link('/admin/earnings')} />
                 <Stat label="Fares, last 7 days" value={naira(data.money.fares_this_week)} />
               </div>
             </section>
@@ -117,10 +122,10 @@ export default function AdminOverviewPage() {
             <section className="stack stack-sm" aria-labelledby="people-title">
               <h2 id="people-title" className="section-title">People</h2>
               <div className="stat-grid">
-                <Stat label="Passengers" value={data.people.passengers} to="/admin/people?role=passenger" />
+                <Stat label="Passengers" value={data.people.passengers} to={link('/admin/people?role=passenger')} />
                 <Stat label="Approved drivers" value={data.people.drivers_approved}
-                  note={`${data.people.drivers_online} online now`} to="/admin/people?role=driver&status=approved" />
-                <Stat label="Suspended accounts" value={data.people.suspended} to="/admin/people?status=suspended" />
+                  note={`${data.people.drivers_online} online now`} to={link('/admin/people?role=driver&status=approved')} />
+                <Stat label="Suspended accounts" value={data.people.suspended} to={link('/admin/people?status=suspended')} />
                 <Stat label="New this week" value={data.people.new_this_week} />
               </div>
             </section>

@@ -29,7 +29,7 @@ from sqlalchemy.orm import Session
 
 from app import messaging, promos
 from app.app_settings import booking_rules, delivery_rules, is_motorcycle, quote_amount
-from app.auth import get_current_user, require_super_admin
+from app.auth import get_current_user, require_staff
 from app.config import settings
 from app.contacts import ContactError, clean_name, clean_phone
 from app.database import get_db
@@ -319,7 +319,7 @@ class StaffDelivered(BaseModel):
 
 @router.post("/admin/rides/{ride_id}/mark-delivered")
 def admin_mark_delivered(ride_id: int, payload: StaffDelivered, db: Session = Depends(get_db),
-                         admin: User = Depends(require_super_admin)) -> dict:
+                         admin: User = Depends(require_staff("dispatch"))) -> dict:
     """For when the recipient got the package but can't give the code."""
     from app.earnings import record_trip_earning  # avoid an import cycle
 

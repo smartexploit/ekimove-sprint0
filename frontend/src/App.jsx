@@ -36,6 +36,7 @@ const ForgotPasswordPage = lazy(() => import('./pages/auth/ForgotPasswordPage.js
 const TrackSharePage = lazy(() => import('./pages/public/TrackSharePage.jsx'))
 const AdminDispatchPage = lazy(() => import('./pages/admin/AdminDispatchPage.jsx'))
 const AdminDriverVerificationPage = lazy(() => import('./pages/admin/AdminDriverVerificationPage.jsx'))
+const AdminTeamPage = lazy(() => import('./pages/admin/AdminTeamPage.jsx'))
 const AdminPaymentsPage = lazy(() => import('./pages/admin/AdminPaymentsPage.jsx'))
 const AdminOverviewPage = lazy(() => import('./pages/admin/AdminOverviewPage.jsx'))
 const AdminPeoplePage = lazy(() => import('./pages/admin/AdminPeoplePage.jsx'))
@@ -84,7 +85,8 @@ export default function App() {
           <Route path="/send-package" element={<SendPackagePage />} />
         </Route>
 
-        <Route element={<ProtectedRoute requiredRole="super_admin" />}>
+        <Route element={<ProtectedRoute requiredRole={['super_admin', 'staff']} />}>
+          <Route path="/admin/team" element={<AdminTeamPage />} />
           <Route path="/admin/dispatch" element={<AdminDispatchPage />} />
           <Route path="/admin/overview" element={<AdminOverviewPage />} />
           <Route path="/admin/map" element={<AdminMapPage />} />

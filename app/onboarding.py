@@ -21,7 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import messaging
-from app.auth import get_current_user, require_super_admin
+from app.auth import get_current_user, require_staff
 from app.config import settings
 from app.contacts import ContactError, clean_name, clean_phone
 from app.database import get_db
@@ -372,7 +372,7 @@ class InviteIn(BaseModel):
 
 @router.post("/admin/driver-invitations", status_code=201)
 def invite_drivers(payload: InviteIn, background: BackgroundTasks, db: Session = Depends(get_db),
-                   admin: User = Depends(require_super_admin)) -> dict:
+                   admin: User = Depends(require_staff("drivers"))) -> dict:
     """Invite one or more drivers to an inspection and/or orientation session."""
     when = _as_utc(payload.scheduled_for)
     if when < now() + timedelta(minutes=30):
@@ -427,7 +427,7 @@ class OutcomeIn(BaseModel):
 
 @router.post("/admin/driver-invitations/{invite_id}/outcome")
 def invitation_outcome(invite_id: int, payload: OutcomeIn, db: Session = Depends(get_db),
-                       _admin: User = Depends(require_super_admin)) -> dict:
+                       _admin: User = Depends(require_staff("drivers"))) -> dict:
     invite = db.get(DriverInvitation, invite_id)
     if invite is None:
         raise HTTPException(status_code=404, detail="Invitation not found.")
@@ -481,10 +481,10 @@ def respond_to_invitation(invite_id: int, payload: RespondIn, db: Session = Depe
     what = INVITE_KINDS[invite.kind]
     if payload.response == "confirmed":
         notify_admins(db, f"{current_user.full_name} confirmed", f"{what.capitalize()} on "
-                      f"{lagos_time(invite.scheduled_for)}.", url="/admin/drivers", tag=f"invite-{invite.id}")
+                      f"{lagos_time(invite.scheduled_for)}.", url="/admin/drivers", tag=f"invite-{invite.id}", permission="drivers")
     else:
         notify_admins(db, f"{current_user.full_name} needs another time", f"{what.capitalize()}: {payload.note}"[:120],
-                      url="/admin/drivers", tag=f"invite-{invite.id}", urgent=True)
+                      url="/admin/drivers", tag=f"invite-{invite.id}", urgent=True, permission="drivers")
     db.commit()
     return invitation_row(invite)
 

@@ -6703,3 +6703,126 @@ def test_requirements_list_the_safety_promises(client):
     data = client.get("/api/v1/driver-applications/requirements").json()
     assert [p["key"] for p in data["pledges"]] == DRIVER_DETAILS["safety_pledges"]
     assert data["review_hours"] == 72 and "car" in data["licence_vehicles"]
+
+
+# --- Staff accounts with limited console access ---
+
+def add_staff_member(client, admin, permissions, phone="08000000881", **extra):
+    response = client.post("/api/v1/admin/staff", headers=admin, json={
+        "full_name": "Tolu Bamidele", "phone": phone, "permissions": permissions, **extra})
+    assert response.status_code == 201, response.text
+    body = response.json()
+    headers = login(client, phone, body["temporary_password"])
+    changed = client.post("/api/v1/me/password", headers=headers, json={
+        "current_password": body["temporary_password"], "new_password": "Team-Member-Password-88!"})
+    assert changed.status_code == 200, changed.text
+    return body["member"], {"Authorization": f"Bearer {changed.json()['access_token']}"}
+
+
+def test_super_admin_adds_staff_with_a_temporary_password(client):
+    admin = login(client, *ADMIN_LOGIN)
+    listing = client.get("/api/v1/admin/staff", headers=admin).json()
+    assert {p["key"] for p in listing["permissions"]} == {"dispatch", "drivers", "support", "finance", "website"}
+    assert "support_agent" in listing["presets"]
+    member, headers = add_staff_member(client, admin, ["support", "dispatch"])
+    me = client.get("/api/v1/auth/me", headers=headers).json()
+    assert me["role"] == "staff" and sorted(me["staff_permissions"]) == ["dispatch", "support"]
+    assert me["must_change_password"] is False
+    team = client.get("/api/v1/admin/staff", headers=admin).json()["team"]
+    assert any(t["id"] == member["id"] and t["last_sign_in"] for t in team)
+    # Super-admin's own /me lists every area.
+    assert len(client.get("/api/v1/auth/me", headers=admin).json()["staff_permissions"]) == 5
+
+
+def test_staff_only_reach_their_own_areas(client):
+    admin = login(client, *ADMIN_LOGIN)
+    _member, support = add_staff_member(client, admin, ["support"])
+    allowed = ["/api/v1/admin/support/threads", "/api/v1/admin/people", "/api/v1/admin/incidents",
+               "/api/v1/admin/overview", "/api/v1/admin/live-map", "/api/v1/admin/dispatch/drivers"]
+    for path in allowed:
+        assert client.get(path, headers=support).status_code == 200, path
+    blocked = ["/api/v1/admin/payouts", "/api/v1/admin/deposits", "/api/v1/admin/reports/summary",
+               "/api/v1/admin/driver-applications/pending", "/api/v1/admin/site", "/api/v1/admin/promos",
+               "/api/v1/admin/locations/fares", "/api/v1/admin/settings", "/api/v1/admin/fare-calculator",
+               "/api/v1/admin/launch-checklist", "/api/v1/admin/staff", "/api/v1/admin/ride-requests/pending"]
+    for path in blocked:
+        response = client.get(path, headers=support)
+        assert response.status_code == 403, path
+    assert "staff account" in client.get("/api/v1/admin/payouts", headers=support).json()["detail"]
+    # Account actions stay with super-admins.
+    assert client.post("/api/v1/admin/people/1/suspend", json={"reason": "testing"},
+                       headers=support).status_code == 403
+    # A staff member can't add more staff.
+    assert client.post("/api/v1/admin/staff", headers=support, json={
+        "full_name": "Someone Else", "phone": "08000000882", "permissions": ["finance"]}).status_code == 403
+
+
+def test_finance_and_dispatch_staff(client):
+    admin = login(client, *ADMIN_LOGIN)
+    _m, finance = add_staff_member(client, admin, ["finance"], phone="08000000883")
+    for path in ["/api/v1/admin/payouts", "/api/v1/admin/deposits", "/api/v1/admin/refunds",
+                 "/api/v1/admin/reports/summary", "/api/v1/admin/payments/pending", "/api/v1/admin/earnings/summary"]:
+        assert client.get(path, headers=finance).status_code == 200, path
+    assert client.get("/api/v1/admin/support/threads", headers=finance).status_code == 403
+    assert client.get("/api/v1/support/unread", headers=finance).json() == {"unread": 0}
+
+    _m, dispatch = add_staff_member(client, admin, ["dispatch"], phone="08000000884")
+    for path in ["/api/v1/admin/ride-requests/pending", "/api/v1/admin/dispatch/drivers", "/api/v1/admin/settings"]:
+        assert client.get(path, headers=dispatch).status_code == 200, path
+    # Dispatch can read settings (to see the dispatch mode) but not change them.
+    current = client.get("/api/v1/admin/settings", headers=admin).json()
+    assert client.put("/api/v1/admin/settings", headers=dispatch, json=current).status_code == 403
+    assert client.get("/api/v1/admin/payouts", headers=dispatch).status_code == 403
+
+
+def test_staff_get_only_their_notifications(client, quiet_messaging_and_push):
+    from app.models import User as UserModel
+    from app.push import notify_admins
+
+    admin = login(client, *ADMIN_LOGIN)
+    _m, support = add_staff_member(client, admin, ["support"], phone="08000000885")
+    _m, finance = add_staff_member(client, admin, ["finance"], phone="08000000886")
+    subscribe(client, support, "https://fcm.googleapis.com/fcm/send/support-staff")
+    subscribe(client, finance, "https://fcm.googleapis.com/fcm/send/finance-staff")
+    db, gen = _get_test_db_session()
+    try:
+        assert db.scalar(select(UserModel).where(UserModel.phone == "08000000885")).role == "staff"
+        notify_admins(db, "Support: test", "hello", url="/admin/support", permission="support")
+        db.commit()
+    finally:
+        gen.close()
+    endpoints = [p["endpoint"] for p in quiet_messaging_and_push]
+    assert any(e.endswith("support-staff") for e in endpoints)
+    assert not any(e.endswith("finance-staff") for e in endpoints)
+
+
+def test_existing_passenger_number_can_become_staff_only_when_confirmed(client):
+    admin = login(client, *ADMIN_LOGIN)
+    first = client.post("/api/v1/admin/staff", headers=admin, json={
+        "full_name": "Passenger Person", "phone": PASSENGER_LOGIN[0], "permissions": ["website"]})
+    assert first.status_code == 409 and first.json()["detail"]["code"] == "existing_account"
+    converted = client.post("/api/v1/admin/staff", headers=admin, json={
+        "full_name": "Passenger Person", "phone": PASSENGER_LOGIN[0], "permissions": ["website"],
+        "use_existing_account": True})
+    assert converted.status_code == 201 and converted.json()["temporary_password"] is None
+    headers = login(client, *PASSENGER_LOGIN)
+    assert client.get("/api/v1/admin/site", headers=headers).status_code == 200
+    # Drivers' numbers can't be turned into staff accounts.
+    driver = client.post("/api/v1/admin/staff", headers=admin, json={
+        "full_name": "Driver Person", "phone": DRIVER_LOGIN[0], "permissions": ["support"],
+        "use_existing_account": True})
+    assert driver.status_code == 409
+
+
+def test_permissions_can_change_and_access_can_be_removed(client):
+    admin = login(client, *ADMIN_LOGIN)
+    member, headers = add_staff_member(client, admin, ["website"], phone="08000000887")
+    assert client.get("/api/v1/admin/payouts", headers=headers).status_code == 403
+    changed = client.patch(f"/api/v1/admin/staff/{member['id']}", headers=admin, json={"permissions": ["finance"]})
+    assert changed.status_code == 200 and changed.json()["permissions"] == ["finance"]
+    assert client.get("/api/v1/admin/payouts", headers=headers).status_code == 200
+    assert client.patch(f"/api/v1/admin/staff/{member['id']}", headers=admin,
+                        json={"permissions": ["owner"]}).status_code == 422
+    assert client.post(f"/api/v1/admin/staff/{member['id']}/remove-access", headers=admin).status_code == 200
+    assert client.get("/api/v1/admin/payouts", headers=headers).status_code == 403
+    assert client.get("/api/v1/auth/me", headers=headers).json()["role"] == "passenger"

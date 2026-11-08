@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user, require_super_admin
+from app.auth import get_current_user, is_staff, require_staff
 from app.client_ip import client_ip
 from app.contacts import ContactError, clean_name
 from app.config import settings
@@ -178,7 +178,7 @@ async def submit_verification(
 def admin_verifications(
     status: Literal["pending", "approved", "rejected"] = Query("pending"),
     db: Session = Depends(get_db),
-    _admin: User = Depends(require_super_admin),
+    _admin: User = Depends(require_staff("drivers")),
 ) -> list[dict]:
     rows = db.execute(select(PassengerVerification, User).join(User, PassengerVerification.user_id == User.id)
                       .where(PassengerVerification.status == status)
@@ -195,7 +195,7 @@ class ReviewInput(BaseModel):
 
 @router.post("/admin/verifications/{user_id}/review")
 def admin_review_verification(user_id: int, payload: ReviewInput, db: Session = Depends(get_db),
-                              admin: User = Depends(require_super_admin)) -> dict:
+                              admin: User = Depends(require_staff("drivers"))) -> dict:
     record = db.scalar(select(PassengerVerification).where(PassengerVerification.user_id == user_id))
     if record is None:
         raise HTTPException(status_code=404, detail="No ID submitted for this account.")
@@ -216,7 +216,7 @@ def admin_review_verification(user_id: int, payload: ReviewInput, db: Session = 
 
 @router.get("/admin/verifications/{user_id}/photo")
 def admin_verification_photo(user_id: int, db: Session = Depends(get_db),
-                             _admin: User = Depends(require_super_admin)) -> Response:
+                             _admin: User = Depends(require_staff("drivers"))) -> Response:
     record = db.scalar(select(PassengerVerification).where(PassengerVerification.user_id == user_id))
     if record is None or not record.id_photo_ref:
         raise HTTPException(status_code=404, detail="ID photo not found.")
@@ -273,7 +273,7 @@ def record_policy_acceptance(db: Session, user: User, request: Request | None) -
 def policies_status(current_user: User = Depends(get_current_user)) -> dict:
     return {"current_version": POLICY_VERSION, "accepted_version": current_user.policies_version,
             "accepted_at": _iso(current_user.policies_accepted_at),
-            "needs_acceptance": current_user.role != "super_admin" and current_user.policies_version != POLICY_VERSION}
+            "needs_acceptance": not is_staff(current_user) and current_user.policies_version != POLICY_VERSION}
 
 
 class PolicyAccept(BaseModel):
@@ -319,7 +319,7 @@ def _point_coords(db: Session, request: RideRequest, end: str) -> dict | None:
 
 
 @router.get("/admin/live-map")
-def admin_live_map(db: Session = Depends(get_db), _admin: User = Depends(require_super_admin)) -> dict:
+def admin_live_map(db: Session = Depends(get_db), _admin: User = Depends(require_staff("dispatch", "support"))) -> dict:
     now = _now()
     active_rides = db.scalars(select(Ride).where(Ride.status.in_(ACTIVE))).all()
     ride_by_driver = {ride.driver_id: ride for ride in active_rides}
@@ -362,7 +362,7 @@ def admin_live_map(db: Session = Depends(get_db), _admin: User = Depends(require
 
 
 @router.get("/admin/rides/{ride_id}/trail")
-def admin_ride_trail(ride_id: int, db: Session = Depends(get_db), _admin: User = Depends(require_super_admin)) -> dict:
+def admin_ride_trail(ride_id: int, db: Session = Depends(get_db), _admin: User = Depends(require_staff("dispatch", "support"))) -> dict:
     ride = db.get(Ride, ride_id)
     if ride is None:
         raise HTTPException(status_code=404, detail="Ride not found.")

@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user, require_super_admin
+from app.auth import get_current_user, require_staff, is_staff, has_permission
 from app.database import get_db
 from app.rate_limit import enforce as enforce_rate_limit
 from app.models import RideRequest, SupportMessage, SupportThread, User
@@ -154,7 +154,7 @@ def _own_thread(db: Session, thread_id: int, user: User) -> SupportThread:
 
 
 def _no_admins(user: User) -> None:
-    if user.role == "super_admin":
+    if is_staff(user):
         raise HTTPException(status_code=403, detail="Use the support inbox in the admin console.")
 
 
@@ -202,7 +202,9 @@ def reply(thread_id: int, payload: NewMessage, current_user: User = Depends(get_
 
 @router.get("/support/unread")
 def my_unread(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
-    if current_user.role == "super_admin":
+    if is_staff(current_user):
+        if not has_permission(current_user, "support"):
+            return {"unread": 0}
         threads = db.scalars(select(SupportThread).where(SupportThread.status == "open")).all()
         return {"unread": sum(1 for t in threads if _unread(db, t, for_staff=True))}
     threads = db.scalars(select(SupportThread).where(SupportThread.user_id == current_user.id)).all()
@@ -218,7 +220,7 @@ def my_unread(current_user: User = Depends(get_current_user), db: Session = Depe
 def staff_threads(
     status: Literal["open", "closed", "all"] = Query("open"),
     db: Session = Depends(get_db),
-    _admin: User = Depends(require_super_admin),
+    _admin: User = Depends(require_staff("support")),
 ) -> list[dict]:
     query = select(SupportThread)
     if status != "all":
@@ -233,7 +235,7 @@ def staff_threads(
 
 @router.get("/admin/support/threads/{thread_id}")
 def staff_read_thread(thread_id: int, db: Session = Depends(get_db),
-                      _admin: User = Depends(require_super_admin)) -> dict:
+                      _admin: User = Depends(require_staff("support"))) -> dict:
     thread = db.get(SupportThread, thread_id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Conversation not found.")
@@ -244,7 +246,7 @@ def staff_read_thread(thread_id: int, db: Session = Depends(get_db),
 
 @router.post("/admin/support/threads/{thread_id}/messages", status_code=201)
 def staff_reply(thread_id: int, payload: NewMessage, db: Session = Depends(get_db),
-                admin: User = Depends(require_super_admin)) -> dict:
+                admin: User = Depends(require_staff("support"))) -> dict:
     thread = db.get(SupportThread, thread_id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Conversation not found.")
@@ -262,10 +264,10 @@ class StaffNewThread(BaseModel):
 
 @router.post("/admin/support/threads", status_code=201)
 def staff_start_thread(payload: StaffNewThread, db: Session = Depends(get_db),
-                       admin: User = Depends(require_super_admin)) -> dict:
+                       admin: User = Depends(require_staff("support", "dispatch", "drivers"))) -> dict:
     """Message any passenger or driver first (e.g. a driver about a trip)."""
     user = db.get(User, payload.user_id)
-    if user is None or user.role == "super_admin" or user.removed_at is not None:
+    if user is None or is_staff(user) or user.removed_at is not None:
         raise HTTPException(status_code=404, detail="Person not found.")
     now = _now()
     thread = SupportThread(user_id=user.id, subject=payload.subject[:160], status="open", created_at=now,
@@ -284,7 +286,7 @@ class ThreadStatus(BaseModel):
 
 @router.post("/admin/support/threads/{thread_id}/status")
 def staff_set_status(thread_id: int, payload: ThreadStatus, db: Session = Depends(get_db),
-                     _admin: User = Depends(require_super_admin)) -> dict:
+                     _admin: User = Depends(require_staff("support"))) -> dict:
     thread = db.get(SupportThread, thread_id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Conversation not found.")
