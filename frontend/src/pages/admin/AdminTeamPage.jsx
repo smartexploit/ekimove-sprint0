@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useOutletContext } from 'react-router-dom'
 import { Copy, KeyRound, UserPlus } from 'lucide-react'
 import AdminShell from '../../layouts/AdminShell.jsx'
 import Alert from '../../components/ui/Alert.jsx'
 import { apiRequest } from '../../services/authService.js'
-import { nameTyping, nigerianMobile, phoneTyping } from '../../utils/inputRules.js'
+import { nameTyping } from '../../utils/inputRules.js'
 
 const PRESET_LABELS = {
   dispatcher: 'Dispatcher',
@@ -36,7 +37,7 @@ function PermissionBoxes({ permissions, value, onChange, idPrefix }) {
   )
 }
 
-function TemporaryPassword({ name, phone, password, onDone }) {
+function TemporaryPassword({ name, email, password, onDone }) {
   const [copied, setCopied] = useState(false)
   return (
     <section className="card stack stack-sm temp-pass" aria-live="polite">
@@ -46,9 +47,9 @@ function TemporaryPassword({ name, phone, password, onDone }) {
       </div>
       <p className="temp-pass-code">{password}</p>
       <p className="small">
-        Give this to {name.split(' ')[0]} in person or on a phone call, not in a group chat. They sign in at
-        <strong> ekimove.com.ng/login</strong> with <strong>{phone}</strong> and choose their own password straight away.
-        It won’t be shown again.
+        Give this to {name.split(' ')[0]} in person or on a phone call, not in a group chat. They open
+        <strong> ekimove.com.ng/login</strong>, choose the <strong>Email</strong> tab, sign in with
+        <strong> {email}</strong> and choose their own password straight away. It won’t be shown again.
       </p>
       <div className="row">
         <button type="button" className="btn btn-sm" onClick={() => {
@@ -62,37 +63,37 @@ function TemporaryPassword({ name, phone, password, onDone }) {
   )
 }
 
-function AddMember({ permissions, presets, onAdded }) {
+function AddMember({ permissions, presets, domain, onAdded }) {
   const [chosen, setChosen] = useState([])
+  const [role, setRole] = useState('staff')
+  const [confirmSuper, setConfirmSuper] = useState(false)
   const [error, setError] = useState('')
-  const [existing, setExisting] = useState('')
   const [busy, setBusy] = useState(false)
+  const superAdmin = role === 'super_admin'
 
-  async function submit(event, useExisting = false) {
-    event?.preventDefault?.()
-    const form = new FormData(document.getElementById('team-add-form'))
+  async function submit(event) {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
     const name = String(form.get('full_name') || '').trim()
-    const phone = nigerianMobile(form.get('phone'))
+    const email = String(form.get('email') || '').trim().toLowerCase()
     if (name.length < 2) return setError('Enter their full name.')
-    if (!phone) return setError('Enter a Nigerian mobile number, like 0803 123 4567.')
-    if (!chosen.length) return setError('Choose at least one area they can use.')
+    if (!email.endsWith(`@${domain}`)) return setError(`Use their work email ending in @${domain}.`)
+    if (!superAdmin && !chosen.length) return setError('Choose at least one area they can use.')
+    if (superAdmin && !confirmSuper) return setError('Tick the box to confirm full access.')
     setBusy(true)
     setError('')
     try {
       const result = await apiRequest('/api/v1/admin/staff', {
         method: 'POST',
-        body: JSON.stringify({
-          full_name: name, phone, email: String(form.get('email') || '').trim() || null,
-          permissions: chosen, use_existing_account: useExisting,
-        }),
+        body: JSON.stringify({ full_name: name, email, role, permissions: superAdmin ? [] : chosen }),
       })
-      setExisting('')
       setChosen([])
-      document.getElementById('team-add-form').reset()
-      onAdded(result, phone)
+      setRole('staff')
+      setConfirmSuper(false)
+      event.target.reset()
+      onAdded(result, email)
     } catch (err) {
-      if (err.code === 'existing_account') setExisting(err.message)
-      else setError(err.message || 'Could not add them.')
+      setError(err.message || 'Could not add them.')
     } finally {
       setBusy(false)
     }
@@ -104,64 +105,78 @@ function AddMember({ permissions, presets, onAdded }) {
         <UserPlus size={22} aria-hidden="true" style={{ flexShrink: 0 }} />
         <h2 id="team-add-title" className="card-title">Add a team member</h2>
       </div>
-      <div className="form-grid">
-        <label className="field" htmlFor="team-name">
-          <span className="field-label">Full name</span>
-          <input id="team-name" className="input" name="full_name" maxLength={80} autoComplete="off" required
-            onInput={(e) => { const v = nameTyping(e.target.value); if (v !== e.target.value) e.target.value = v }} />
-        </label>
-        <label className="field" htmlFor="team-phone">
-          <span className="field-label">Phone number (they sign in with this)</span>
-          <input id="team-phone" className="input" name="phone" type="tel" inputMode="tel" maxLength={18} required
-            placeholder="e.g. 0803 123 4567"
-            onInput={(e) => { const v = phoneTyping(e.target.value); if (v !== e.target.value) e.target.value = v }} />
-        </label>
-      </div>
-      <label className="field" htmlFor="team-email">
-        <span className="field-label">Email (optional)</span>
-        <input id="team-email" className="input" name="email" type="email" maxLength={254} autoComplete="off" />
+      <label className="field" htmlFor="team-name">
+        <span className="field-label">Full name</span>
+        <input id="team-name" className="input" name="full_name" maxLength={80} autoComplete="off" required
+          onInput={(e) => { const v = nameTyping(e.target.value); if (v !== e.target.value) e.target.value = v }} />
       </label>
-      <div className="stack stack-sm">
-        <span className="field-label">Start from a role</span>
-        <div className="chip-row">
-          {Object.entries(presets).map(([key, perms]) => {
-            const active = perms.length === chosen.length && perms.every((p) => chosen.includes(p))
-            return (
-              <button type="button" key={key} className={`chip ${active ? 'is-active' : ''}`} aria-pressed={active}
-                onClick={() => setChosen(perms)}>
-                {PRESET_LABELS[key] || key}
-              </button>
-            )
-          })}
-        </div>
-      </div>
+      <label className="field" htmlFor="team-email">
+        <span className="field-label">Work email (they sign in with this)</span>
+        <input id="team-email" className="input" name="email" type="email" maxLength={254} autoComplete="off"
+          required placeholder={`e.g. tolu@${domain}`} aria-describedby="team-email-hint" />
+        <span className="field-hint" id="team-email-hint">
+          Must end in @{domain}. Set it up in Cloudflare Email Routing first, so EkiMove emails like password resets reach them.
+        </span>
+      </label>
       <fieldset className="stack stack-sm" style={{ border: 0, padding: 0, margin: 0 }}>
-        <legend className="field-label" style={{ marginBottom: 8 }}>What they can use</legend>
-        <PermissionBoxes permissions={permissions} value={chosen} onChange={setChosen} idPrefix="add" />
-      </fieldset>
-      <p className="muted small">
-        Only super-admins can change fares, places and zones, app settings, suspend or remove accounts, or manage the team.
-      </p>
-      <Alert tone="error">{error}</Alert>
-      {existing && (
-        <div className="card card-outline stack stack-sm" style={{ padding: 14 }}>
-          <p className="small">{existing}</p>
-          <div className="row">
-            <button type="button" className="btn btn-sm btn-primary" disabled={busy} onClick={() => submit(null, true)}>
-              Make it a staff account
-            </button>
-            <button type="button" className="btn btn-sm btn-quiet" onClick={() => setExisting('')}>Use another number</button>
-          </div>
+        <legend className="field-label" style={{ marginBottom: 8 }}>Access level</legend>
+        <div className="chip-row">
+          {[['staff', 'Staff: chosen areas'], ['super_admin', 'Super-admin: full access']].map(([value, label]) => (
+            <label key={value} className={`chip ${role === value ? 'is-active' : ''}`}>
+              <input type="radio" className="sr-only" name="team-role" value={value} checked={role === value}
+                onChange={() => { setRole(value); setError('') }} />
+              {label}
+            </label>
+          ))}
         </div>
+      </fieldset>
+      {superAdmin ? (
+        <div className="card card-outline stack stack-sm" style={{ padding: 14 }}>
+          <p className="small">
+            A super-admin can do everything you can: change fares and settings, approve payouts, suspend accounts
+            and add or remove team members, including you. Only give this to your co-founder or someone you fully trust.
+            The other super-admins are notified.
+          </p>
+          <label className="check-row" htmlFor="team-confirm-super">
+            <input id="team-confirm-super" type="checkbox" checked={confirmSuper}
+              onChange={(event) => { setConfirmSuper(event.target.checked); setError('') }} />
+            <span>I understand this gives full access to EkiMove.</span>
+          </label>
+        </div>
+      ) : (
+        <>
+          <div className="stack stack-sm">
+            <span className="field-label">Start from a role</span>
+            <div className="chip-row">
+              {Object.entries(presets).map(([key, perms]) => {
+                const active = perms.length === chosen.length && perms.every((p) => chosen.includes(p))
+                return (
+                  <button type="button" key={key} className={`chip ${active ? 'is-active' : ''}`} aria-pressed={active}
+                    onClick={() => setChosen(perms)}>
+                    {PRESET_LABELS[key] || key}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+          <fieldset className="stack stack-sm" style={{ border: 0, padding: 0, margin: 0 }}>
+            <legend className="field-label" style={{ marginBottom: 8 }}>What they can use</legend>
+            <PermissionBoxes permissions={permissions} value={chosen} onChange={setChosen} idPrefix="add" />
+          </fieldset>
+          <p className="muted small">
+            Only super-admins can change fares, places and zones, app settings, suspend or remove accounts, or manage the team.
+          </p>
+        </>
       )}
+      <Alert tone="error">{error}</Alert>
       <button type="submit" className="btn btn-primary btn-block" disabled={busy}>
-        {busy ? 'Adding…' : 'Add to the team'}
+        {busy ? 'Adding…' : superAdmin ? 'Add as super-admin' : 'Add to the team'}
       </button>
     </form>
   )
 }
 
-function MemberCard({ member, permissions, onChanged, onPassword }) {
+function MemberCard({ member, permissions, isSelf, onChanged, onPassword }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(member.permissions)
   const [confirmRemove, setConfirmRemove] = useState(false)
@@ -216,11 +231,11 @@ function MemberCard({ member, permissions, onChanged, onPassword }) {
           </div>
         </div>
       )}
-      {staff && confirmRemove && (
+      {!isSelf && confirmRemove && (
         <div className="card card-outline stack stack-sm" style={{ padding: 12 }}>
           <p className="small">
-            Remove {member.full_name.split(' ')[0]}’s console access? Their account becomes an ordinary passenger account
-            and any remembered phones are signed out.
+            Remove {member.full_name.split(' ')[0]}’s {staff ? 'console' : 'super-admin'} access? They can no longer open the
+            console, and any remembered phones are signed out. You can add them back later with the same work email.
           </p>
           <div className="row">
             <button type="button" className="btn btn-sm btn-danger-outline" disabled={busy}
@@ -231,9 +246,10 @@ function MemberCard({ member, permissions, onChanged, onPassword }) {
           </div>
         </div>
       )}
-      {staff && !editing && !confirmRemove && (
+      {isSelf && <p className="small muted">This is you.</p>}
+      {!isSelf && !editing && !confirmRemove && (
         <div className="row">
-          <button type="button" className="btn btn-sm" onClick={() => setEditing(true)}>Change access</button>
+          {staff && <button type="button" className="btn btn-sm" onClick={() => setEditing(true)}>Change access</button>}
           <button type="button" className="btn btn-sm" disabled={busy}
             onClick={() => run(`/api/v1/admin/staff/${member.id}/reset-password`, { method: 'POST' },
               (result) => onPassword(member, result.temporary_password))}>
@@ -248,6 +264,7 @@ function MemberCard({ member, permissions, onChanged, onPassword }) {
 
 /** Super-admins add team members and choose what each can use. */
 export default function AdminTeamPage() {
+  const { user } = useOutletContext() || {}
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
   const [secret, setSecret] = useState(null)
@@ -266,24 +283,22 @@ export default function AdminTeamPage() {
       <div className="stack">
         <Alert tone="error">{error}</Alert>
         {secret && (
-          <TemporaryPassword name={secret.name} phone={secret.phone} password={secret.password}
+          <TemporaryPassword name={secret.name} email={secret.email} password={secret.password}
             onDone={() => setSecret(null)} />
         )}
         {data && (
           <div className="team-layout">
-            <AddMember permissions={data.permissions} presets={data.presets}
-              onAdded={(result, phone) => {
-                if (result.temporary_password) {
-                  setSecret({ name: result.member.full_name, phone, password: result.temporary_password })
-                }
+            <AddMember permissions={data.permissions} presets={data.presets} domain={data.email_domain}
+              onAdded={(result, email) => {
+                setSecret({ name: result.member.full_name, email, password: result.temporary_password })
                 load()
               }} />
             <section className="stack" aria-labelledby="team-list-title">
               <h2 id="team-list-title" className="section-title">Your team ({data.team.length})</h2>
               {data.team.map((member) => (
                 <MemberCard key={`${member.id}-${member.permissions.join()}`} member={member} permissions={data.permissions}
-                  onChanged={load}
-                  onPassword={(m, password) => setSecret({ name: m.full_name, phone: m.phone, password })} />
+                  isSelf={member.id === user?.id} onChanged={load}
+                  onPassword={(m, password) => setSecret({ name: m.full_name, email: m.email, password })} />
               ))}
             </section>
           </div>

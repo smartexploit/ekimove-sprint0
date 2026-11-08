@@ -1,7 +1,7 @@
 """Super-admins add team members with limited console access.
 
-A staff account (role "staff") signs in like anyone else and lands in the
-admin console, but only sees and uses the areas its permissions allow (see
+A staff account (role "staff") signs in with a work email on EkiMove's own
+domain (settings.staff_email_domain) and lands in the admin console, but only sees and uses the areas its permissions allow (see
 app.auth.STAFF_PERMISSIONS). Fares, zones and places, app settings,
 suspending or removing accounts, and managing staff stay with super-admins.
 """
@@ -10,17 +10,19 @@ from __future__ import annotations
 
 import secrets
 from datetime import datetime, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import or_, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.auth import STAFF_PERMISSIONS, hash_password, require_super_admin, staff_permissions
-from app.contacts import ContactError, clean_email, clean_name, clean_phone
+from app.config import settings
+from app.contacts import ContactError, clean_email, clean_name
 from app.database import get_db
 from app.device_sessions import forget_all
-from app.models import AuditLog, Driver, User
+from app.models import AuditLog, User
 
 router = APIRouter(prefix="/api/v1/admin/staff", tags=["staff"])
 
@@ -80,76 +82,85 @@ def list_staff(db: Session = Depends(get_db), _admin: User = Depends(require_sup
         "team": [_row(db, user) for user in team],
         "permissions": [{"key": key, "label": label} for key, label in STAFF_PERMISSIONS.items()],
         "presets": PRESETS,
+        "email_domain": settings.staff_email_domain.strip().lower().lstrip("@"),
     }
 
 
 class StaffIn(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
     full_name: str = Field(min_length=2, max_length=160)
-    phone: str = Field(min_length=7, max_length=32)
-    email: str | None = Field(default=None, max_length=254)
-    permissions: list[str] = Field(min_length=1, max_length=10)
-    # The phone already has a passenger account: turn that account into a
-    # staff account (they keep their own password).
-    use_existing_account: bool = False
+    # Team members sign in with this work email only (e.g. tolu@ekimove.com.ng).
+    email: str = Field(min_length=6, max_length=254)
+    role: Literal["staff", "super_admin"] = "staff"
+    permissions: list[str] = Field(default_factory=list, max_length=10)
+
+
+def _work_email(value: str) -> str:
+    try:
+        email = clean_email(value)
+    except ContactError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    domain = settings.staff_email_domain.strip().lower().lstrip("@")
+    if not email or (domain and not email.endswith("@" + domain)):
+        raise HTTPException(status_code=422, detail=f"Use their work email ending in @{domain}.")
+    return email
 
 
 @router.post("", status_code=201)
 def add_staff(payload: StaffIn, db: Session = Depends(get_db), admin: User = Depends(require_super_admin)) -> dict:
-    permissions = _clean_permissions(payload.permissions)
+    super_admin = payload.role == "super_admin"
+    permissions = None if super_admin else _clean_permissions(payload.permissions)
     try:
         name = clean_name(payload.full_name)
-        phone = clean_phone(payload.phone)
-        email = clean_email(payload.email) if payload.email else None
     except ContactError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
-    if not phone:
-        raise HTTPException(status_code=422, detail="Enter a phone number.")
-
-    existing = db.scalar(select(User).where(or_(User.phone == phone, *( [User.email == email] if email else []))))
-    now = datetime.now(timezone.utc)
-    if existing is not None:
-        if existing.removed_at is not None:
-            raise HTTPException(status_code=409, detail="That phone number or email belongs to a removed account.")
-        if existing.role in ("super_admin", "staff"):
-            raise HTTPException(status_code=409, detail=f"{existing.full_name} is already on the team.")
-        if existing.role == "driver" or db.scalar(select(Driver.id).where(Driver.user_id == existing.id)):
-            raise HTTPException(status_code=409, detail="That number belongs to a driver account. Use a different "
-                                                        "number for the staff account.")
-        if not payload.use_existing_account:
-            raise HTTPException(status_code=409, detail={
-                "code": "existing_account",
-                "message": f"{existing.full_name} already uses EkiMove with this number as a passenger. "
-                           "You can make that account a staff account (they keep their password, but can no "
-                           "longer book rides with it), or use a different number.",
-            })
-        existing.role = "staff"
-        existing.staff_permissions = permissions
-        db.add(AuditLog(actor_user_id=admin.id, action="staff.added", entity_type="user", entity_id=str(existing.id),
-                        details=f"existing account; {', '.join(permissions)}"))
-        db.commit()
-        return {"member": _row(db, existing), "temporary_password": None}
+    email = _work_email(payload.email)
 
     temporary = _temporary_password()
-    user = User(full_name=name, phone=phone, email=email, role="staff", staff_permissions=permissions,
-                password_hash=hash_password(temporary), must_change_password=True, is_active=True, created_at=now)
-    db.add(user)
+    user = db.scalar(select(User).where(User.email == email))
+    if user is not None:
+        if user.role in ("super_admin", "staff") and user.removed_at is None:
+            raise HTTPException(status_code=409, detail=f"{user.full_name} is already on the team.")
+        # A former team member's work account (no phone, not removed) can come back.
+        former_staff = user.removed_at is None and user.role == "passenger" and not user.phone and db.scalar(
+            select(AuditLog.id).where(AuditLog.entity_type == "user", AuditLog.entity_id == str(user.id),
+                                      AuditLog.action == "staff.removed").limit(1))
+        if not former_staff:
+            raise HTTPException(status_code=409, detail="That email is already used by another EkiMove account.")
+        user.full_name = name
+        user.is_active = True
+        user.suspended_at = None
+    else:
+        user = User(full_name=name, email=email, phone=None, is_active=True, created_at=datetime.now(timezone.utc))
+        db.add(user)
+    user.role = "super_admin" if super_admin else "staff"
+    user.staff_permissions = permissions
+    user.password_hash = hash_password(temporary)
+    user.must_change_password = True
     db.flush()
-    db.add(AuditLog(actor_user_id=admin.id, action="staff.added", entity_type="user", entity_id=str(user.id),
-                    details=", ".join(permissions)))
+    db.add(AuditLog(actor_user_id=admin.id, action="staff.added_super_admin" if super_admin else "staff.added",
+                    entity_type="user", entity_id=str(user.id),
+                    details="full access" if super_admin else ", ".join(permissions)))
+    if super_admin:
+        from app.push import notify  # avoid an import cycle
+
+        others = [uid for uid in db.scalars(select(User.id).where(
+            User.role == "super_admin", User.is_active.is_(True), User.id.notin_((admin.id, user.id)))).all()]
+        notify(db, others, "New super-admin added", f"{admin.full_name} gave {name} full access to the console.",
+               url="/admin/team", tag=f"super-admin-{user.id}")
     db.commit()
     db.refresh(user)
     return {"member": _row(db, user), "temporary_password": temporary}
 
 
-def _staff_member(db: Session, user_id: int) -> User:
+def _staff_member(db: Session, user_id: int, admin: User, *, allow_super_admin: bool = False) -> User:
     user = db.get(User, user_id)
-    if user is None or user.removed_at is not None:
+    if user is None or user.removed_at is not None or user.role not in ("staff", "super_admin"):
         raise HTTPException(status_code=404, detail="Team member not found.")
-    if user.role == "super_admin":
+    if user.id == admin.id:
+        raise HTTPException(status_code=409, detail="You can't change your own access here.")
+    if user.role == "super_admin" and not allow_super_admin:
         raise HTTPException(status_code=409, detail="Super-admins already have full access.")
-    if user.role != "staff":
-        raise HTTPException(status_code=404, detail="Team member not found.")
     return user
 
 
@@ -161,7 +172,7 @@ class PermissionsIn(BaseModel):
 @router.patch("/{user_id}")
 def update_staff(user_id: int, payload: PermissionsIn, db: Session = Depends(get_db),
                  admin: User = Depends(require_super_admin)) -> dict:
-    user = _staff_member(db, user_id)
+    user = _staff_member(db, user_id, admin)
     user.staff_permissions = _clean_permissions(payload.permissions)
     db.add(AuditLog(actor_user_id=admin.id, action="staff.permissions_changed", entity_type="user",
                     entity_id=str(user.id), details=", ".join(user.staff_permissions)))
@@ -172,8 +183,14 @@ def update_staff(user_id: int, payload: PermissionsIn, db: Session = Depends(get
 @router.post("/{user_id}/remove-access")
 def remove_access(user_id: int, db: Session = Depends(get_db), admin: User = Depends(require_super_admin)) -> dict:
     """Take away console access. The account becomes an ordinary passenger
-    account, and remembered phones must sign in again."""
-    user = _staff_member(db, user_id)
+    account, and remembered phones must sign in again. A super-admin can be
+    removed too, as long as another active super-admin remains."""
+    user = _staff_member(db, user_id, admin, allow_super_admin=True)
+    if user.role == "super_admin":
+        remaining = db.scalar(select(func.count(User.id)).where(
+            User.role == "super_admin", User.is_active.is_(True), User.removed_at.is_(None), User.id != user.id)) or 0
+        if remaining < 1:
+            raise HTTPException(status_code=409, detail="EkiMove needs at least one super-admin.")
     user.role = "passenger"
     user.staff_permissions = None
     forget_all(db, user.id)
@@ -185,7 +202,7 @@ def remove_access(user_id: int, db: Session = Depends(get_db), admin: User = Dep
 @router.post("/{user_id}/reset-password")
 def reset_staff_password(user_id: int, db: Session = Depends(get_db),
                          admin: User = Depends(require_super_admin)) -> dict:
-    user = _staff_member(db, user_id)
+    user = _staff_member(db, user_id, admin, allow_super_admin=True)
     temporary = _temporary_password()
     user.password_hash = hash_password(temporary)
     user.must_change_password = True

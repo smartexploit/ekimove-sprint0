@@ -178,6 +178,8 @@ class Settings(BaseSettings):
     # Public address of the app, used in links sent by text (e.g. a
     # delivery's tracking link). Render sets FRONTEND_URL too.
     frontend_url: str = "https://ekimove.com.ng"
+    # Team accounts must use an email address on this domain.
+    staff_email_domain: str = "ekimove.com.ng"
 
     # The static site's Render Deploy Hook (Render > ekimove static site >
     # Settings > Deploy Hook). "Publish to website" in the console calls it

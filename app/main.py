@@ -817,6 +817,10 @@ def login(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    # Team (staff) accounts sign in with their work email only.
+    if user.role == "staff" and not is_email(identifier):
+        raise HTTPException(status_code=400, detail="EkiMove team accounts sign in with your work email address.")
+
     # Sign-in log for traceability (time, IP address and device).
     db.add(AuditLog(actor_user_id=user.id, action="auth.login", entity_type="user",
                     entity_id=str(user.id), details=client_fingerprint(request)))
