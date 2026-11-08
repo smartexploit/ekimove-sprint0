@@ -1,9 +1,9 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import os
 import re
 from pathlib import Path
 
-from fastapi import Body, APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
+from fastapi import BackgroundTasks, Body, APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -15,6 +15,7 @@ from app.contacts import ContactError, clean_email, clean_name, clean_phone, ema
 from app.rate_limit import enforce as enforce_rate_limit
 from app.database import get_db
 from app.models import Driver, User, Vehicle
+from app import onboarding
 from app.photo_storage import PhotoStorageError, upload_driver_photo, delete_driver_photo
 
 router = APIRouter(tags=["driver applications"])
@@ -36,6 +37,7 @@ PRIVATE_UPLOAD_DIR = Path(
 @router.post("/api/v1/driver-applications", status_code=status.HTTP_201_CREATED)
 async def submit_driver_application(
     request: Request,
+    background: BackgroundTasks,
     full_name: str = Form(min_length=2, max_length=160),
     phone: str = Form(min_length=7, max_length=32),
     password: str = Form(min_length=12, max_length=128),
@@ -45,6 +47,14 @@ async def submit_driver_application(
     face_photo: UploadFile = File(...),
     accept_policies: bool = Form(False),
     email: str | None = Form(default=None, max_length=254),
+    gender: str | None = Form(default=None, max_length=16),
+    date_of_birth: str | None = Form(default=None, max_length=10),
+    home_address: str | None = Form(default=None, max_length=240),
+    town: str | None = Form(default=None, max_length=80),
+    licence_number: str | None = Form(default=None, max_length=32),
+    emergency_contact_name: str | None = Form(default=None, max_length=160),
+    emergency_contact_phone: str | None = Form(default=None, max_length=32),
+    safety_pledges: list[str] = Form(default=[]),
     db: Session = Depends(get_db),
 ):
     """Create a driver account pending review and keep the face photo private."""
@@ -79,6 +89,13 @@ async def submit_driver_application(
 
     if vehicle_type == "car" and capacity > 4:
         raise HTTPException(status_code=422, detail="A car can carry 4 passengers at most")
+
+    details = onboarding.clean_details(
+        gender=gender, date_of_birth=date_of_birth, home_address=home_address, town=town,
+        licence_number=licence_number, emergency_contact_name=emergency_contact_name,
+        emergency_contact_phone=emergency_contact_phone, vehicle_type=vehicle_type, pledges=safety_pledges,
+        own_phone=phone,
+    )
 
     if phone_taken(db, phone):
         raise HTTPException(status_code=409, detail="Phone number is already registered")
@@ -127,7 +144,9 @@ async def submit_driver_application(
             verification_status="pending",
             is_online=False,
             photo_path=photo_ref,
+            review_due_at=datetime.now(timezone.utc) + timedelta(hours=onboarding.REVIEW_HOURS),
         )
+        onboarding.apply_details(driver, details)
         db.add(driver)
         db.flush()
 
@@ -142,11 +161,21 @@ async def submit_driver_application(
             from app.verification import record_policy_acceptance  # avoid an import cycle
 
             record_policy_acceptance(db, user, request)
+        onboarding.welcome_driver(db, user, driver, background)
+        from app.push import notify_admins  # avoid an import cycle
+
+        due_label = onboarding.lagos_time(driver.review_due_at)
+        notify_admins(db, f"New driver application · {full_name}",
+                      f"{vehicle_type.replace('_', ' ').capitalize()} {plate_number}. Review by {due_label}.",
+                      url="/admin/drivers", tag=f"driver-app-{driver.id}")
         db.commit()
 
         return {
             "status": "pending_review",
-            "message": "Application submitted. Your driver and vehicle details must be reviewed before you can accept rides.",
+            "review_due_at": onboarding.review_info(driver)["review_due_at"],
+            "review_due_label": due_label,
+            "message": f"Application submitted. We'll review it within {onboarding.REVIEW_HOURS} hours "
+                       f"(by {due_label}).",
         }
 
     except IntegrityError:
@@ -188,6 +217,10 @@ def get_my_driver_application(
     return {
         "verification_status": driver.verification_status,
         "is_online": driver.is_online,
+        **onboarding.review_info(driver),
+        "details": onboarding.driver_details(driver),
+        "details_missing": onboarding.details_missing(driver, vehicles),
+        "invitations": onboarding.invitations_for(db, driver.id),
         "vehicles": [
             {
                 "vehicle_type": vehicle.vehicle_type,

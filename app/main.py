@@ -27,6 +27,7 @@ from app.fare_calculator import router as fare_calculator_router
 from app import deliveries as deliveries_module
 from app.deliveries import check_delivery_code, recipient_text, router as deliveries_router
 from app.support import router as support_router
+from app.onboarding import router as onboarding_router, welcome_passenger
 from app.haulage import router as haulage_router
 from app.verification import client_fingerprint, ensure_passenger_may_book, record_policy_acceptance, router as verification_router
 from app.trips import check_pickup_pin, my_rating, passenger_verified, rating_summary, router as trips_router, short_name as trip_short_name
@@ -34,7 +35,7 @@ from app.dispatch import advance_dispatch, assign_driver, dispatch_summary, rout
 from app.app_settings import booking_rules, is_motorcycle, max_passengers, quote_amount, router as app_settings_router, seats_needed
 from app.earnings import record_trip_earning, ride_earning_preview, router as earnings_router
 from decimal import Decimal, ROUND_HALF_UP
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select, text
@@ -121,6 +122,7 @@ app.include_router(device_sessions_router)
 app.include_router(calls_router)
 app.include_router(launch_checklist_router)
 app.include_router(fare_calculator_router)
+app.include_router(onboarding_router)
 
 class LoginRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
@@ -645,6 +647,7 @@ def business_info() -> dict[str, object]:
 def register(
     payload: RegisterRequest,
     request: Request,
+    background: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> AuthenticatedResponse:
     """Create a passenger account and return an access token."""
@@ -704,6 +707,7 @@ def register(
         promos.welcome_invited(db, user, inviter)
         db.add(AuditLog(actor_user_id=user.id, action="auth.registered", entity_type="user",
                         entity_id=str(user.id), details=client_fingerprint(request)))
+        welcome_passenger(db, user, background)
         db.commit()
         db.refresh(user)
     except IntegrityError:

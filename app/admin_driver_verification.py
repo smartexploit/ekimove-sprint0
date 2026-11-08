@@ -1,7 +1,7 @@
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -11,6 +11,7 @@ from app.auth import require_super_admin
 from app.database import get_db
 from app.driver_applications import PRIVATE_UPLOAD_DIR
 from app.models import Driver, User, Vehicle
+from app import onboarding
 from app.photo_storage import PHOTO_PREFIX, download_driver_photo
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin driver verification"])
@@ -18,6 +19,7 @@ router = APIRouter(prefix="/api/v1/admin", tags=["admin driver verification"])
 
 class DecisionRequest(BaseModel):
     decision: str = Field(pattern="^(approve|reject)$")
+    reason: str | None = Field(default=None, max_length=300)
 
 
 @router.get("/driver-applications/pending")
@@ -36,9 +38,10 @@ def pending_driver_applications(
             Driver.verification_status == status
         )
 
-    drivers = db.scalars(
-        statement.order_by(Driver.created_at.asc())
-    ).all()
+    # Pending: the review due soonest first. Others: newest first.
+    order = ((Driver.review_due_at.is_(None), Driver.review_due_at.asc(), Driver.created_at.asc())
+             if status == "pending" else (Driver.created_at.desc(),))
+    drivers = db.scalars(statement.order_by(*order)).all()
 
     results = []
     for driver in drivers:
@@ -51,8 +54,14 @@ def pending_driver_applications(
             "driver_id": driver.id,
             "full_name": user.full_name if user else "Unavailable",
             "phone": user.phone if user else None,
+            "email": user.email if user else None,
             "verification_status": driver.verification_status,
             "photo_available": bool(driver.photo_path),
+            "applied_at": onboarding._iso(driver.created_at),
+            **onboarding.review_info(driver),
+            "details": onboarding.driver_details(driver),
+            "details_missing": onboarding.details_missing(driver, vehicles),
+            "invitations": onboarding.invitations_for(db, driver.id),
             "vehicles": [
                 {
                     "id": vehicle.id,
@@ -116,6 +125,7 @@ def driver_application_photo(
 def decide_driver_application(
     driver_id: int,
     payload: DecisionRequest,
+    background: BackgroundTasks,
     _admin=Depends(require_super_admin),
     db: Session = Depends(get_db),
 ):
@@ -135,7 +145,12 @@ def decide_driver_application(
     driver.is_online = False
     from app import notifications  # avoid an import cycle
 
-    notifications.driver_reviewed(db, driver, payload.decision == "approve")
+    approved = payload.decision == "approve"
+    driver.reviewed_at = onboarding.now()
+    notifications.driver_reviewed(db, driver, approved)
+    user = db.get(User, driver.user_id)
+    if user is not None:
+        onboarding.application_decided(db, user, approved, (payload.reason or "").strip() or None, background)
     db.commit()
 
     return {

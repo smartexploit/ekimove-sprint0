@@ -8,13 +8,14 @@ import StatusBadge from '../../components/ui/StatusBadge.jsx'
 import VehicleIcon from '../../components/ui/VehicleIcon.jsx'
 import SupportContacts from '../../components/SupportContacts.jsx'
 import NotificationsCard from '../../components/account/NotificationsCard.jsx'
+import DriverOnboarding from '../../components/driver/DriverOnboarding.jsx'
 import { apiRequest } from '../../services/authService.js'
 import { vehicleLabel } from '../../utils/vehicles.js'
 
 const statusCopy = {
   pending: {
     title: 'Your application is under review',
-    detail: "We're checking your details. You can't accept rides until your profile and vehicle are approved.",
+    detail: "You can't accept rides until your profile and vehicle are approved. We'll notify you as soon as they are.",
     icon: Clock3,
     colors: ['var(--gold-100)', 'var(--gold-700)'],
   },
@@ -172,6 +173,9 @@ export default function DriverStatusPage() {
 
             <Alert tone="error">{actionError}</Alert>
             <Alert tone="success">{actionMessage}</Alert>
+
+            <DriverOnboarding application={application}
+              onUpdate={(patch) => setApplication((current) => ({ ...current, ...patch }))} />
 
             <div className="status-hero">
               <span

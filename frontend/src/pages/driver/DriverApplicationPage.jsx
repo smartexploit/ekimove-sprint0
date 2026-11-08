@@ -1,9 +1,12 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { CheckCircle2 } from 'lucide-react'
+import { CalendarClock, CheckCircle2 } from 'lucide-react'
 import AuthLayout from '../../layouts/AuthLayout.jsx'
 import Alert from '../../components/ui/Alert.jsx'
 import PasswordInput from '../../components/ui/PasswordInput.jsx'
+import { apiUrl } from '../../services/authService.js'
+import DriverDetailsFields from '../../components/driver/DriverDetailsFields.jsx'
+import { REVIEW_HOURS, detailsProblem } from '../../utils/driverOnboarding.js'
 import {
   NAME_MAX, PASSWORD_MAX, PASSWORD_MIN, emailProblem, nameProblem, nameTyping, nigerianMobile, passwordProblem,
   phoneProblem, phoneTyping,
@@ -20,6 +23,8 @@ export default function DriverApplicationPage() {
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [loading, setLoading] = useState(false)
+  const [vehicleType, setVehicleType] = useState('motorcycle')
+  const [dueLabel, setDueLabel] = useState('')
 
   async function submit(event) {
     event.preventDefault()
@@ -35,7 +40,8 @@ export default function DriverApplicationPage() {
       phoneProblem(form.get('phone')) ||
       (email ? emailProblem(email) : '') ||
       passwordProblem(form.get('password'), { name: form.get('full_name'), phone: form.get('phone'), email }) ||
-      (/^[A-Z0-9][A-Z0-9 -]{3,13}[A-Z0-9]$/.test(plate) ? '' : 'Enter the plate number as it appears on the vehicle, like EKT 123 AB.')
+      (/^[A-Z0-9][A-Z0-9 -]{3,13}[A-Z0-9]$/.test(plate) ? '' : 'Enter the plate number as it appears on the vehicle, like EKT 123 AB.') ||
+      detailsProblem(form, { vehicleType, ownPhone: form.get('phone') })
     if (problem) {
       setError(problem)
       return
@@ -44,21 +50,12 @@ export default function DriverApplicationPage() {
     form.set('phone', nigerianMobile(form.get('phone')))
     form.set('email', email)
     form.set('plate_number', plate)
+    form.set('emergency_contact_phone', nigerianMobile(form.get('emergency_contact_phone')))
+    form.set('licence_number', String(form.get('licence_number') || '').replace(/\s+/g, '').toUpperCase())
     setLoading(true)
 
     try {
-      const apiBaseUrl = (
-        import.meta.env.VITE_API_BASE_URL ||
-        'https://ekimove-api.onrender.com'
-      ).replace(/\/+$/, '')
-
-      const response = await fetch(
-        `${apiBaseUrl}/api/v1/driver-applications`,
-        {
-          method: 'POST',
-          body: form,
-        },
-      )
+      const response = await fetch(apiUrl('/api/v1/driver-applications'), { method: 'POST', body: form })
 
       const contentType = response.headers.get('content-type') || ''
       if (!contentType.includes('application/json')) {
@@ -76,7 +73,9 @@ export default function DriverApplicationPage() {
         )
       }
       setMessage(data.message || 'Application submitted for review.')
+      setDueLabel(data.review_due_label || '')
       formElement.reset()
+      window.scrollTo?.({ top: 0 })
     } catch (err) {
       setError(err.message || 'Unable to reach EkiMove. Please try again.')
     } finally {
@@ -95,13 +94,26 @@ export default function DriverApplicationPage() {
           <div className="row" style={{ alignItems: 'flex-start', flexWrap: 'nowrap' }}>
             <CheckCircle2 size={28} color="#2E8B63" aria-hidden="true" style={{ flexShrink: 0 }} />
             <div className="stack stack-sm">
-              <p role="status" style={{ fontWeight: 700 }}>{message}</p>
+              <p role="status" style={{ fontWeight: 700 }}>Thank you, your application is in.</p>
               <p className="muted">
-                Our team will review your details and vehicle. You can't accept
-                rides until both are approved. Keep your sign-in details safe.
+                We review every driver within {REVIEW_HOURS} hours{dueLabel ? <>, so you’ll hear from us by <strong>{dueLabel}</strong></> : ''}.
+                A welcome message is waiting in your EkiMove inbox{' '}
+                (and your email, if you gave one).
               </p>
             </div>
           </div>
+          <ol className="next-steps">
+            <li><strong>Review.</strong> We check your details, face photo and vehicle.</li>
+            <li>
+              <strong>Inspection and orientation.</strong> We may invite you to bring your vehicle, licence and
+              papers, and show you how to take trips in the app.
+            </li>
+            <li><strong>Approval.</strong> Once your profile and vehicle are approved, go online to start earning.</li>
+          </ol>
+          <p className="muted small row" style={{ gap: 6, flexWrap: 'nowrap', alignItems: 'flex-start' }}>
+            <CalendarClock size={16} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />
+            Sign in now and turn on notifications, so you see your invitation and approval the moment they’re sent.
+          </p>
           <Link className="btn btn-primary btn-lg btn-block" to="/login">
             Continue to sign in
           </Link>
@@ -115,7 +127,7 @@ export default function DriverApplicationPage() {
       title="Drive with EkiMove."
       intro="Earn on trips across Ekiti with fares agreed before every ride. Apply once, get verified, then go online whenever you're ready."
       heading="Apply to drive"
-      subheading="Use your own accurate details. Approval isn't automatic: your profile and vehicle are reviewed separately."
+      subheading={`Use your own accurate details. We review every application within ${REVIEW_HOURS} hours and may invite you for a vehicle inspection and app orientation.`}
       wide
     >
       <form className="form" onSubmit={submit} encType="multipart/form-data">
@@ -172,7 +184,8 @@ export default function DriverApplicationPage() {
           <div className="form-grid">
             <label className="field" htmlFor="vehicle-type">
               <span className="field-label">Vehicle type</span>
-              <select id="vehicle-type" className="select" name="vehicle_type" defaultValue="motorcycle" required>
+              <select id="vehicle-type" className="select" name="vehicle_type" value={vehicleType}
+                onChange={(event) => setVehicleType(event.target.value)} required>
                 <option value="motorcycle">Motorcycle</option>
                 <option value="tricycle">Tricycle</option>
                 <option value="car">Car</option>
@@ -198,6 +211,8 @@ export default function DriverApplicationPage() {
             </label>
           </div>
         </fieldset>
+
+        <DriverDetailsFields vehicleType={vehicleType} idPrefix="apply" />
 
         <Alert tone="error">{error}</Alert>
 

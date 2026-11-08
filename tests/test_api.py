@@ -1245,6 +1245,18 @@ def _get_test_db_session():
     return next(session_generator), session_generator
 
 
+DRIVER_DETAILS = {
+    "gender": "male",
+    "date_of_birth": "1990-05-14",
+    "home_address": "12 Ajilosun Street, Ado-Ekiti",
+    "town": "Ado-Ekiti",
+    "licence_number": "ABC12345AA12",
+    "emergency_contact_name": "Kemi Adeyemi",
+    "emergency_contact_phone": "08039998877",
+    "safety_pledges": ["documents", "sober", "protection", "road_rules", "respect", "roadworthy"],
+}
+
+
 def test_driver_application_creates_pending_driver_and_unapproved_vehicle(
     client, monkeypatch, tmp_path
 ):
@@ -1267,6 +1279,7 @@ def test_driver_application_creates_pending_driver_and_unapproved_vehicle(
             "vehicle_type": "car",
             "plate_number": "EKM-NEW-901",
             "capacity": "4",
+            **DRIVER_DETAILS,
         },
         files={
             "face_photo": ("face.png", photo_bytes, "image/png"),
@@ -1318,6 +1331,7 @@ def test_driver_application_rejects_invalid_image_signature(
             "vehicle_type": "car",
             "plate_number": "EKM-NEW-902",
             "capacity": "4",
+            **DRIVER_DETAILS,
         },
         files={
             "face_photo": (
@@ -1357,6 +1371,7 @@ def test_driver_application_rejects_registered_phone(
             "vehicle_type": "car",
             "plate_number": "EKM-NEW-903",
             "capacity": "4",
+            **DRIVER_DETAILS,
         },
         files={
             "face_photo": (
@@ -4160,7 +4175,8 @@ def outbox(monkeypatch):
     monkeypatch.setattr(settings, "brevo_api_key", "test-brevo")
     monkeypatch.setattr(settings, "email_from_address", "hello@example.com")
     monkeypatch.setattr(messaging_module, "send_sms", lambda to, body: sent.append(("sms", to, body)))
-    monkeypatch.setattr(messaging_module, "send_email", lambda to, subject, text: sent.append(("email", to, text)))
+    monkeypatch.setattr(messaging_module, "send_email",
+                        lambda to, subject, text, html=None: sent.append(("email", to, text)))
     return sent
 
 
@@ -6470,3 +6486,220 @@ def test_admin_sees_drivers_and_can_message_them(client, quiet_messaging_and_pus
     assert any("second-inbox" in p["endpoint"] for p in quiet_messaging_and_push)
     assert client.post("/api/v1/admin/support/threads", headers=admin,
                        json={"user_id": 999, "subject": "Hello", "message": "Hi"}).status_code == 404
+
+
+# --- Welcome messages, driver details, 72-hour review, invitations ---
+
+from app.models import DriverInvitation, SupportThread
+
+PHOTO = ("face.png", b"\x89PNG\r\n\x1a\nfake-test-image", "image/png")
+
+
+@pytest.fixture()
+def rich_outbox(monkeypatch):
+    """Email switched on; capture subject, text and HTML."""
+    sent = []
+    monkeypatch.setattr(settings, "email_provider", "brevo")
+    monkeypatch.setattr(settings, "brevo_api_key", "test-brevo")
+    monkeypatch.setattr(settings, "email_from_address", "hello@example.com")
+    monkeypatch.setattr(messaging_module, "send_email",
+                        lambda to, subject, text, html=None: sent.append((to, subject, text, html)))
+    return sent
+
+
+def apply_as_driver(client, monkeypatch, **changes):
+    monkeypatch.setattr(driver_applications_module, "upload_driver_photo", lambda _b: "cloudinary:x|png")
+    data = {"full_name": "Femi Ogunleye", "phone": "08000000771", "password": "Green-Rider-Motorbike-77!",
+            "email": "femi@example.com", "vehicle_type": "motorcycle", "plate_number": "EKT-771-AB",
+            "capacity": "1", "accept_policies": "true", **DRIVER_DETAILS}
+    data.update(changes)
+    data = {k: v for k, v in data.items() if v is not None}
+    return client.post("/api/v1/driver-applications", data=data, files={"face_photo": PHOTO})
+
+
+def test_new_passenger_gets_a_free_welcome_email_and_inbox_message(client, rich_outbox):
+    response = client.post("/api/v1/auth/register", json={
+        "phone": "08000000551", "email": "ada@example.com", "full_name": "Ada Bello",
+        "password": "Ada-Passenger-Pass-55!"})
+    assert response.status_code == 201, response.text
+    assert len(rich_outbox) == 1
+    to, subject, text, html = rich_outbox[0]
+    assert to == "ada@example.com" and subject == "Welcome to EkiMove, Ada"
+    assert "pickup PIN" in text and "<ol" in html and "Book your first ride" in html
+    headers = {"Authorization": f"Bearer {response.json()['access_token']}"}
+    threads = client.get("/api/v1/support/threads", headers=headers).json()
+    assert [t["subject"] for t in threads] == ["Welcome to EkiMove"]
+    assert client.get("/api/v1/support/unread", headers=headers).json()
+    # It doesn't land in the staff support queue.
+    admin = login(client, *ADMIN_LOGIN)
+    queue = client.get("/api/v1/admin/support/threads", headers=admin).json()
+    assert all(t["subject"] != "Welcome to EkiMove" for t in queue)
+
+
+def test_phone_only_passenger_gets_the_inbox_welcome_and_no_text(client, outbox):
+    response = client.post("/api/v1/auth/register", json={
+        "phone": "08000000552", "full_name": "Tayo Ade", "password": "Tayo-Passenger-Pass-55!"})
+    assert response.status_code == 201, response.text
+    assert outbox == []  # SMS costs money: none sent
+    headers = {"Authorization": f"Bearer {response.json()['access_token']}"}
+    assert len(client.get("/api/v1/support/threads", headers=headers).json()) == 1
+
+
+@pytest.mark.parametrize("changes,message", [
+    ({"gender": None}, "gender"),
+    ({"date_of_birth": "2012-01-01"}, "at least 18"),
+    ({"home_address": "Ado"}, "home address"),
+    ({"town": ""}, "town"),
+    ({"emergency_contact_phone": "08000000771"}, "different phone"),
+    ({"safety_pledges": ["documents", "sober"]}, "safety promise"),
+    ({"vehicle_type": "car", "capacity": "4", "licence_number": None}, "licence number"),
+])
+def test_driver_application_requires_the_new_details(client, monkeypatch, changes, message):
+    response = apply_as_driver(client, monkeypatch, **changes)
+    assert response.status_code == 422, response.text
+    assert message in response.json()["detail"]
+
+
+def test_driver_application_saves_details_and_promises_review_in_72_hours(
+        client, monkeypatch, rich_outbox, quiet_messaging_and_push):
+    monkeypatch.setattr(settings, "email_provider", "brevo")
+    monkeypatch.setattr(settings, "brevo_api_key", "test-brevo")
+    monkeypatch.setattr(settings, "email_from_address", "hello@example.com")
+    admin = login(client, *ADMIN_LOGIN)
+    subscribe(client, admin, "https://fcm.googleapis.com/fcm/send/admin")
+    # A motorcycle rider doesn't have to give a licence number.
+    response = apply_as_driver(client, monkeypatch, licence_number=None)
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert "within 72 hours" in body["message"]
+    due = datetime.fromisoformat(body["review_due_at"])
+    assert timedelta(hours=71) < due - datetime.now(timezone.utc) <= timedelta(hours=72)
+
+    db, gen = _get_test_db_session()
+    try:
+        driver = db.scalar(select(Driver).join(User, User.id == Driver.user_id).where(User.phone == "08000000771"))
+        assert driver.gender == "male" and str(driver.date_of_birth) == "1990-05-14"
+        assert driver.town == "Ado-Ekiti" and driver.licence_number is None
+        assert driver.emergency_contact_phone == "08039998877" and len(driver.safety_pledges) == 6
+    finally:
+        gen.close()
+
+    (to, subject, text, html), = rich_outbox
+    assert to == "femi@example.com" and "driver application" in subject
+    assert body["review_due_label"] in text and "inspection" in text
+    assert any(json.loads(p["payload"])["title"].startswith("New driver application")
+               for p in quiet_messaging_and_push)
+
+    driver_headers = login(client, "08000000771", "Green-Rider-Motorbike-77!")
+    me = client.get("/api/v1/driver-applications/me", headers=driver_headers).json()
+    assert me["review_due_label"] == body["review_due_label"] and me["details_missing"] == []
+    assert me["details"]["age"] >= 18 and me["invitations"] == []
+    queue = client.get("/api/v1/admin/driver-applications/pending", headers=admin).json()
+    mine = next(row for row in queue if row["phone"] == "08000000771")
+    assert mine["details"]["home_address"].startswith("12 Ajilosun") and mine["review_overdue"] is False
+
+
+def test_overdue_reviews_come_first_and_are_flagged(client, monkeypatch):
+    assert apply_as_driver(client, monkeypatch).status_code == 201
+    assert apply_as_driver(client, monkeypatch, phone="08000000772", email="b@example.com",
+                           plate_number="EKT-772-AB").status_code == 201
+    db, gen = _get_test_db_session()
+    try:
+        late = db.scalar(select(Driver).join(User, User.id == Driver.user_id).where(User.phone == "08000000772"))
+        late.review_due_at = datetime.now(timezone.utc) - timedelta(hours=3)
+        db.commit()
+    finally:
+        gen.close()
+    admin = login(client, *ADMIN_LOGIN)
+    queue = client.get("/api/v1/admin/driver-applications/pending", headers=admin).json()
+    assert queue[0]["phone"] == "08000000772" and queue[0]["review_overdue"] is True
+
+
+def test_admin_invites_drivers_to_inspection_and_driver_responds(client, monkeypatch, rich_outbox,
+                                                                  quiet_messaging_and_push):
+    monkeypatch.setattr(settings, "email_provider", "brevo")
+    monkeypatch.setattr(settings, "brevo_api_key", "test-brevo")
+    monkeypatch.setattr(settings, "email_from_address", "hello@example.com")
+    assert apply_as_driver(client, monkeypatch).status_code == 201
+    driver = login(client, "08000000771", "Green-Rider-Motorbike-77!")
+    subscribe(client, driver, "https://fcm.googleapis.com/fcm/send/femi")
+    admin = login(client, *ADMIN_LOGIN)
+    queue = client.get("/api/v1/admin/driver-applications/pending", headers=admin).json()
+    ids = [row["driver_id"] for row in queue]
+    when = (datetime.now(timezone.utc) + timedelta(days=2)).replace(microsecond=0)
+
+    too_soon = client.post("/api/v1/admin/driver-invitations", headers=admin, json={
+        "driver_ids": ids, "kind": "both", "scheduled_for": datetime.now(timezone.utc).isoformat(),
+        "venue": "EkiMove office, Fajuyi"})
+    assert too_soon.status_code == 422
+
+    made = client.post("/api/v1/admin/driver-invitations", headers=admin, json={
+        "driver_ids": ids, "kind": "both", "scheduled_for": when.isoformat(),
+        "venue": "EkiMove office, Fajuyi Park", "notes": "Ask for Mr Bola at the gate."})
+    assert made.status_code == 201, made.text
+    assert made.json()["invited"] == len(ids)
+    assert any(json.loads(p["payload"])["title"] == "You're invited: vehicle inspection and app orientation"
+               for p in quiet_messaging_and_push)
+    invite_mail = [m for m in rich_outbox if m[1].startswith("EkiMove invitation")]
+    assert invite_mail and "Fajuyi Park" in invite_mail[0][2] and "Mr Bola" in invite_mail[0][3]
+
+    me = client.get("/api/v1/driver-applications/me", headers=driver).json()
+    (invite,) = me["invitations"]
+    assert invite["status"] == "invited" and invite["venue"] == "EkiMove office, Fajuyi Park"
+    url = f"/api/v1/driver-applications/me/invitations/{invite['id']}/respond"
+    assert client.post(url, headers=driver, json={"response": "reschedule"}).status_code == 422
+    moved = client.post(url, headers=driver, json={"response": "reschedule", "note": "Saturday morning please"})
+    assert moved.status_code == 200 and moved.json()["status"] == "reschedule"
+
+    # A new time replaces the old invitation.
+    again = client.post("/api/v1/admin/driver-invitations", headers=admin, json={
+        "driver_ids": [invite and next(r["driver_id"] for r in queue if r["phone"] == "08000000771")],
+        "kind": "inspection", "scheduled_for": (when + timedelta(days=1)).isoformat(), "venue": "Fajuyi Park"})
+    assert again.status_code == 201
+    me = client.get("/api/v1/driver-applications/me", headers=driver).json()
+    assert [i["status"] for i in me["invitations"]] == ["invited", "cancelled"]
+    new_id = me["invitations"][0]["id"]
+    ok = client.post(f"/api/v1/driver-applications/me/invitations/{new_id}/respond", headers=driver,
+                     json={"response": "confirmed"})
+    assert ok.status_code == 200 and ok.json()["status"] == "confirmed"
+    done = client.post(f"/api/v1/admin/driver-invitations/{new_id}/outcome", headers=admin, json={"status": "attended"})
+    assert done.status_code == 200 and done.json()["status"] == "attended"
+    assert client.post(f"/api/v1/driver-applications/me/invitations/{new_id}/respond", headers=driver,
+                       json={"response": "confirmed"}).status_code == 409
+    # Other drivers can't answer someone else's invitation.
+    other = login(client, *DRIVER_LOGIN)
+    assert client.post(f"/api/v1/driver-applications/me/invitations/{new_id}/respond", headers=other,
+                       json={"response": "confirmed"}).status_code == 404
+
+
+def test_rejection_reason_reaches_the_driver(client, monkeypatch, rich_outbox):
+    assert apply_as_driver(client, monkeypatch).status_code == 201
+    admin = login(client, *ADMIN_LOGIN)
+    row = next(r for r in client.get("/api/v1/admin/driver-applications/pending", headers=admin).json()
+               if r["phone"] == "08000000771")
+    decided = client.post(f"/api/v1/admin/driver-applications/{row['driver_id']}/decision", headers=admin,
+                          json={"decision": "reject", "reason": "The face photo is blurred."})
+    assert decided.status_code == 200
+    assert any("The face photo is blurred." in m[2] for m in rich_outbox)
+    driver = login(client, "08000000771", "Green-Rider-Motorbike-77!")
+    subjects = [t["subject"] for t in client.get("/api/v1/support/threads", headers=driver).json()]
+    assert "Your EkiMove driver application" in subjects
+
+
+def test_older_drivers_can_fill_in_missing_details_once(client):
+    driver = login(client, *DRIVER_LOGIN)
+    me = client.get("/api/v1/driver-applications/me", headers=driver).json()
+    assert "gender" in me["details_missing"]
+    details = {k: v for k, v in DRIVER_DETAILS.items()}
+    saved = client.patch("/api/v1/driver-applications/me/details", headers=driver, json=details)
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["details_missing"] == []
+    # Once complete and approved, changes go through support.
+    assert client.patch("/api/v1/driver-applications/me/details", headers=driver,
+                        json=details).status_code == 409
+
+
+def test_requirements_list_the_safety_promises(client):
+    data = client.get("/api/v1/driver-applications/requirements").json()
+    assert [p["key"] for p in data["pledges"]] == DRIVER_DETAILS["safety_pledges"]
+    assert data["review_hours"] == 72 and "car" in data["licence_vehicles"]

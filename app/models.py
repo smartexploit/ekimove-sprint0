@@ -1,7 +1,7 @@
-﻿from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, func, text
+from sqlalchemy import JSON, Boolean, CheckConstraint, Date, DateTime, Float, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -60,6 +60,44 @@ class Driver(Base):
     last_longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     location_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     online_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Application details (required for new applications; older drivers may
+    # fill them in later).
+    gender: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    date_of_birth: Mapped[date | None] = mapped_column(Date, nullable=True)
+    home_address: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    town: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    licence_number: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    emergency_contact_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    emergency_contact_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    safety_pledges: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    safety_pledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # When EkiMove promised to finish the review (72 hours after applying).
+    review_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class DriverInvitation(Base):
+    """An invitation to a vehicle inspection and/or app orientation."""
+
+    __tablename__ = "driver_invitations"
+    __table_args__ = (
+        CheckConstraint("kind IN ('inspection', 'orientation', 'both')", name="ck_driver_invitations_kind"),
+        CheckConstraint("status IN ('invited', 'confirmed', 'reschedule', 'attended', 'missed', 'cancelled')",
+                        name="ck_driver_invitations_status"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    driver_id: Mapped[int] = mapped_column(ForeignKey("drivers.id", ondelete="RESTRICT"), index=True)
+    kind: Mapped[str] = mapped_column(String(16))
+    scheduled_for: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    venue: Mapped[str] = mapped_column(String(240))
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="invited", nullable=False, index=True)
+    driver_note: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    outcome_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Vehicle(Base):

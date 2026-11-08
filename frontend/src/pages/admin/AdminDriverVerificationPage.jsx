@@ -1,12 +1,54 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Camera, RefreshCw, ShieldCheck } from 'lucide-react'
+import { CalendarPlus, Camera, RefreshCw, ShieldCheck } from 'lucide-react'
 import AdminShell from '../../layouts/AdminShell.jsx'
 import Alert from '../../components/ui/Alert.jsx'
 import StatusBadge from '../../components/ui/StatusBadge.jsx'
 import VehicleIcon from '../../components/ui/VehicleIcon.jsx'
+import DriverInviteForm from '../../components/admin/DriverInviteForm.jsx'
+import { INVITE_KINDS } from '../../utils/driverOnboarding.js'
 import { apiRequest, getAccessToken } from '../../services/authService.js'
 import { initials } from '../../utils/format.js'
 import { vehicleLabel } from '../../utils/vehicles.js'
+
+const INVITE_STATUS = {
+  invited: 'Invited, no answer yet',
+  confirmed: 'Confirmed',
+  reschedule: 'Asked for another time',
+  attended: 'Attended',
+  missed: 'Missed',
+  cancelled: 'Cancelled',
+}
+const OPEN_INVITES = ['invited', 'confirmed', 'reschedule']
+
+function formatDob(value) {
+  if (!value) return ''
+  const [y, m, d] = value.split('-').map(Number)
+  return new Date(y, m - 1, d).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+function DetailsList({ application }) {
+  const d = application.details || {}
+  const rows = [
+    ['Gender', d.gender ? d.gender[0].toUpperCase() + d.gender.slice(1) : ''],
+    ['Age', d.age != null ? `${d.age} (born ${formatDob(d.date_of_birth)})` : ''],
+    ['Town', d.town],
+    ['Address', d.home_address],
+    ['Licence no.', d.licence_number],
+    ['Emergency contact', d.emergency_contact_name ? `${d.emergency_contact_name} · ${d.emergency_contact_phone}` : ''],
+    ['Email', application.email],
+    ['Safety promises', d.safety_pledged_at ? 'All ticked' : ''],
+  ]
+  return (
+    <dl className="detail-list">
+      {rows.map(([label, value]) => (
+        <div key={label}>
+          <dt>{label}</dt>
+          <dd>{value || <span className="muted">Not given</span>}</dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
 
 const FILTERS = [
   ['pending', 'Pending'],
@@ -24,6 +66,9 @@ export default function AdminDriverVerificationPage() {
   const [busy, setBusy] = useState('')
   const [photoUrl, setPhotoUrl] = useState('')
   const [photoDriverId, setPhotoDriverId] = useState(null)
+  const [inviting, setInviting] = useState(null) // array of driver ids
+  const [selected, setSelected] = useState([])
+  const [reasons, setReasons] = useState({})
 
   const loadApplications = useCallback(async () => {
     setLoading(true)
@@ -130,10 +175,10 @@ export default function AdminDriverVerificationPage() {
         `/api/v1/admin/driver-applications/${driverId}/decision`,
         {
           method: 'POST',
-          body: JSON.stringify({ decision }),
+          body: JSON.stringify({ decision, reason: decision === 'reject' ? (reasons[driverId] || '').trim() || null : null }),
         },
       )
-      setMessage(`Driver ${decision === 'approve' ? 'approved' : 'rejected'}. Vehicle approval is separate.`)
+      setMessage(`Driver ${decision === 'approve' ? 'approved' : 'rejected'} and told by notification, inbox and email. Vehicle approval is separate.`)
       if (photoDriverId === driverId) closePhoto()
       await loadApplications()
     } catch (err) {
@@ -165,11 +210,38 @@ export default function AdminDriverVerificationPage() {
     }
   }
 
+  async function setOutcome(inviteId, status) {
+    setBusy(`invite-${inviteId}`)
+    setError('')
+    setMessage('')
+    try {
+      await apiRequest(`/api/v1/admin/driver-invitations/${inviteId}/outcome`, {
+        method: 'POST', body: JSON.stringify({ status }),
+      })
+      setMessage(status === 'cancelled' ? 'Invitation cancelled and the driver told.' : `Marked as ${status}.`)
+      await loadApplications()
+    } catch (err) {
+      setError(err.message || 'Could not update the invitation.')
+    } finally {
+      setBusy('')
+    }
+  }
+
+  function invitationsDone(result) {
+    setInviting(null)
+    setSelected([])
+    setMessage(`Invitation sent to ${result.invited} driver${result.invited === 1 ? '' : 's'}.`)
+    loadApplications()
+  }
+
+  const toggle = (id) => setSelected((list) => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id]))
+  const bulkInvite = inviting && inviting.length > 1
+
   return (
     <AdminShell
       eyebrow="Trust"
       title="Driver verification"
-      description="Review each driver and each vehicle. Approving a driver doesn't approve their vehicle."
+      description="Review every application within 72 hours. Invite drivers for inspection and orientation, then approve the driver and the vehicle separately."
       actions={
         <button type="button" className="btn btn-sm" onClick={loadApplications} disabled={loading || Boolean(busy)}>
           <RefreshCw size={16} aria-hidden="true" /> {loading ? 'Loading…' : 'Refresh'}
@@ -195,6 +267,26 @@ export default function AdminDriverVerificationPage() {
         <Alert tone="error">{error}</Alert>
         <Alert tone="success">{message}</Alert>
 
+        {selectedStatus === 'pending' && applications.length > 0 && !bulkInvite && (
+          <div className="row" style={{ justifyContent: 'space-between' }}>
+            <p className="muted small">
+              {selected.length ? `${selected.length} selected` : 'Tick drivers to invite them to the same session.'}
+            </p>
+            <div className="row">
+              {selected.length > 0 && (
+                <button type="button" className="btn btn-sm btn-quiet" onClick={() => setSelected([])}>Clear</button>
+              )}
+              <button type="button" className="btn btn-sm btn-primary" disabled={!selected.length || Boolean(busy)}
+                onClick={() => setInviting(selected)}>
+                <CalendarPlus size={16} aria-hidden="true" /> Invite selected
+              </button>
+            </div>
+          </div>
+        )}
+        {bulkInvite && (
+          <DriverInviteForm driverIds={inviting} onDone={invitationsDone} onCancel={() => setInviting(null)} />
+        )}
+
         {loading && (
           <div className="loading-block" role="status">
             <span className="spinner" aria-hidden="true" /> Loading applications…
@@ -212,7 +304,7 @@ export default function AdminDriverVerificationPage() {
         )}
 
         {!loading && applications.length > 0 && (
-          <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))' }}>
+          <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(min(340px, 100%), 1fr))' }}>
             {applications.map((application) => (
               <article className="card stack" key={application.driver_id} aria-labelledby={`driver-${application.driver_id}`}>
                 <div className="row" style={{ flexWrap: 'nowrap', alignItems: 'flex-start' }}>
@@ -224,6 +316,68 @@ export default function AdminDriverVerificationPage() {
                     </p>
                   </div>
                   <StatusBadge status={application.verification_status} kind="verification" />
+                </div>
+
+                {application.verification_status === 'pending' && (
+                  <div className="row" style={{ justifyContent: 'space-between' }}>
+                    <span className={`due-chip ${application.review_overdue ? 'is-late' : ''}`}>
+                      {application.review_overdue
+                        ? `Overdue: was due ${application.review_due_label}`
+                        : application.review_due_label ? `Review by ${application.review_due_label}` : 'No deadline set'}
+                    </span>
+                    <label className="check-row" style={{ margin: 0 }}>
+                      <input type="checkbox" checked={selected.includes(application.driver_id)}
+                        onChange={() => toggle(application.driver_id)}
+                        aria-label={`Select ${application.full_name} for a group invitation`} />
+                      <span className="small">Select</span>
+                    </label>
+                  </div>
+                )}
+
+                <DetailsList application={application} />
+                {application.details_missing?.length > 0 && (
+                  <p className="small" style={{ color: 'var(--laterite-700)' }}>
+                    Missing: {application.details_missing.join(', ')}. The driver is asked to add them in the app.
+                  </p>
+                )}
+
+                <div className="stack stack-sm">
+                  <h3 className="section-title" style={{ fontSize: 15 }}>Inspection and orientation</h3>
+                  {application.invitations?.length ? application.invitations.slice(0, 3).map((invite) => (
+                    <div className="invite-row" key={invite.id}>
+                      <p style={{ fontWeight: 700 }}>{INVITE_KINDS[invite.kind]} · {invite.scheduled_label}</p>
+                      <p className="muted small">{invite.venue} · <strong>{INVITE_STATUS[invite.status]}</strong></p>
+                      {invite.driver_note && <p className="small">Driver: “{invite.driver_note}”</p>}
+                      {(OPEN_INVITES.includes(invite.status) || ['attended', 'missed'].includes(invite.status)) && (
+                        <div className="row" style={{ marginTop: 6 }}>
+                          {invite.status !== 'attended' && (
+                            <button type="button" className="btn btn-sm" disabled={Boolean(busy)}
+                              onClick={() => setOutcome(invite.id, 'attended')}>Attended</button>
+                          )}
+                          {invite.status !== 'missed' && (
+                            <button type="button" className="btn btn-sm" disabled={Boolean(busy)}
+                              onClick={() => setOutcome(invite.id, 'missed')}>Missed</button>
+                          )}
+                          {OPEN_INVITES.includes(invite.status) && (
+                            <button type="button" className="btn btn-sm btn-quiet" disabled={Boolean(busy)}
+                              onClick={() => setOutcome(invite.id, 'cancelled')}>Cancel</button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )) : <p className="muted small">Not invited yet.</p>}
+                  {inviting?.length === 1 && inviting[0] === application.driver_id ? (
+                    <DriverInviteForm driverIds={inviting} names={[application.full_name]} onDone={invitationsDone}
+                      onCancel={() => setInviting(null)} />
+                  ) : (
+                    <div>
+                      <button type="button" className="btn btn-sm" disabled={Boolean(busy)}
+                        onClick={() => setInviting([application.driver_id])}>
+                        <CalendarPlus size={16} aria-hidden="true" />
+                        {application.invitations?.some((i) => OPEN_INVITES.includes(i.status)) ? 'Send a new time' : 'Invite'}
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {photoDriverId === application.driver_id && photoUrl ? (
@@ -257,6 +411,14 @@ export default function AdminDriverVerificationPage() {
                   </div>
                 )}
 
+                {application.verification_status === 'pending' && (
+                  <label className="field">
+                    <span className="field-label">Reason if you reject (sent to the driver)</span>
+                    <input className="input" maxLength={300} value={reasons[application.driver_id] || ''}
+                      onChange={(event) => setReasons((r) => ({ ...r, [application.driver_id]: event.target.value }))}
+                      placeholder="e.g. The face photo is blurred. Please apply again." />
+                  </label>
+                )}
                 <div className="row">
                   <button
                     type="button"

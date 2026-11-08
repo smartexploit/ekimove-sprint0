@@ -4,7 +4,7 @@ const API_BASE_URL = (
   import.meta.env.VITE_API_BASE_URL || ''
 ).replace(/\/+$/, '')
 
-function apiUrl(path) {
+export function apiUrl(path) {
   if (/^https?:\/\//i.test(path)) return path
   return `${API_BASE_URL}/${path.replace(/^\/+/, '')}`
 }

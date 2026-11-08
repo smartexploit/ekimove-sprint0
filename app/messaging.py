@@ -126,15 +126,18 @@ def send_sms(phone: str, body: str) -> None:
         raise
 
 
-def _send_brevo(to: str, subject: str, text: str) -> None:
+def _send_brevo(to: str, subject: str, text: str, html: str | None = None) -> None:
+    body = {
+        "sender": {"name": settings.email_from_name, "email": settings.email_from_address},
+        "to": [{"email": to}],
+        "subject": subject,
+        "textContent": text,
+    }
+    if html:
+        body["htmlContent"] = html
     response = requests.post(
         "https://api.brevo.com/v3/smtp/email",
-        json={
-            "sender": {"name": settings.email_from_name, "email": settings.email_from_address},
-            "to": [{"email": to}],
-            "subject": subject,
-            "textContent": text,
-        },
+        json=body,
         headers={"api-key": settings.brevo_api_key, "Accept": "application/json"},
         timeout=TIMEOUT_SECONDS,
     )
@@ -142,12 +145,14 @@ def _send_brevo(to: str, subject: str, text: str) -> None:
         raise MessagingError(str(_json(response).get("message") or f"HTTP {response.status_code}"))
 
 
-def _send_smtp(to: str, subject: str, text: str) -> None:
+def _send_smtp(to: str, subject: str, text: str, html: str | None = None) -> None:
     message = EmailMessage()
     message["From"] = f"{settings.email_from_name} <{settings.email_from_address}>"
     message["To"] = to
     message["Subject"] = subject
     message.set_content(text)
+    if html:
+        message.add_alternative(html, subtype="html")
     context = ssl.create_default_context()
     if settings.smtp_use_ssl:
         server = smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=TIMEOUT_SECONDS, context=context)
@@ -161,15 +166,15 @@ def _send_smtp(to: str, subject: str, text: str) -> None:
         server.send_message(message)
 
 
-def send_email(to: str, subject: str, text: str) -> None:
+def send_email(to: str, subject: str, text: str, html: str | None = None) -> None:
     provider = email_provider()
     if provider is None:
         raise MessagingError("Email is not set up.")
     try:
         if provider == "brevo":
-            _send_brevo(to, subject, text)
+            _send_brevo(to, subject, text, html)
         else:
-            _send_smtp(to, subject, text)
+            _send_smtp(to, subject, text, html)
     except requests.RequestException as exc:
         logger.warning("Email provider unreachable: %s", exc)
         raise MessagingError("The email service couldn't be reached.") from None
