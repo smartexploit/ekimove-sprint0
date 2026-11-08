@@ -5,6 +5,8 @@ from pydantic import BaseModel, Field, field_validator
 from uuid import uuid4
 
 import requests
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
@@ -15,6 +17,7 @@ from app.config import settings
 from app.database import get_db
 from app.models import AuditLog, Payment, Ride, RideRequest, User
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/payments", tags=["interswitch"])
 
 
@@ -266,19 +269,28 @@ def interswitch_says_paid(payment: Payment) -> bool:
                 "transactionreference": payment.provider_transaction_ref,
                 "amount": amount_kobo,
             },
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
             timeout=12,
         )
-        response.raise_for_status()
+    except requests.RequestException as exc:
+        logger.warning("Interswitch requery for payment %s failed to connect: %s", payment.id, exc)
+        raise HTTPException(
+            status_code=502,
+            detail="Unable to verify with Interswitch. Check the status and retry.",
+        ) from None
+    try:
         result = response.json()
-    except (requests.RequestException, ValueError):
+    except ValueError:
+        result = None
+    # Interswitch answers an unpaid or unknown checkout with a response code
+    # (sometimes on an HTTP error status). Any such answer means "not paid".
+    if not isinstance(result, dict) or "ResponseCode" not in result:
+        logger.warning("Interswitch requery for payment %s returned HTTP %s: %s", payment.id,
+                       response.status_code, (response.text or "")[:200])
         raise HTTPException(
             status_code=502,
             detail="Unable to verify with Interswitch. Check the status and retry.",
         )
-
-    # A successful HTTP response alone is not evidence of payment.
-    if not isinstance(result, dict):
-        raise HTTPException(status_code=502, detail="Invalid provider response.")
 
     response_code = str(result.get("ResponseCode", "")).strip()
     returned_reference = str(result.get("MerchantReference", "")).strip()

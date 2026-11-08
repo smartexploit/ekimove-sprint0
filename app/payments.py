@@ -113,11 +113,9 @@ def initiate_payment(
             try:
                 paid = interswitch_says_paid(existing)
             except HTTPException:
-                raise HTTPException(
-                    status_code=503,
-                    detail="We couldn't check your card checkout with Interswitch just now. "
-                           "Please try again in a minute.",
-                ) from None
+                # Don't leave the passenger stuck: switch anyway and keep the
+                # card reference on record so finance can check it later.
+                paid = None
             if paid:
                 raise HTTPException(
                     status_code=409,
@@ -129,9 +127,11 @@ def initiate_payment(
         existing.status = "pending"
         existing.provider_transaction_ref = None
         existing.transfer_reference = None
+        note = ("Interswitch could not be checked; finance should confirm this card reference wasn't paid"
+                if paid is None and old_reference else "Interswitch reports it unpaid")
         record_audit(
             db, user.id, "payment.method_switched", existing,
-            f"Switched from unpaid Interswitch checkout ({old_reference or 'no reference'}) to bank transfer.",
+            f"Switched from Interswitch checkout ({old_reference or 'no reference'}) to bank transfer. {note}.",
         )
         db.commit()
         db.refresh(existing)

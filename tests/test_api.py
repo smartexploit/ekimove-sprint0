@@ -6962,12 +6962,38 @@ def test_paid_card_checkout_is_not_switched_away(client, monkeypatch):
     assert status["method"] == "interswitch"
 
 
-def test_card_checkout_is_kept_when_interswitch_cant_be_reached(client, monkeypatch):
-    passenger, ride_id, _checkout = _start_card_checkout(client, monkeypatch)
+def test_switch_goes_ahead_when_interswitch_cant_be_reached(client, monkeypatch):
+    from app.models import AuditLog as AuditLogModel
+
+    passenger, ride_id, checkout = _start_card_checkout(client, monkeypatch)
     _fake_interswitch(monkeypatch, "", fail=True)
     response = client.post(f"/api/v1/payments/rides/{ride_id}/initiate", headers=passenger)
-    assert response.status_code == 503 and "try again" in response.json()["detail"]
-    assert client.get(f"/api/v1/payments/rides/{ride_id}", headers=passenger).json()["method"] == "interswitch"
+    assert response.status_code == 200 and response.json()["method"] == "bank_transfer"
+    db, gen = _get_test_db_session()
+    try:
+        note = db.scalar(select(AuditLogModel.details).where(AuditLogModel.action == "payment.method_switched"))
+        assert checkout["txn_ref"] in note and "finance should confirm" in note
+    finally:
+        gen.close()
+
+
+def test_unpaid_answer_on_an_http_error_counts_as_unpaid(client, monkeypatch):
+    import app.interswitch_payments as interswitch_module
+
+    passenger, ride_id, _checkout = _start_card_checkout(client, monkeypatch)
+
+    class NotFound:
+        status_code = 400
+        text = '{"ResponseCode":"Z25","ResponseDescription":"Transaction not Found"}'
+
+        def json(self):
+            return {"ResponseCode": "Z25", "ResponseDescription": "Transaction not Found", "Amount": 0}
+
+    monkeypatch.setattr(interswitch_module.requests, "get", lambda *a, **k: NotFound())
+    verify = client.post(f"/api/v1/payments/rides/{ride_id}/interswitch/verify", headers=passenger)
+    assert verify.status_code == 409 and "not been verified" in verify.json()["detail"]
+    switched = client.post(f"/api/v1/payments/rides/{ride_id}/initiate", headers=passenger)
+    assert switched.status_code == 200 and switched.json()["method"] == "bank_transfer"
 
 
 def test_unpaid_bank_transfer_can_switch_to_card(client, monkeypatch):
