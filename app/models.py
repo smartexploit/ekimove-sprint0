@@ -44,6 +44,9 @@ class User(Base):
     policies_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # For role "staff": the parts of the admin console this person may use.
     staff_permissions: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # The founder's account: it can't be removed, suspended or reset by other
+    # admins, and only the owner can add or remove super-admins.
+    is_owner: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
 
 
 class Driver(Base):

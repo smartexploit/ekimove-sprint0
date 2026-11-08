@@ -53,7 +53,20 @@ def _clean_permissions(values: list[str]) -> list[str]:
     return chosen
 
 
-def _row(db: Session, user: User) -> dict:
+def owner_id(db: Session) -> int | None:
+    """The owner account: the one flagged as owner, otherwise the oldest
+    super-admin (the founder's account on a fresh install)."""
+    flagged = db.scalar(select(User.id).where(User.is_owner.is_(True), User.removed_at.is_(None)).limit(1))
+    if flagged is not None:
+        return flagged
+    return db.scalar(select(func.min(User.id)).where(User.role == "super_admin", User.removed_at.is_(None)))
+
+
+def is_owner(db: Session, user: User) -> bool:
+    return user.role == "super_admin" and user.id == owner_id(db)
+
+
+def _row(db: Session, user: User, owner: int | None = None) -> dict:
     last_login = db.scalar(select(AuditLog.created_at).where(
         AuditLog.actor_user_id == user.id, AuditLog.action == "auth.login").order_by(AuditLog.id.desc()).limit(1))
     return {
@@ -64,6 +77,8 @@ def _row(db: Session, user: User) -> dict:
         "role": user.role,
         "permissions": staff_permissions(user),
         "is_active": user.is_active,
+        "is_owner": user.id == (owner if owner is not None else owner_id(db)),
+        "suspended_at": _iso(user.suspended_at),
         "must_change_password": bool(user.must_change_password),
         "last_sign_in": _iso(last_login),
         "created_at": _iso(user.created_at),
@@ -75,11 +90,14 @@ def _temporary_password() -> str:
 
 
 @router.get("")
-def list_staff(db: Session = Depends(get_db), _admin: User = Depends(require_super_admin)) -> dict:
+def list_staff(db: Session = Depends(get_db), admin: User = Depends(require_super_admin)) -> dict:
+    owner = owner_id(db)
     team = db.scalars(select(User).where(User.role.in_(("super_admin", "staff")), User.removed_at.is_(None))
                       .order_by(User.role.desc(), User.full_name)).all()
+    team = sorted(team, key=lambda u: u.id != owner)  # owner first
     return {
-        "team": [_row(db, user) for user in team],
+        "team": [_row(db, user, owner) for user in team],
+        "you_are_owner": admin.id == owner,
         "permissions": [{"key": key, "label": label} for key, label in STAFF_PERMISSIONS.items()],
         "presets": PRESETS,
         "email_domain": settings.staff_email_domain.strip().lower().lstrip("@"),
@@ -109,6 +127,8 @@ def _work_email(value: str) -> str:
 @router.post("", status_code=201)
 def add_staff(payload: StaffIn, db: Session = Depends(get_db), admin: User = Depends(require_super_admin)) -> dict:
     super_admin = payload.role == "super_admin"
+    if super_admin and not is_owner(db, admin):
+        raise HTTPException(status_code=403, detail="Only the account owner can add a super-admin.")
     permissions = None if super_admin else _clean_permissions(payload.permissions)
     try:
         name = clean_name(payload.full_name)
@@ -159,8 +179,13 @@ def _staff_member(db: Session, user_id: int, admin: User, *, allow_super_admin: 
         raise HTTPException(status_code=404, detail="Team member not found.")
     if user.id == admin.id:
         raise HTTPException(status_code=409, detail="You can't change your own access here.")
-    if user.role == "super_admin" and not allow_super_admin:
-        raise HTTPException(status_code=409, detail="Super-admins already have full access.")
+    if user.role == "super_admin":
+        if user.id == owner_id(db):
+            raise HTTPException(status_code=403, detail="The owner account can't be changed, suspended or removed.")
+        if not allow_super_admin:
+            raise HTTPException(status_code=409, detail="Super-admins already have full access.")
+        if not is_owner(db, admin):
+            raise HTTPException(status_code=403, detail="Only the account owner can change another super-admin.")
     return user
 
 
@@ -211,3 +236,40 @@ def reset_staff_password(user_id: int, db: Session = Depends(get_db),
                     entity_id=str(user.id), details="staff account"))
     db.commit()
     return {"temporary_password": temporary, "member": _row(db, user)}
+
+
+class SuspendIn(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    reason: str | None = Field(default=None, max_length=300)
+
+
+@router.post("/{user_id}/suspend")
+def suspend_member(user_id: int, payload: SuspendIn | None = None, db: Session = Depends(get_db),
+                   admin: User = Depends(require_super_admin)) -> dict:
+    """Block a team member from signing in, without removing them. Their
+    current sessions stop working at once."""
+    user = _staff_member(db, user_id, admin, allow_super_admin=True)
+    if not user.is_active:
+        raise HTTPException(status_code=409, detail="This account is already suspended.")
+    user.is_active = False
+    user.suspended_at = datetime.now(timezone.utc)
+    user.suspension_reason = (payload.reason if payload else None) or "Suspended from Team & access"
+    forget_all(db, user.id)
+    db.add(AuditLog(actor_user_id=admin.id, action="staff.suspended", entity_type="user", entity_id=str(user.id),
+                    details=user.suspension_reason))
+    db.commit()
+    return _row(db, user)
+
+
+@router.post("/{user_id}/reactivate")
+def reactivate_member(user_id: int, db: Session = Depends(get_db),
+                      admin: User = Depends(require_super_admin)) -> dict:
+    user = _staff_member(db, user_id, admin, allow_super_admin=True)
+    if user.is_active:
+        raise HTTPException(status_code=409, detail="This account is already active.")
+    user.is_active = True
+    user.suspended_at = None
+    user.suspension_reason = None
+    db.add(AuditLog(actor_user_id=admin.id, action="staff.reactivated", entity_type="user", entity_id=str(user.id)))
+    db.commit()
+    return _row(db, user)

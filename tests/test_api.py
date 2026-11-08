@@ -6835,7 +6835,7 @@ def test_super_admin_can_add_a_second_super_admin(client, quiet_messaging_and_pu
     # Full access, including the team and settings.
     for path in ["/api/v1/admin/staff", "/api/v1/admin/settings", "/api/v1/admin/locations/fares"]:
         assert client.get(path, headers=partner).status_code == 200, path
-    # Neither can remove themselves; one can remove the other while another remains.
+    # Nobody can remove themselves.
     assert client.post(f"/api/v1/admin/staff/{member['id']}/remove-access", headers=partner).status_code == 409
     assert client.patch(f"/api/v1/admin/staff/{member['id']}", headers=admin,
                         json={"permissions": ["support"]}).status_code == 409
@@ -6843,13 +6843,46 @@ def test_super_admin_can_add_a_second_super_admin(client, quiet_messaging_and_pu
     assert new_pass.status_code == 200 and new_pass.json()["temporary_password"]
 
 
-def test_the_last_super_admin_cant_be_removed(client):
+def test_nobody_can_remove_suspend_or_reset_the_owner(client):
+    admin = login(client, *ADMIN_LOGIN)
+    owner_id = client.get("/api/v1/auth/me", headers=admin).json()["id"]
+    team = client.get("/api/v1/admin/staff", headers=admin).json()
+    assert team["you_are_owner"] is True and team["team"][0]["is_owner"] is True
+    _member, partner = add_staff_member(client, admin, [], email="partner@ekimove.com.ng", role="super_admin")
+    assert client.get("/api/v1/admin/staff", headers=partner).json()["you_are_owner"] is False
+    for action in ("remove-access", "suspend", "reset-password"):
+        response = client.post(f"/api/v1/admin/staff/{owner_id}/{action}", headers=partner)
+        assert response.status_code == 403, action
+        assert "owner account" in response.json()["detail"]
+    assert client.post(f"/api/v1/admin/people/{owner_id}/suspend", json={"reason": "taking over"},
+                       headers=partner).status_code == 409
+    # Only the owner can add another super-admin.
+    blocked = client.post("/api/v1/admin/staff", headers=partner, json={
+        "full_name": "Someone", "email": "someone@ekimove.com.ng", "role": "super_admin"})
+    assert blocked.status_code == 403
+    # The partner can still manage ordinary staff.
+    added = client.post("/api/v1/admin/staff", headers=partner, json={
+        "full_name": "Kemi Ade", "email": "kemi@ekimove.com.ng", "permissions": ["support"]})
+    assert added.status_code == 201
+    staff_id = added.json()["member"]["id"]
+    assert client.post(f"/api/v1/admin/staff/{staff_id}/suspend", headers=partner).status_code == 200
+
+
+def test_owner_can_suspend_reactivate_and_remove_a_super_admin(client):
     admin = login(client, *ADMIN_LOGIN)
     member, partner = add_staff_member(client, admin, [], email="partner@ekimove.com.ng", role="super_admin")
-    first_id = client.get("/api/v1/auth/me", headers=admin).json()["id"]
-    assert client.post(f"/api/v1/admin/staff/{first_id}/remove-access", headers=partner).status_code == 200
-    # Now the partner is the only super-admin left; nobody else can remove them, and they can't remove themselves.
-    assert client.post(f"/api/v1/admin/staff/{member['id']}/remove-access", headers=partner).status_code == 409
+    suspended = client.post(f"/api/v1/admin/staff/{member['id']}/suspend", headers=admin,
+                            json={"reason": "Lost phone"})
+    assert suspended.status_code == 200 and suspended.json()["is_active"] is False
+    assert client.get("/api/v1/auth/me", headers=partner).status_code == 401
+    signin = client.post("/api/v1/auth/login", json={"identifier": "partner@ekimove.com.ng",
+                                                     "password": "Team-Member-Password-88!"})
+    assert signin.status_code == 403 and "suspended" in signin.json()["detail"]
+    assert client.post(f"/api/v1/admin/staff/{member['id']}/suspend", headers=admin).status_code == 409
+    assert client.post(f"/api/v1/admin/staff/{member['id']}/reactivate", headers=admin).status_code == 200
+    assert login(client, "partner@ekimove.com.ng", "Team-Member-Password-88!")
+    assert client.post(f"/api/v1/admin/staff/{member['id']}/remove-access", headers=admin).status_code == 200
+    assert client.get("/api/v1/admin/staff", headers=admin).json()["team"][0]["is_owner"] is True
 
 
 def test_team_accounts_sign_in_with_email_only(client):

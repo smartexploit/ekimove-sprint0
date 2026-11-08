@@ -63,7 +63,7 @@ function TemporaryPassword({ name, email, password, onDone }) {
   )
 }
 
-function AddMember({ permissions, presets, domain, onAdded }) {
+function AddMember({ permissions, presets, domain, canAddSuper, onAdded }) {
   const [chosen, setChosen] = useState([])
   const [role, setRole] = useState('staff')
   const [confirmSuper, setConfirmSuper] = useState(false)
@@ -121,7 +121,7 @@ function AddMember({ permissions, presets, domain, onAdded }) {
       <fieldset className="stack stack-sm" style={{ border: 0, padding: 0, margin: 0 }}>
         <legend className="field-label" style={{ marginBottom: 8 }}>Access level</legend>
         <div className="chip-row">
-          {[['staff', 'Staff: chosen areas'], ['super_admin', 'Super-admin: full access']].map(([value, label]) => (
+          {[['staff', 'Staff: chosen areas'], ...(canAddSuper ? [['super_admin', 'Super-admin: full access']] : [])].map(([value, label]) => (
             <label key={value} className={`chip ${role === value ? 'is-active' : ''}`}>
               <input type="radio" className="sr-only" name="team-role" value={value} checked={role === value}
                 onChange={() => { setRole(value); setError('') }} />
@@ -133,9 +133,9 @@ function AddMember({ permissions, presets, domain, onAdded }) {
       {superAdmin ? (
         <div className="card card-outline stack stack-sm" style={{ padding: 14 }}>
           <p className="small">
-            A super-admin can do everything you can: change fares and settings, approve payouts, suspend accounts
-            and add or remove team members, including you. Only give this to your co-founder or someone you fully trust.
-            The other super-admins are notified.
+            A super-admin can do almost everything you can: change fares and settings, approve payouts, suspend
+            accounts and manage staff. They can’t change, suspend or remove your owner account, or add other
+            super-admins. Only give this to your co-founder or someone you fully trust.
           </p>
           <label className="check-row" htmlFor="team-confirm-super">
             <input id="team-confirm-super" type="checkbox" checked={confirmSuper}
@@ -176,13 +176,17 @@ function AddMember({ permissions, presets, domain, onAdded }) {
   )
 }
 
-function MemberCard({ member, permissions, isSelf, onChanged, onPassword }) {
+function MemberCard({ member, permissions, isSelf, viewerIsOwner, onChanged, onPassword }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(member.permissions)
-  const [confirmRemove, setConfirmRemove] = useState(false)
+  const [confirm, setConfirm] = useState(null) // 'remove' | 'suspend'
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const staff = member.role === 'staff'
+  const first = member.full_name.split(' ')[0]
+  const suspended = !member.is_active
+  // The owner can't be changed by anyone; other super-admins only by the owner.
+  const locked = member.is_owner || (!staff && !viewerIsOwner)
 
   async function run(path, options, after) {
     setBusy(true)
@@ -190,6 +194,7 @@ function MemberCard({ member, permissions, isSelf, onChanged, onPassword }) {
     try {
       const result = await apiRequest(path, options)
       after?.(result)
+      setConfirm(null)
       onChanged()
     } catch (err) {
       setError(err.message || 'That did not work.')
@@ -198,14 +203,21 @@ function MemberCard({ member, permissions, isSelf, onChanged, onPassword }) {
     }
   }
 
+  const badge = member.is_owner
+    ? ['badge-solid', 'Owner']
+    : staff ? ['badge-gold', 'Staff'] : ['badge-green', 'Super-admin']
+
   return (
-    <article className="card stack stack-sm team-card">
+    <article className={`card stack stack-sm team-card ${suspended ? 'is-suspended' : ''}`}>
       <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div style={{ minWidth: 0 }}>
           <h3 className="card-title">{member.full_name}</h3>
-          <p className="muted small">{[member.phone, member.email].filter(Boolean).join(' · ')}</p>
+          <p className="muted small">{[member.email, member.phone].filter(Boolean).join(' · ')}</p>
         </div>
-        <span className={`badge ${staff ? 'badge-gold' : 'badge-green'}`}>{staff ? 'Staff' : 'Super-admin'}</span>
+        <div className="row" style={{ gap: 6 }}>
+          {suspended && <span className="badge badge-red">Suspended</span>}
+          <span className={`badge ${badge[0]}`}>{badge[1]}</span>
+        </div>
       </div>
       <div className="chip-row">
         {staff
@@ -213,7 +225,9 @@ function MemberCard({ member, permissions, isSelf, onChanged, onPassword }) {
           : <span className="chip is-static">Everything</span>}
       </div>
       <p className="muted small">
-        {member.must_change_password ? 'Hasn’t set their own password yet' : formatWhen(member.last_sign_in)}
+        {suspended
+          ? 'Can’t sign in until reactivated.'
+          : member.must_change_password ? 'Hasn’t set their own password yet' : formatWhen(member.last_sign_in)}
       </p>
       <Alert tone="error">{error}</Alert>
       {staff && editing && (
@@ -231,31 +245,44 @@ function MemberCard({ member, permissions, isSelf, onChanged, onPassword }) {
           </div>
         </div>
       )}
-      {!isSelf && confirmRemove && (
+      {confirm && (
         <div className="card card-outline stack stack-sm" style={{ padding: 12 }}>
           <p className="small">
-            Remove {member.full_name.split(' ')[0]}’s {staff ? 'console' : 'super-admin'} access? They can no longer open the
-            console, and any remembered phones are signed out. You can add them back later with the same work email.
+            {confirm === 'suspend'
+              ? `Suspend ${first}? They’re signed out everywhere and can’t sign in until you reactivate them. Nothing else changes.`
+              : `Remove ${first}’s ${staff ? 'console' : 'super-admin'} access? They can no longer open the console, and any remembered phones are signed out. You can add them back later with the same work email.`}
           </p>
           <div className="row">
             <button type="button" className="btn btn-sm btn-danger-outline" disabled={busy}
-              onClick={() => run(`/api/v1/admin/staff/${member.id}/remove-access`, { method: 'POST' })}>
-              Remove access
+              onClick={() => run(`/api/v1/admin/staff/${member.id}/${confirm === 'suspend' ? 'suspend' : 'remove-access'}`,
+                { method: 'POST' })}>
+              {confirm === 'suspend' ? 'Suspend' : 'Remove access'}
             </button>
-            <button type="button" className="btn btn-sm btn-quiet" onClick={() => setConfirmRemove(false)}>Keep</button>
+            <button type="button" className="btn btn-sm btn-quiet" onClick={() => setConfirm(null)}>Cancel</button>
           </div>
         </div>
       )}
-      {isSelf && <p className="small muted">This is you.</p>}
-      {!isSelf && !editing && !confirmRemove && (
+      {isSelf && <p className="small muted">{member.is_owner ? 'This is you, the account owner. Nobody can change or remove this account.' : 'This is you.'}</p>}
+      {!isSelf && locked && (
+        <p className="small muted">
+          {member.is_owner ? 'Account owner. Nobody can change, suspend or remove this account.' : 'Only the account owner can change a super-admin.'}
+        </p>
+      )}
+      {!isSelf && !locked && !editing && !confirm && (
         <div className="row">
-          {staff && <button type="button" className="btn btn-sm" onClick={() => setEditing(true)}>Change access</button>}
-          <button type="button" className="btn btn-sm" disabled={busy}
-            onClick={() => run(`/api/v1/admin/staff/${member.id}/reset-password`, { method: 'POST' },
-              (result) => onPassword(member, result.temporary_password))}>
-            New password
-          </button>
-          <button type="button" className="btn btn-sm btn-quiet" onClick={() => setConfirmRemove(true)}>Remove access</button>
+          {staff && !suspended && <button type="button" className="btn btn-sm" onClick={() => setEditing(true)}>Change access</button>}
+          {!suspended && (
+            <button type="button" className="btn btn-sm" disabled={busy}
+              onClick={() => run(`/api/v1/admin/staff/${member.id}/reset-password`, { method: 'POST' },
+                (result) => onPassword(member, result.temporary_password))}>
+              New password
+            </button>
+          )}
+          {suspended
+            ? <button type="button" className="btn btn-sm btn-primary" disabled={busy}
+                onClick={() => run(`/api/v1/admin/staff/${member.id}/reactivate`, { method: 'POST' })}>Reactivate</button>
+            : <button type="button" className="btn btn-sm" onClick={() => setConfirm('suspend')}>Suspend</button>}
+          <button type="button" className="btn btn-sm btn-quiet" onClick={() => setConfirm('remove')}>Remove access</button>
         </div>
       )}
     </article>
@@ -288,7 +315,7 @@ export default function AdminTeamPage() {
         )}
         {data && (
           <div className="team-layout">
-            <AddMember permissions={data.permissions} presets={data.presets} domain={data.email_domain}
+            <AddMember permissions={data.permissions} presets={data.presets} domain={data.email_domain} canAddSuper={data.you_are_owner}
               onAdded={(result, email) => {
                 setSecret({ name: result.member.full_name, email, password: result.temporary_password })
                 load()
@@ -297,7 +324,7 @@ export default function AdminTeamPage() {
               <h2 id="team-list-title" className="section-title">Your team ({data.team.length})</h2>
               {data.team.map((member) => (
                 <MemberCard key={`${member.id}-${member.permissions.join()}`} member={member} permissions={data.permissions}
-                  isSelf={member.id === user?.id} onChanged={load}
+                  isSelf={member.id === user?.id} viewerIsOwner={data.you_are_owner} onChanged={load}
                   onPassword={(m, password) => setSecret({ name: m.full_name, email: m.email, password })} />
               ))}
             </section>
