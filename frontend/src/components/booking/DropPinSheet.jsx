@@ -7,7 +7,9 @@ import { apiRequest } from '../../services/authService.js'
  * Full-screen map for a spot that isn't on the list: tap the map (or use
  * your location), then say how the driver will recognise it.
  */
-export default function DropPinSheet({ title, initial, allowHere = false, onCancel, onDone }) {
+export default function DropPinSheet({
+  title, initial, allowHere = false, onCancel, onDone, question = 'How will the driver find you?',
+}) {
   const [pin, setPin] = useState(initial ? { latitude: initial.latitude, longitude: initial.longitude } : null)
   const [label, setLabel] = useState(initial?.label || '')
   const [typed, setTyped] = useState(Boolean(initial?.label))
@@ -84,7 +86,7 @@ export default function DropPinSheet({ title, initial, allowHere = false, onCanc
           </button>
         )}
         <label className="field">
-          <span className="field-label">How will the driver find you?</span>
+          <span className="field-label">{question}</span>
           <input ref={inputRef} className="input" value={label} maxLength={120}
             placeholder="e.g. Blue gate opposite Mercy Pharmacy"
             onChange={(event) => {

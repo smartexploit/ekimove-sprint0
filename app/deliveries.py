@@ -34,6 +34,7 @@ from app.config import settings
 from app.contacts import ContactError, clean_name, clean_phone
 from app.database import get_db
 from app.models import AuditLog, Place, PlaceFare, Ride, RideRequest, ServiceArea, User, Zone
+from app.points import PointIn, Stop, distance_quotes, resolve_stop
 from app.scheduling import check_pickup_time, iso_utc
 from app.verification import ensure_passenger_may_book
 
@@ -111,10 +112,49 @@ def list_delivery_options(origin_place_id: int, destination_place_id: int, db: S
     return {"enabled": True, "options": options}
 
 
+def point_delivery_options(db: Session, start: dict, end: dict) -> tuple[list[dict], int]:
+    """Delivery prices when a pickup or drop-off is a dropped pin (per km)."""
+    quotes, meters = distance_quotes(db, start, end, 1)
+    by_vehicle = {q["vehicle_type"]: q for q in quotes}
+    extras = delivery_rules(db)
+    options = []
+    for size, meta in SIZES.items():
+        vehicle = None
+        if meta["vehicle"] == "motorbike":
+            vehicle = next((v for v in by_vehicle if is_motorcycle(v)), None)
+        if vehicle is None:
+            vehicle = next((v for v in CAR_TYPES if v in by_vehicle), None)
+        if vehicle is None:
+            continue
+        price = (Decimal(by_vehicle[vehicle]["quoted_fare"]) + Decimal(extras.get(f"{size}_extra", 0)))
+        options.append({"size": size, "label": meta["label"], "hint": meta["hint"], "vehicle_type": vehicle,
+                        "price": str(price.quantize(Decimal("0.01"))), "distance_km": round(meters / 1000, 1)})
+    return options, meters
+
+
+class PointDeliveryQuote(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    origin: Stop
+    destination: Stop
+
+
+@router.post("/point-delivery-options", tags=["booking"])
+def list_point_delivery_options(payload: PointDeliveryQuote, db: Session = Depends(get_db)) -> dict:
+    if not delivery_rules(db)["enabled"]:
+        return {"enabled": False, "options": []}
+    start = resolve_stop(db, payload.origin, "pickup")
+    end = resolve_stop(db, payload.destination, "drop-off")
+    options, _meters = point_delivery_options(db, start, end)
+    return {"enabled": True, "options": options}
+
+
 class DeliveryCreate(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
-    origin_place_id: int = Field(gt=0)
-    destination_place_id: int = Field(gt=0)
+    origin_place_id: int | None = Field(default=None, gt=0)
+    destination_place_id: int | None = Field(default=None, gt=0)
+    # A pin dropped on the map for a spot that isn't on the list (priced per km).
+    origin_point: PointIn | None = None
+    destination_point: PointIn | None = None
     size: Literal["small", "medium", "large"]
     description: str = Field(min_length=3, max_length=300)
     recipient_name: str = Field(min_length=2, max_length=160)
@@ -168,19 +208,42 @@ def create_delivery(payload: DeliveryCreate, current_user: User = Depends(get_cu
         recipient_name = clean_name(payload.recipient_name, label="recipient's name")
     except ContactError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
-    origin, destination, _, _ = _active_route(db, payload.origin_place_id, payload.destination_place_id)
-    option = next((o for o in delivery_options(db, origin.id, destination.id) if o["size"] == payload.size), None)
+    pins = payload.origin_point is not None or payload.destination_point is not None
+    if pins:
+        start = resolve_stop(db, Stop(place_id=payload.origin_place_id, point=payload.origin_point), "pickup")
+        end = resolve_stop(db, Stop(place_id=payload.destination_place_id, point=payload.destination_point),
+                           "drop-off")
+        options, meters = point_delivery_options(db, start, end)
+        origin_place, destination_place = start["place"], end["place"]
+        origin_text, destination_text = start["name"], end["name"]
+    else:
+        if payload.origin_place_id is None or payload.destination_place_id is None:
+            raise HTTPException(status_code=422, detail="Choose a pickup and a drop-off.")
+        origin_place, destination_place, _, _ = _active_route(db, payload.origin_place_id,
+                                                              payload.destination_place_id)
+        options = delivery_options(db, origin_place.id, destination_place.id)
+        origin_text, destination_text = origin_place.name, destination_place.name
+    option = next((o for o in options if o["size"] == payload.size), None)
     if option is None:
         raise HTTPException(status_code=422, detail="Deliveries of this size aren't priced for this route yet.")
     scheduled_for = check_pickup_time(db, payload.scheduled_for)
     request = RideRequest(
-        passenger_user_id=current_user.id, origin_place_id=origin.id, destination_place_id=destination.id,
-        origin_text=origin.name, destination_text=destination.name, vehicle_type=option["vehicle_type"],
+        passenger_user_id=current_user.id,
+        origin_place_id=origin_place.id if origin_place else None,
+        destination_place_id=destination_place.id if destination_place else None,
+        origin_text=origin_text, destination_text=destination_text, vehicle_type=option["vehicle_type"],
         passenger_count=1, quoted_fare=Decimal(option["price"]), status="requested", service_type="delivery",
         load_description=payload.description, delivery_size=payload.size, recipient_name=recipient_name,
         recipient_phone=recipient_phone, delivery_notes=payload.notes or None, fragile=payload.fragile,
         scheduled_for=scheduled_for, dispatch_status="scheduled" if scheduled_for else None,
+        pricing="distance" if pins else "route",
     )
+    if pins:
+        request.distance_m = meters
+        if origin_place is None:
+            request.origin_latitude, request.origin_longitude = start["latitude"], start["longitude"]
+        if destination_place is None:
+            request.destination_latitude, request.destination_longitude = end["latitude"], end["longitude"]
     db.add(request)
     db.flush()
     if payload.promo_code and payload.promo_code.strip():

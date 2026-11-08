@@ -4,6 +4,9 @@ import { CheckCircle2, Package } from 'lucide-react'
 import AppShell from '../../layouts/AppShell.jsx'
 import Alert from '../../components/ui/Alert.jsx'
 import PlacePicker from '../../components/booking/PlacePicker.jsx'
+import DropPinSheet from '../../components/booking/DropPinSheet.jsx'
+import { bookingStops, pinValue } from '../../utils/stops.js'
+import { apiRequest } from '../../services/authService.js'
 import Select from '../../components/ui/Select.jsx'
 import WhenPicker from '../../components/booking/WhenPicker.jsx'
 import PromoField from '../../components/booking/PromoField.jsx'
@@ -31,6 +34,8 @@ export default function SendPackagePage() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [done, setDone] = useState(null)
+  const [dropping, setDropping] = useState(null)
+  const [pinsEnabled, setPinsEnabled] = useState(false)
   const rules = useBookingRules()
   const trip = useTripOptions({
     areaId: form.service_area_id, originId: form.origin_place_id, destinationId: form.destination_place_id,
@@ -41,6 +46,7 @@ export default function SendPackagePage() {
 
   useEffect(() => {
     let active = true
+    apiRequest('/api/v1/points/settings').then((d) => active && setPinsEnabled(Boolean(d?.enabled))).catch(() => {})
     Promise.resolve().then(() => listSavedPlaces()).then((list) => active && Array.isArray(list) && setSaved(list)).catch(() => {})
     Promise.resolve().then(() => getMyPromos()).then((d) => active && Array.isArray(d?.codes) && setGiftCodes(d.codes)).catch(() => {})
     return () => {
@@ -85,8 +91,7 @@ export default function SendPackagePage() {
     setError('')
     try {
       setDone(await createDelivery({
-        origin_place_id: Number(form.origin_place_id),
-        destination_place_id: Number(form.destination_place_id),
+        ...bookingStops(form.origin_place_id, form.destination_place_id),
         size: form.size,
         description: form.description.trim(),
         recipient_name: form.recipient_name.trim().replace(/\s+/g, ' '),
@@ -158,10 +163,12 @@ export default function SendPackagePage() {
               </div>
               <PlacePicker label="Pickup" name="origin_place_id" value={form.origin_place_id} places={places}
                 onChange={(id) => set('origin_place_id', id)} disabled={!trip.effectiveAreaId || loadingPlaces}
-                loading={loadingPlaces} placeholder="Where the rider collects it" required />
+                loading={loadingPlaces} placeholder="Where the rider collects it" required
+                onDropPin={pinsEnabled ? (current) => setDropping({ field: 'origin_place_id', current }) : null} />
               <PlacePicker label="Drop-off" name="destination_place_id" value={form.destination_place_id} places={places}
                 onChange={(id) => set('destination_place_id', id)} disabled={!trip.effectiveAreaId || loadingPlaces}
-                loading={loadingPlaces} placeholder="Where it goes" required />
+                loading={loadingPlaces} placeholder="Where it goes" required
+                onDropPin={pinsEnabled ? (current) => setDropping({ field: 'destination_place_id', current }) : null} />
             </div>
             <SavedPlacesBar saved={saved} places={places} originId={form.origin_place_id}
               destinationId={form.destination_place_id} onPick={(name, id) => set(name, id)}
@@ -206,7 +213,9 @@ export default function SendPackagePage() {
                   </span>
                   <span className="choice-body">
                     <span className="choice-title">{option.label}</span>
-                    <span className="choice-sub">{option.hint}</span>
+                    <span className="choice-sub">
+                      {option.hint}{option.distance_km != null && ` · about ${option.distance_km} km`}
+                    </span>
                   </span>
                   <span className="choice-price">{formatNaira(option.price, { decimals: 0 })}</span>
                 </label>
@@ -241,6 +250,18 @@ export default function SendPackagePage() {
             </div>
           </div>
         </form>
+      )}
+      {dropping && (
+        <DropPinSheet
+          title={dropping.field === 'origin_place_id' ? 'Drop the pickup pin' : 'Drop the drop-off pin'}
+          question={dropping.field === 'origin_place_id' ? 'How will the rider find the package?' : 'How will the rider find the recipient?'}
+          initial={dropping.current} allowHere={dropping.field === 'origin_place_id'}
+          onCancel={() => setDropping(null)}
+          onDone={(point) => {
+            set(dropping.field, pinValue(point))
+            set('size', '')
+            setDropping(null)
+          }} />
       )}
     </AppShell>
   )

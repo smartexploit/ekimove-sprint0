@@ -6211,3 +6211,37 @@ def test_road_distance_and_pin_description(client, monkeypatch):
                                                {"latitude": 7.62, "longitude": 5.22}, 1.35)
     assert source == "estimate" and meters > 3000
     assert client.get("/api/v1/points/describe?latitude=7.63&longitude=5.23", headers=passenger).json() == {"label": None}
+
+
+def test_package_to_a_dropped_pin(client, monkeypatch):
+    monkeypatch.setattr(settings, "geoapify_api_key", None)
+    admin = login(client, *ADMIN_LOGIN)
+    passenger = login(client, *PASSENGER_LOGIN)
+    area_id, (a, b, c), _manual = _calc_area(client)
+    _calc_area.area_id = area_id
+    pin = {"latitude": 7.6250, "longitude": 5.2200, "label": "Green shop by the junction"}
+    body = {"origin": {"place_id": a}, "destination": {"point": pin}}
+    _enable_pins(client, admin, allow=False)
+    assert client.post("/api/v1/point-delivery-options", json=body).status_code == 409
+    _enable_pins(client, admin)
+    quoted = client.post("/api/v1/point-delivery-options", json=body)
+    assert quoted.status_code == 200, quoted.text
+    sizes = {o["size"]: o for o in quoted.json()["options"]}
+    assert sizes["small"]["vehicle_type"] == "motorcycle" and sizes["small"]["price"] == "1500.00"
+    assert sizes["large"]["vehicle_type"] == "car" and 3.6 < sizes["large"]["distance_km"] < 3.9
+    sent = client.post("/api/v1/deliveries", headers=passenger, json={
+        "origin_place_id": a, "destination_point": pin, "size": "small", "description": "A phone in a box",
+        "recipient_name": "Ada Bello", "recipient_phone": "0803 555 1234", "no_prohibited_items": True})
+    assert sent.status_code == 201, sent.text
+    assert sent.json()["destination_text"] == "Green shop by the junction" and sent.json()["quoted_fare"] == "1500.00"
+    with session_for(client) as db:
+        request = db.get(RideRequest, sent.json()["id"])
+        assert request.service_type == "delivery" and request.pricing == "distance"
+        assert request.destination_place_id is None and request.destination_latitude == 7.625
+    # Listed places still work as before, and an empty choice is refused.
+    with session_for(client) as db:
+        db.get(RideRequest, sent.json()["id"]).status = "cancelled"
+        db.commit()
+    assert client.post("/api/v1/deliveries", headers=passenger, json={
+        "size": "small", "description": "A phone in a box", "recipient_name": "Ada Bello",
+        "recipient_phone": "0803 555 1234", "no_prohibited_items": True}).status_code == 422
