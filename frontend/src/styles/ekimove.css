@@ -4793,3 +4793,55 @@ a.chip {
   background: var(--green-50);
   line-height: 1.45;
 }
+
+/* ---------- Turn on notifications prompt ---------- */
+.alerts-prompt {
+  position: relative;
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 14px 54px 14px 14px;
+  border: 1px solid var(--gold-500);
+  border-radius: var(--radius);
+  background: var(--gold-100);
+}
+
+.alerts-prompt-icon {
+  display: grid;
+  flex: 0 0 40px;
+  place-items: center;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--gold-500);
+  color: var(--green-900);
+}
+
+.alerts-prompt-body h2 {
+  margin: 0 0 4px;
+  font-size: 16px;
+}
+
+.alerts-prompt-body p {
+  margin: 0 0 10px;
+  color: var(--ink-700);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.alerts-prompt-error {
+  color: var(--laterite-700) !important;
+}
+
+.alerts-prompt-close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+}
+
+.pin-input {
+  max-width: 220px;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: 0.4em;
+  text-align: center;
+}

@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   loginPassenger,
   getCurrentUser,
+  getDevice,
 } from '../../services/authService.js'
 import AuthLayout from '../../layouts/AuthLayout.jsx'
 import Alert from '../../components/ui/Alert.jsx'
@@ -25,6 +26,8 @@ export default function LoginPage() {
   const returnTo = safeReturnPath(location.state?.from)
   const contact = useContactMethod(location.state?.identifier)
   const [password, setPassword] = useState('')
+  const [remember, setRemember] = useState(true)
+  const remembered = getDevice()
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -39,7 +42,7 @@ export default function LoginPage() {
     setLoading(true)
 
     try {
-      await loginPassenger({ identifier: contact.identifier, password })
+      await loginPassenger({ identifier: contact.identifier, password, remember })
       const user = await getCurrentUser()
       const home = homePathForRole(user.role)
       const destination =
@@ -70,6 +73,13 @@ export default function LoginPage() {
       )}
       {returnTo && (
         <Alert tone="info">Sign in to continue with your trip.</Alert>
+      )}
+      {location.state?.notice && <Alert tone="info">{location.state.notice}</Alert>}
+      {remembered && (
+        <Alert tone="info">
+          {remembered.first_name ? `Welcome back, ${remembered.first_name}. ` : ''}
+          <Link className="text-link" to="/unlock">Continue with your password or PIN</Link>
+        </Alert>
       )}
       {location.state?.passwordReset && (
         <Alert tone="success">Your password has been changed. Sign in with your new password.</Alert>
@@ -108,6 +118,12 @@ export default function LoginPage() {
             required
           />
         </div>
+
+        <label className="check-row">
+          <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} />
+          <span>Keep me signed in on this phone <span className="muted small">(you’ll only need your password or a
+            PIN to get back in)</span></span>
+        </label>
 
         <Alert tone="error">{error}</Alert>
 

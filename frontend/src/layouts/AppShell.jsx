@@ -9,10 +9,11 @@ import {
   Wallet,
 } from 'lucide-react'
 import useSupportUnread from '../hooks/useSupportUnread.js'
+import AlertsPrompt from '../components/account/AlertsPrompt.jsx'
 import OfferWatcher from '../components/driver/OfferWatcher.jsx'
 import Logo from '../components/brand/Logo.jsx'
 import AtonaFloatingAssistant from '../components/AtonaFloatingAssistant.jsx'
-import { logoutPassenger } from '../services/authService.js'
+import { signOutCompletely } from '../services/authService.js'
 import { firstName, initials } from '../utils/format.js'
 import { homePathForRole } from '../utils/roles.js'
 
@@ -53,7 +54,7 @@ export default function AppShell({
   const unread = useSupportUnread(Boolean(user))
 
   function signOut() {
-    logoutPassenger()
+    signOutCompletely()
     navigate('/login', { replace: true })
   }
 
@@ -106,6 +107,7 @@ export default function AppShell({
       <main className="app-main" id="main">
         <div className="container">
           {role === 'driver' && <OfferWatcher />}
+          <AlertsPrompt role={role} />
           {!hideHead && (title || actions) && (
             <div className="page-head">
               <div>

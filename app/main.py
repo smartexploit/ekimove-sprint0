@@ -19,6 +19,7 @@ from app.scheduling import router as scheduling_router
 from app.trip_chat import router as trip_chat_router
 from app.data_rights import router as data_rights_router
 from app.site_content import router as site_content_router
+from app.device_sessions import remember_device, router as device_sessions_router
 from app.points import PointIn, Stop, distance_quotes, resolve_stop, router as points_router
 from app.calls import router as calls_router
 from app.launch_checklist import router as launch_checklist_router
@@ -116,6 +117,7 @@ app.include_router(data_rights_router)
 app.include_router(deliveries_router)
 app.include_router(site_content_router)
 app.include_router(points_router)
+app.include_router(device_sessions_router)
 app.include_router(calls_router)
 app.include_router(launch_checklist_router)
 app.include_router(fare_calculator_router)
@@ -127,6 +129,8 @@ class LoginRequest(BaseModel):
     identifier: str | None = Field(default=None, min_length=3, max_length=254)
     phone: str | None = Field(default=None, min_length=3, max_length=254)
     password: str = Field(min_length=1, max_length=256)
+    # "Keep me signed in on this phone" (passengers and drivers).
+    remember: bool = False
 
 
 class RegisterRequest(BaseModel):
@@ -148,6 +152,8 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: int
+    # Returned when the person chose "Keep me signed in" (see device_sessions).
+    device_token: str | None = None
 
 
 class CurrentUserResponse(BaseModel):
@@ -804,11 +810,13 @@ def login(
     # Sign-in log for traceability (time, IP address and device).
     db.add(AuditLog(actor_user_id=user.id, action="auth.login", entity_type="user",
                     entity_id=str(user.id), details=client_fingerprint(request)))
+    device_token = remember_device(db, user, client_fingerprint(request)) if payload.remember else None
     db.commit()
     token = create_access_token(user)
     return TokenResponse(
         access_token=token,
         expires_in=settings.access_token_expire_minutes * 60,
+        device_token=device_token,
     )
 @app.get(
     "/api/v1/auth/me",

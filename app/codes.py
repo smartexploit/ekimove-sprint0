@@ -24,6 +24,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app import messaging
+from app.device_sessions import forget_all
 from app.auth import get_current_user, hash_password, verify_password
 from app.client_ip import client_ip
 from app.config import settings
@@ -278,6 +279,7 @@ def confirm_password_reset(payload: ResetConfirm, request: Request, db: Session 
         raise HTTPException(status_code=422, detail=weak)
     record = check_code(db, user=user, purpose="reset_password", code=payload.code)
     user.password_hash = hash_password(payload.new_password)
+    forget_all(db, user.id)  # remembered phones must sign in again
     user.must_change_password = False
     _mark_verified(user, record)
     db.add(AuditLog(actor_user_id=user.id, action="password.reset", entity_type="user", entity_id=str(user.id),

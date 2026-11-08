@@ -5,7 +5,7 @@ import Alert from '../ui/Alert.jsx'
 import PasswordInput from '../ui/PasswordInput.jsx'
 import CodeEntry from './CodeEntry.jsx'
 import { changePassword, confirmVerifyCode, getProfile, sendVerifyCode } from '../../services/accountService.js'
-import { logoutPassenger } from '../../services/authService.js'
+import { signOutCompletely } from '../../services/authService.js'
 
 function NewPasswordStep({ onDone }) {
   const [form, setForm] = useState({ current: '', next: '', confirm: '' })
@@ -138,7 +138,7 @@ export default function AccountGate() {
       <div className="session-card">
         {step === 'password' ? <NewPasswordStep onDone={reload} /> : <ConfirmContactStep profile={profile} onDone={reload} />}
         <button type="button" className="btn btn-sm" onClick={() => {
-          logoutPassenger()
+          signOutCompletely()
           navigate('/login', { replace: true })
         }}>
           Sign out

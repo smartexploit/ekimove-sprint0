@@ -151,6 +151,7 @@ def bypass_redis_rate_limiter_in_tests(monkeypatch):
 
     rate_limit_module.reset_memory_counters()
     monkeypatch.setattr(settings, "geocoding_enabled", False)  # no map lookups in tests
+    monkeypatch.setattr(settings, "call_ring_repeat_seconds", 0)  # no background ring threads
     monkeypatch.setattr(settings, "redis_url", None)
     monkeypatch.setattr(settings, "redis_host", None)
     monkeypatch.setattr(
@@ -6245,3 +6246,117 @@ def test_package_to_a_dropped_pin(client, monkeypatch):
     assert client.post("/api/v1/deliveries", headers=passenger, json={
         "size": "small", "description": "A phone in a box", "recipient_name": "Ada Bello",
         "recipient_phone": "0803 555 1234", "no_prohibited_items": True}).status_code == 422
+
+
+# ---------- Keep me signed in (remembered phones) ----------
+def _remember(client, phone, password):
+    reply = client.post("/api/v1/auth/login", json={"phone": phone, "password": password, "remember": True})
+    assert reply.status_code == 200, reply.text
+    return reply.json()
+
+
+def test_remembered_phone_unlocks_with_password_or_pin(client):
+    signed = _remember(client, *PASSENGER_LOGIN)
+    token = signed["device_token"]
+    assert token and len(token) > 30
+    plain = client.post("/api/v1/auth/login", json={"phone": PASSENGER_LOGIN[0], "password": PASSENGER_LOGIN[1]})
+    assert plain.json()["device_token"] is None  # only when asked
+    info = client.post("/api/v1/auth/device", json={"device_token": token}).json()
+    assert info["first_name"] and info["role"] == "passenger" and info["has_pin"] is False
+    assert "•••" in info["account"] and PASSENGER_LOGIN[0] not in info["account"]
+    # Unlock with the password.
+    unlocked = client.post("/api/v1/auth/unlock", json={"device_token": token, "password": PASSENGER_LOGIN[1]})
+    assert unlocked.status_code == 200, unlocked.text
+    headers = {"Authorization": f"Bearer {unlocked.json()['access_token']}"}
+    assert client.get("/api/v1/me", headers=headers).status_code == 200
+    # Set a PIN; easy PINs are refused; a PIN needs a signed-in session for this phone.
+    assert client.post("/api/v1/me/device-pin", json={"device_token": token, "pin": "1234"},
+                       headers=headers).status_code == 422
+    assert client.post("/api/v1/me/device-pin", json={"device_token": token, "pin": "4826"}).status_code == 401
+    assert client.post("/api/v1/me/device-pin", json={"device_token": token, "pin": "4826"},
+                       headers=headers).json() == {"has_pin": True}
+    driver = login(client, *DRIVER_LOGIN)
+    assert client.post("/api/v1/me/device-pin", json={"device_token": token, "pin": "4826"},
+                       headers=driver).status_code == 401  # someone else's phone token
+    ok = client.post("/api/v1/auth/unlock", json={"device_token": token, "pin": "4826"})
+    assert ok.status_code == 200 and ok.json()["has_pin"] is True
+    # A PIN without this phone's token is useless.
+    assert client.post("/api/v1/auth/unlock", json={"device_token": "x" * 43, "pin": "4826"}).status_code == 401
+    # Wrong tries count down, and five forget the phone.
+    for left in (4, 3, 2, 1):
+        wrong = client.post("/api/v1/auth/unlock", json={"device_token": token, "pin": "9071"})
+        assert wrong.status_code == 401 and f"{left} tr" in wrong.json()["detail"]
+    last = client.post("/api/v1/auth/unlock", json={"device_token": token, "pin": "9071"})
+    assert "sign in again" in last.json()["detail"]
+    assert client.post("/api/v1/auth/unlock", json={"device_token": token, "pin": "4826"}).status_code == 401
+    assert client.post("/api/v1/auth/device", json={"device_token": token}).status_code == 401
+
+
+def test_remembered_phones_end_on_password_change_and_sign_out(client):
+    first = _remember(client, *PASSENGER_LOGIN)["device_token"]
+    second = _remember(client, *PASSENGER_LOGIN)["device_token"]
+    # Signing out on one phone forgets only that phone.
+    assert client.post("/api/v1/auth/forget-device", json={"device_token": first}).json() == {"forgotten": True}
+    assert client.post("/api/v1/auth/device", json={"device_token": first}).status_code == 401
+    assert client.post("/api/v1/auth/device", json={"device_token": second}).status_code == 200
+    # Changing the password forgets every phone.
+    headers = login(client, *PASSENGER_LOGIN)
+    changed = client.post("/api/v1/me/password", headers=headers, json={
+        "current_password": PASSENGER_LOGIN[1], "new_password": "A-Brand-New-Password-77!"})
+    assert changed.status_code == 200, changed.text
+    assert client.post("/api/v1/auth/device", json={"device_token": second}).status_code == 401
+    # Staff accounts never get a remembered phone.
+    staff = client.post("/api/v1/auth/login", json={"phone": ADMIN_LOGIN[0], "password": ADMIN_LOGIN[1],
+                                                    "remember": True}).json()
+    assert staff["device_token"] is None
+    # Suspended accounts can't unlock.
+    token = _remember(client, *DRIVER_LOGIN)["device_token"]
+    with session_for(client) as db:
+        db.scalar(select(User).where(User.phone == DRIVER_LOGIN[0])).is_active = False
+        db.commit()
+    assert client.post("/api/v1/auth/unlock", json={"device_token": token, "password": DRIVER_LOGIN[1]}).status_code == 401
+
+
+
+def test_call_keeps_ringing_until_answered(client, quiet_messaging_and_push, monkeypatch):
+    import time as time_module
+
+    passenger, driver, _admin, ride_id = _call_parties(client)
+    subscribe(client, driver, "https://fcm.googleapis.com/fcm/send/driver-ring")
+    monkeypatch.setattr(settings, "call_ring_repeat_seconds", 0)
+    started = {}
+
+    class InlineThread:
+        def __init__(self, target, name, daemon):
+            started["run"] = target
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(calls_module.threading, "Thread", InlineThread)
+    monkeypatch.setattr(settings, "call_ring_repeat_seconds", 1)
+    naps = []
+    monkeypatch.setattr(calls_module.time, "sleep", lambda s: naps.append(s))
+    clock = iter([0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] + list(range(11, 200)))
+    monkeypatch.setattr(calls_module.time, "monotonic", lambda: next(clock))
+    call_id = client.post(f"/api/v1/rides/{ride_id}/calls", headers=passenger).json()["call"]["id"]
+    rings = lambda: [p for p in quiet_messaging_and_push if "driver-ring" in p["endpoint"]]
+    assert len(rings()) == 1
+    # Answer after the reminder loop has sent two more rings.
+    original_get = calls_module.Session
+
+    sent_before_answer = {"n": 0}
+
+    def fake_session(bind):
+        sent_before_answer["n"] += 1
+        if sent_before_answer["n"] == 3:
+            client.post(f"/api/v1/calls/{call_id}/accept", headers=driver)
+        return original_get(bind=bind)
+
+    monkeypatch.setattr(calls_module, "Session", fake_session)
+    started["run"]()
+    reminders = rings()[1:]
+    assert len(reminders) == 2 and all(json.loads(r["payload"])["call"] for r in reminders)
+    assert all(json.loads(r["payload"])["tag"] == f"call-{call_id}" for r in reminders)
+    assert naps and all(n == 1 for n in naps)
+    del time_module

@@ -21,7 +21,7 @@ const dist = join(root, 'dist')
 const PRIVATE_PATHS = [
   '/admin', '/dashboard', '/book-ride', '/my-rides', '/payments', '/move-a-load', '/invite', '/send-package',
   '/profile', '/support', '/receipts', '/driver/status', '/driver/trips', '/driver/earnings', '/t/', '/login',
-  '/register', '/forgot-password', '/api/',
+  '/register', '/forgot-password', '/unlock', '/api/',
 ]
 
 const escapeHtml = (text) => String(text ?? '')

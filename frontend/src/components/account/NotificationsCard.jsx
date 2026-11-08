@@ -11,8 +11,8 @@ import {
 } from '../../utils/push.js'
 
 const WHAT = {
-  driver: 'new trip offers, payments and support replies',
-  passenger: 'your driver’s arrival, payments, quotes and support replies',
+  driver: 'in-app calls and messages, new trip offers, payments and support replies',
+  passenger: 'in-app calls and messages, your driver’s arrival, payments, quotes and support replies',
   super_admin: 'SOS alerts and new support messages',
 }
 

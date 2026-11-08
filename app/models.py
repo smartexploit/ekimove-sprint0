@@ -763,3 +763,22 @@ class TripCallSignal(Base):
     kind: Mapped[str] = mapped_column(String(12))
     payload: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class DeviceSession(Base):
+    """"Keep me signed in" on one phone. The phone keeps a random token; on
+    return the person unlocks with their password or a quick PIN set on that
+    phone. Only a hash of the token and PIN is stored here."""
+
+    __tablename__ = "device_sessions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    pin_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    label: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    failed_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Clock } from 'lucide-react'
 import { refreshSession } from '../services/accountService.js'
-import { logoutPassenger, tokenSecondsLeft } from '../services/authService.js'
+import { logoutPassenger, signInPath, tokenSecondsLeft } from '../services/authService.js'
 import { IDLE_MINUTES } from '../utils/session.js'
 
 const IDLE_MS = IDLE_MINUTES * 60 * 1000
@@ -22,8 +22,10 @@ export default function SessionTimeout() {
   const [secondsLeft, setSecondsLeft] = useState(null)
 
   const signOut = useCallback(() => {
+    // A remembered phone locks (password or PIN to continue); otherwise sign out.
+    const path = signInPath()
     logoutPassenger()
-    navigate('/login?reason=timeout', { replace: true })
+    navigate(`${path}?reason=timeout`, { replace: true, state: { from: window.location.pathname } })
   }, [navigate])
 
   const stayActive = useCallback(() => {

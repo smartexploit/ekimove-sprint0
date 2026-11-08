@@ -1,7 +1,7 @@
 ﻿import { useEffect, useState } from 'react'
 import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { LogoMark } from '../components/brand/Logo.jsx'
-import { getCurrentUser, getAccessToken, logoutPassenger } from '../services/authService.js'
+import { getCurrentUser, getAccessToken, logoutPassenger, signInPath, signOutCompletely } from '../services/authService.js'
 import { homePathForRole } from '../utils/roles.js'
 import { syncNotifications } from '../utils/push.js'
 import SessionTimeout from '../components/SessionTimeout.jsx'
@@ -56,7 +56,7 @@ export default function ProtectedRoute({ requiredRole = 'passenger' }) {
     // Keep the query string so a trip planned before signing in survives.
     return (
       <Navigate
-        to="/login"
+        to={signInPath()}
         replace
         state={{ from: `${location.pathname}${location.search}` }}
       />
@@ -64,7 +64,7 @@ export default function ProtectedRoute({ requiredRole = 'passenger' }) {
   }
 
   if (!state.user.is_active) {
-    logoutPassenger()
+    signOutCompletely()
     return <Navigate to="/login" replace />
   }
 

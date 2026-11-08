@@ -17,10 +17,15 @@ self.addEventListener('push', (event) => {
     options.tag = data.tag
     options.renotify = true
   }
+  options.silent = false
   if (data.call) {
-    // Incoming call: keep it on screen and vibrate like a phone call.
+    // Incoming call: keep it on screen, sound and vibrate like a phone call.
+    // EkiMove re-sends it every few seconds while it rings.
     options.requireInteraction = true
-    options.vibrate = [600, 300, 600, 300, 600, 300, 600]
+    options.vibrate = [800, 400, 800, 400, 800, 400, 800]
+    options.actions = [{ action: 'answer', title: 'Answer' }]
+  } else if (String(data.tag || '').startsWith('chat-')) {
+    options.vibrate = [300, 150, 300]
   }
   event.waitUntil(self.registration.showNotification(data.title || 'EkiMove', options))
 })

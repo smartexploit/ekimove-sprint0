@@ -19,7 +19,7 @@ import {
 } from 'lucide-react'
 import Logo from '../components/brand/Logo.jsx'
 import useSupportUnread from '../hooks/useSupportUnread.js'
-import { logoutPassenger } from '../services/authService.js'
+import { signOutCompletely } from '../services/authService.js'
 
 const NAV = [
   ['/admin/overview', 'Overview', LayoutDashboard],
@@ -48,7 +48,7 @@ export default function AdminShell({ eyebrow = 'Operations', title, description,
   const unread = useSupportUnread(Boolean(user))
 
   function signOut() {
-    logoutPassenger()
+    signOutCompletely()
     navigate('/login', { replace: true })
   }
 

@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import secrets
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -196,6 +197,35 @@ def _live_call_for_user(db: Session, user_id: int, exclude_ride: int | None = No
     return None
 
 
+def _keep_ringing(bind, call_id: str, callee_id: int, title: str, body: str, url: str) -> None:
+    """Re-send the call notification every few seconds while it rings, so the
+    other phone keeps sounding and vibrating like a phone call even when
+    EkiMove is closed. Stops as soon as the call is answered, declined,
+    cancelled or rings out."""
+    every = settings.call_ring_repeat_seconds
+    if every <= 0:
+        return
+
+    def run() -> None:
+        deadline = time.monotonic() + settings.call_ring_seconds
+        while time.monotonic() + every < deadline:
+            time.sleep(every)
+            try:
+                with Session(bind=bind) as db:
+                    call = db.get(TripCall, call_id)
+                    if call is None or call.status != "ringing":
+                        return
+                    left = max(5, int(deadline - time.monotonic()))
+                    notify(db, callee_id, title, body, url=url, tag=f"call-{call_id}", urgent=True, ttl=left,
+                           extra={"call": True})
+                    db.commit()
+            except Exception:  # never let a ring reminder crash anything
+                logger.exception("Could not repeat the call notification")
+                return
+
+    threading.Thread(target=run, name=f"ring-{call_id[:8]}", daemon=True).start()
+
+
 @router.get("/calls/config")
 def calls_config(current_user: User = Depends(get_current_user)) -> dict:
     return {"enabled": settings.calls_enabled, "relay": relay_configured(),
@@ -234,10 +264,13 @@ def start_call(ride_id: int, current_user: User = Depends(get_current_user), db:
                     callee_user_id=callee_id, status="ringing", created_at=_now())
     db.add(call)
     caller_role = "passenger" if current_user.id == passenger_id else "driver"
-    notify(db, callee_id, f"{_first(current_user, 'Your ' + caller_role)} is calling",
-           f"Your {caller_role} is calling you in EkiMove. Tap to answer.", url=_trip_url(db, call, callee_id),
-           tag=f"call-{call.id}", urgent=True, ttl=settings.call_ring_seconds, extra={"call": True})
+    title = f"{_first(current_user, 'Your ' + caller_role)} is calling"
+    body = f"Your {caller_role} is calling you in EkiMove. Tap to answer."
+    url = _trip_url(db, call, callee_id)
+    notify(db, callee_id, title, body, url=url, tag=f"call-{call.id}", urgent=True, ttl=settings.call_ring_seconds,
+           extra={"call": True})
     db.commit()
+    _keep_ringing(db.get_bind(), call.id, callee_id, title, body, url)
     return {"call": call_view(db, call, current_user), "ice_servers": ice_servers()}
 
 

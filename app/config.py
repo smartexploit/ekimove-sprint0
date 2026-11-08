@@ -191,6 +191,9 @@ class Settings(BaseSettings):
     # CLOUDFLARE_TURN_API_TOKEN. Keep the token secret.
     calls_enabled: bool = True
     call_ring_seconds: int = 45
+    # While a call rings, the phone notification is sent again this often so
+    # the other phone keeps ringing/vibrating even when EkiMove is closed.
+    call_ring_repeat_seconds: int = 5
     call_max_minutes: int = 30
     cloudflare_turn_key_id: str | None = None
     cloudflare_turn_api_token: str | None = None

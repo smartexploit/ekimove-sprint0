@@ -24,6 +24,7 @@ const HaulagePage = lazy(() => import('./pages/passenger/HaulagePage.jsx'))
 const InvitePage = lazy(() => import('./pages/passenger/InvitePage.jsx'))
 const SendPackagePage = lazy(() => import('./pages/passenger/SendPackagePage.jsx'))
 const ReceiptPage = lazy(() => import('./pages/account/ReceiptPage.jsx'))
+const UnlockPage = lazy(() => import('./pages/auth/UnlockPage.jsx'))
 const FaresPage = lazy(() => import('./pages/public/FaresPage.jsx'))
 const FaqPage = lazy(() => import('./pages/public/FaqPage.jsx'))
 const AreaPage = lazy(() => import('./pages/public/AreaPage.jsx'))
@@ -66,6 +67,7 @@ export default function App() {
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/driver/apply" element={<DriverApplicationPage />} />
         <Route path="/t/:token" element={<TrackSharePage />} />
+        <Route path="/unlock" element={<UnlockPage />} />
         <Route path="/fares" element={<FaresPage />} />
         <Route path="/faq" element={<FaqPage />} />
         <Route path="/areas/:slug" element={<AreaPage />} />

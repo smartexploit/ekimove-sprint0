@@ -112,14 +112,94 @@ export async function registerPassenger({ phone = '', email = '', full_name, pas
 }
 
 /** Sign in with a phone number or an email address. */
-export async function loginPassenger({ identifier, phone, password }) {
+export async function loginPassenger({ identifier, phone, password, remember = false }) {
   const data = await requestAuth('login', {
     identifier: (identifier ?? phone ?? '').trim(),
     password,
+    remember,
   })
 
   saveSession(data.access_token)
+  if (data.device_token) saveDevice({ token: data.device_token })
+  else if (remember === false) clearDevice()
   return data
+}
+
+// ---------- Keep me signed in (remembered phone) ----------
+const DEVICE_KEY = 'ekimove.device'
+
+/** The remembered phone: { token, first_name, role, account, has_pin }. */
+export function getDevice() {
+  try {
+    const value = JSON.parse(localStorage.getItem(DEVICE_KEY) || 'null')
+    return value?.token ? value : null
+  } catch {
+    return null
+  }
+}
+
+export function saveDevice(details) {
+  try {
+    localStorage.setItem(DEVICE_KEY, JSON.stringify({ ...(getDevice() || {}), ...details }))
+  } catch {
+    /* private mode: the person signs in normally next time */
+  }
+}
+
+export function clearDevice() {
+  try {
+    localStorage.removeItem(DEVICE_KEY)
+  } catch {
+    /* nothing to clear */
+  }
+}
+
+/** Where to send someone whose session ended: unlock if this phone is remembered. */
+export function signInPath() {
+  return getDevice() ? '/unlock' : '/login'
+}
+
+export async function describeDevice() {
+  const device = getDevice()
+  if (!device) return null
+  try {
+    const info = await requestAuth('device', { device_token: device.token })
+    saveDevice(info)
+    return getDevice()
+  } catch (err) {
+    if (/sign in again/i.test(err.message || '')) clearDevice()
+    throw err
+  }
+}
+
+/** Sign back in on a remembered phone with the password or the phone's PIN. */
+export async function unlockDevice({ password, pin }) {
+  const device = getDevice()
+  if (!device) throw new Error('Please sign in again.')
+  try {
+    const data = await requestAuth('unlock', { device_token: device.token, ...(pin ? { pin } : { password }) })
+    saveSession(data.access_token)
+    saveDevice({ has_pin: data.has_pin })
+    return data
+  } catch (err) {
+    if (/sign in again/i.test(err.message || '')) clearDevice()
+    throw err
+  }
+}
+
+export async function setDevicePin(pin) {
+  const device = getDevice()
+  if (!device) throw new Error('This phone isn’t remembered.')
+  await apiRequest('/api/v1/me/device-pin', { method: 'POST', body: JSON.stringify({ device_token: device.token, pin }) })
+  saveDevice({ has_pin: true })
+}
+
+/** Sign out completely: this phone forgets the account. */
+export async function signOutCompletely() {
+  const device = getDevice()
+  clearDevice()
+  logoutPassenger()
+  if (device) await requestAuth('forget-device', { device_token: device.token }).catch(() => {})
 }
 
 function saveSession(token, user) {

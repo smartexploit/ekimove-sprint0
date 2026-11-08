@@ -25,6 +25,7 @@ from app.codes import contact_status
 from app.contacts import ContactError, clean_email, clean_name, email_taken, password_problem, search_filter
 from app.rate_limit import enforce as enforce_rate_limit
 from app.messaging import email_configured
+from app.device_sessions import forget_all
 from app.auth import create_access_token, get_current_user, hash_password, require_super_admin, verify_password
 from app.config import settings
 from app.database import get_db
@@ -203,6 +204,7 @@ def change_my_password(
     if weak:
         raise HTTPException(status_code=422, detail=weak)
     current_user.password_hash = hash_password(payload.new_password)
+    forget_all(db, current_user.id)  # remembered phones must sign in again
     current_user.must_change_password = False
     db.add(AuditLog(actor_user_id=current_user.id, action="password.changed", entity_type="user",
                     entity_id=str(current_user.id), details="Password changed; older sessions signed out."))
@@ -442,6 +444,7 @@ def admin_reset_password(user_id: int, payload: AccountAction, db: Session = Dep
     user = _target(db, user_id, admin)
     temporary = "-".join("".join(secrets.choice(_TEMP_ALPHABET) for _ in range(4)) for _ in range(3))
     user.password_hash = hash_password(temporary)
+    forget_all(db, user.id)  # remembered phones must sign in again
     user.must_change_password = True
     db.add(AuditLog(actor_user_id=admin.id, action="password.admin_reset", entity_type="user",
                     entity_id=str(user.id), details=payload.reason))
