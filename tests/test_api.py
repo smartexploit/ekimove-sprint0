@@ -6901,3 +6901,83 @@ def test_team_accounts_sign_in_with_email_only(client):
     by_email = client.post("/api/v1/auth/login", json={"identifier": "sup@ekimove.com.ng",
                                                        "password": "Team-Member-Password-88!"})
     assert by_email.status_code == 200
+
+
+# --- Switching payment method while a ride is unpaid ---
+
+def _start_card_checkout(client, monkeypatch):
+    monkeypatch.setattr(settings, "interswitch_merchant_code", "TEST-MERCHANT")
+    monkeypatch.setattr(settings, "interswitch_pay_item_id", "TEST-PAYITEM")
+    monkeypatch.setattr(settings, "interswitch_mode", "TEST")
+    passenger, _, request_id = create_assigned_ride(client)
+    ride_id = get_ride_id_from_request(client, request_id, passenger)
+    started = client.post(f"/api/v1/payments/rides/{ride_id}/interswitch/initiate", headers=passenger,
+                          json={"customer_email": "passenger@example.com"})
+    assert started.status_code == 200, started.text
+    return passenger, ride_id, started.json()["checkout"]
+
+
+def _fake_interswitch(monkeypatch, code, checkout=None, fail=False):
+    import app.interswitch_payments as interswitch_module
+    import requests as requests_module
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"ResponseCode": code, "Amount": str(checkout["amount"]) if checkout else "0",
+                    "MerchantReference": checkout["txn_ref"] if checkout else ""}
+
+    def fake_get(*args, **kwargs):
+        if fail:
+            raise requests_module.ConnectionError("down")
+        return Response()
+
+    monkeypatch.setattr(interswitch_module.requests, "get", fake_get)
+
+
+def test_unfinished_card_checkout_can_switch_to_bank_transfer(client, monkeypatch):
+    passenger, ride_id, checkout = _start_card_checkout(client, monkeypatch)
+    _fake_interswitch(monkeypatch, "Z6", checkout)  # Interswitch: not paid
+    switched = client.post(f"/api/v1/payments/rides/{ride_id}/initiate", headers=passenger)
+    assert switched.status_code == 200, switched.text
+    body = switched.json()
+    assert body["method"] == "bank_transfer" and body["status"] == "pending"
+    submitted = client.post(f"/api/v1/payments/rides/{ride_id}/submit-transfer", headers=passenger,
+                            json={"transfer_reference": "TRF-12345"})
+    assert submitted.status_code == 200 and submitted.json()["status"] == "awaiting_confirmation"
+    # Once a transfer reference is in, the passenger can't start a card checkout too.
+    again = client.post(f"/api/v1/payments/rides/{ride_id}/interswitch/initiate", headers=passenger,
+                        json={"customer_email": "passenger@example.com"})
+    assert again.status_code == 409 and "being checked" in again.json()["detail"]
+
+
+def test_paid_card_checkout_is_not_switched_away(client, monkeypatch):
+    passenger, ride_id, checkout = _start_card_checkout(client, monkeypatch)
+    _fake_interswitch(monkeypatch, "00", checkout)  # Interswitch: paid
+    response = client.post(f"/api/v1/payments/rides/{ride_id}/initiate", headers=passenger)
+    assert response.status_code == 409 and "went through" in response.json()["detail"]
+    status = client.get(f"/api/v1/payments/rides/{ride_id}", headers=passenger).json()
+    assert status["method"] == "interswitch"
+
+
+def test_card_checkout_is_kept_when_interswitch_cant_be_reached(client, monkeypatch):
+    passenger, ride_id, _checkout = _start_card_checkout(client, monkeypatch)
+    _fake_interswitch(monkeypatch, "", fail=True)
+    response = client.post(f"/api/v1/payments/rides/{ride_id}/initiate", headers=passenger)
+    assert response.status_code == 503 and "try again" in response.json()["detail"]
+    assert client.get(f"/api/v1/payments/rides/{ride_id}", headers=passenger).json()["method"] == "interswitch"
+
+
+def test_unpaid_bank_transfer_can_switch_to_card(client, monkeypatch):
+    monkeypatch.setattr(settings, "interswitch_merchant_code", "TEST-MERCHANT")
+    monkeypatch.setattr(settings, "interswitch_pay_item_id", "TEST-PAYITEM")
+    monkeypatch.setattr(settings, "interswitch_mode", "TEST")
+    passenger, _, request_id = create_assigned_ride(client)
+    ride_id = get_ride_id_from_request(client, request_id, passenger)
+    assert client.post(f"/api/v1/payments/rides/{ride_id}/initiate", headers=passenger).json()["method"] == "bank_transfer"
+    card = client.post(f"/api/v1/payments/rides/{ride_id}/interswitch/initiate", headers=passenger,
+                       json={"customer_email": "passenger@example.com"})
+    assert card.status_code == 200, card.text
+    assert card.json()["payment"]["method"] == "interswitch" and card.json()["checkout"]["txn_ref"]

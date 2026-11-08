@@ -73,7 +73,8 @@ export default function PaymentsPage() {
   const [rides, setRides] = useState({ loaded: false, items: [] })
   const [reference, setReference] = useState('')
   const [email, setEmail] = useState('')
-  const [method, setMethod] = useState('bank_transfer')
+  // null until the passenger picks one; then the default follows their payment.
+  const [methodChoice, setMethod] = useState(null)
   const [payment, setPayment] = useState(null)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
@@ -110,9 +111,29 @@ export default function PaymentsPage() {
   )
   const currentPayment =
     payment && String(payment.ride_id) === effectiveRideId ? payment : null
+
+  // Load any payment already started for the selected ride, so the page opens
+  // on the right step (e.g. a card checkout that wasn't finished).
+  useEffect(() => {
+    if (!effectiveRideId) return undefined
+    let active = true
+    getRidePayment(Number(effectiveRideId))
+      .then((result) => {
+        if (active) setPayment((current) => (current && String(current.ride_id) === effectiveRideId ? current : result))
+      })
+      .catch(() => { /* no payment yet */ })
+    return () => {
+      active = false
+    }
+  }, [effectiveRideId])
   const { instant_transfers: instant } = useBusinessInfo()
   const [instantUnavailable, setInstantUnavailable] = useState(false)
   const instantOn = Boolean(instant?.enabled) && !instantUnavailable
+  const unpaidCard = currentPayment?.method === 'interswitch' && ['pending', 'rejected'].includes(currentPayment?.status)
+  const transferStarted = currentPayment?.method === 'bank_transfer'
+  // Open on the method the passenger actually started for this ride.
+  const method = methodChoice ?? (currentPayment?.method === 'interswitch' && currentPayment.status !== 'confirmed'
+    ? 'interswitch' : 'bank_transfer')
   const isPaid =
     currentPayment?.status === 'confirmed' ||
     (!currentPayment && selectedRide?.payment_status === 'confirmed')
@@ -404,6 +425,12 @@ export default function PaymentsPage() {
                   <Alert tone="warning">Choose the ride you're paying for at the top first.</Alert>
                 ) : currentPayment?.status === 'confirmed' ? (
                   <Alert tone="success">This ride is paid. Your driver can start the trip.</Alert>
+                ) : unpaidCard ? (
+                  <Alert tone="info">
+                    You started a card payment for this ride, but it wasn’t completed. To pay by bank transfer
+                    instead, send exactly {amountDue != null ? formatNaira(amountDue) : 'the fare'} to the account
+                    above, then tap <strong>I’ve sent the money</strong> and enter your transfer reference.
+                  </Alert>
                 ) : currentPayment?.status === 'rejected' ? (
                   <Alert tone="warning">
                     The EkiMove team couldn't match that reference to money in the account. Check the
@@ -449,7 +476,7 @@ export default function PaymentsPage() {
                   </form>
                 )}
                 <div className="row">
-                  {!currentPayment && (
+                  {(!currentPayment || unpaidCard) && (
                     <button
                       type="button"
                       className="btn btn-primary"
@@ -471,6 +498,18 @@ export default function PaymentsPage() {
               </>
             ) : (
               <>
+                {transferStarted && currentPayment?.status === 'awaiting_confirmation' && (
+                  <Alert tone="warning">
+                    You’ve already sent a bank transfer for this ride and we’re checking it. Please don’t pay
+                    again by card. Switch back to Bank transfer and tap “Check status”.
+                  </Alert>
+                )}
+                {transferStarted && currentPayment?.status === 'pending' && (
+                  <Alert tone="info">
+                    You chose bank transfer earlier. If you’ve already sent the money, don’t pay again: switch
+                    back to Bank transfer and enter your transfer reference. Otherwise you can pay by card here.
+                  </Alert>
+                )}
                 <label className="field" htmlFor="checkout-email">
                   <span className="field-label">Email for your receipt</span>
                   <input
@@ -492,7 +531,7 @@ export default function PaymentsPage() {
                   <button
                     type="button"
                     className="btn btn-primary"
-                    disabled={busy || !effectiveRideId}
+                    disabled={busy || !effectiveRideId || (transferStarted && currentPayment?.status === 'awaiting_confirmation')}
                     onClick={startInterswitch}
                   >
                     {busy ? 'Please wait…' : 'Continue to secure checkout'}

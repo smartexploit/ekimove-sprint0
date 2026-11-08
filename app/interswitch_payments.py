@@ -84,11 +84,24 @@ def initiate_interswitch(
     payment = db.scalar(select(Payment).where(Payment.ride_id == ride_id))
     if payment:
         if payment.method != "interswitch":
-            raise HTTPException(
-                status_code=409,
-                detail="A bank-transfer payment already exists for this ride. "
-                       "Resolve that payment before choosing Interswitch.",
-            )
+            if payment.status not in ("pending", "rejected"):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Your bank transfer for this ride is already being checked. "
+                           "Wait for it to be confirmed instead of paying again.",
+                )
+            # Switch an unpaid bank transfer to card checkout.
+            payment.method = "interswitch"
+            payment.status = "pending"
+            payment.transfer_reference = None
+            payment.provider_transaction_ref = None
+            db.add(AuditLog(
+                actor_user_id=user.id,
+                action="payment.method_switched",
+                entity_type="payment",
+                entity_id=str(payment.id),
+                details="Passenger switched from bank transfer to Interswitch checkout before paying.",
+            ))
         if payment.status in ("confirmed", "refunded"):
             return {"payment": _result(payment), "checkout": None}
 
@@ -165,59 +178,7 @@ def verify_interswitch(
     if not payment.provider_transaction_ref:
         raise HTTPException(status_code=409, detail="Transaction reference is missing.")
 
-    if not settings.interswitch_merchant_code:
-        raise HTTPException(status_code=503, detail="Interswitch is not configured.")
-
-    amount_kobo = int(
-        (Decimal(str(payment.amount)) * 100).quantize(
-            Decimal("1"), rounding=ROUND_HALF_UP
-        )
-    )
-
-    mode = settings.interswitch_mode.strip().upper()
-    if mode not in ("TEST", "LIVE"):
-        raise HTTPException(status_code=503, detail="Invalid Interswitch mode.")
-
-    requery_url = (
-        settings.interswitch_live_requery_base_url
-        if mode == "LIVE"
-        else settings.interswitch_requery_base_url
-    )
-
-    try:
-        response = requests.get(
-            requery_url,
-            params={
-                "merchantcode": settings.interswitch_merchant_code,
-                "transactionreference": payment.provider_transaction_ref,
-                "amount": amount_kobo,
-            },
-            timeout=12,
-        )
-        response.raise_for_status()
-        result = response.json()
-    except (requests.RequestException, ValueError):
-        raise HTTPException(
-            status_code=502,
-            detail="Unable to verify with Interswitch. Check the status and retry.",
-        )
-
-    # A successful HTTP response alone is not evidence of payment.
-    if not isinstance(result, dict):
-        raise HTTPException(status_code=502, detail="Invalid provider response.")
-
-    response_code = str(result.get("ResponseCode", "")).strip()
-    returned_reference = str(result.get("MerchantReference", "")).strip()
-    try:
-        provider_amount = int(str(result.get("Amount", "")).strip())
-    except (ValueError, TypeError):
-        provider_amount = -1
-
-    if (
-        response_code != "00"
-        or provider_amount != amount_kobo
-        or returned_reference != payment.provider_transaction_ref
-    ):
+    if not interswitch_says_paid(payment):
         raise HTTPException(
             status_code=409,
             detail="Payment has not been verified. Check status and retry later.",
@@ -271,3 +232,63 @@ def verify_interswitch(
         )
 
     return _result(confirmed_payment)
+
+
+def interswitch_says_paid(payment: Payment) -> bool:
+    """Ask Interswitch whether this checkout was paid in full.
+
+    Raises 502/503 when Interswitch can't be asked; returns False when it
+    answers that the payment isn't complete.
+    """
+    if not settings.interswitch_merchant_code:
+        raise HTTPException(status_code=503, detail="Interswitch is not configured.")
+    amount_kobo = int(
+        (Decimal(str(payment.amount)) * 100).quantize(
+            Decimal("1"), rounding=ROUND_HALF_UP
+        )
+    )
+
+    mode = settings.interswitch_mode.strip().upper()
+    if mode not in ("TEST", "LIVE"):
+        raise HTTPException(status_code=503, detail="Invalid Interswitch mode.")
+
+    requery_url = (
+        settings.interswitch_live_requery_base_url
+        if mode == "LIVE"
+        else settings.interswitch_requery_base_url
+    )
+
+    try:
+        response = requests.get(
+            requery_url,
+            params={
+                "merchantcode": settings.interswitch_merchant_code,
+                "transactionreference": payment.provider_transaction_ref,
+                "amount": amount_kobo,
+            },
+            timeout=12,
+        )
+        response.raise_for_status()
+        result = response.json()
+    except (requests.RequestException, ValueError):
+        raise HTTPException(
+            status_code=502,
+            detail="Unable to verify with Interswitch. Check the status and retry.",
+        )
+
+    # A successful HTTP response alone is not evidence of payment.
+    if not isinstance(result, dict):
+        raise HTTPException(status_code=502, detail="Invalid provider response.")
+
+    response_code = str(result.get("ResponseCode", "")).strip()
+    returned_reference = str(result.get("MerchantReference", "")).strip()
+    try:
+        provider_amount = int(str(result.get("Amount", "")).strip())
+    except (ValueError, TypeError):
+        provider_amount = -1
+
+    return (
+        response_code == "00"
+        and provider_amount == amount_kobo
+        and returned_reference == payment.provider_transaction_ref
+    )

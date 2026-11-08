@@ -2,6 +2,8 @@
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
+
+from app.config import settings
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -101,6 +103,39 @@ def initiate_payment(
     existing = db.scalar(
         select(Payment).where(Payment.ride_id == ride_id)
     )
+    if existing and existing.method == "interswitch" and existing.status in ("pending", "rejected"):
+        # The passenger started a card checkout but now wants to pay by bank
+        # transfer. First make sure the card payment didn't go through.
+        # (If Interswitch has since been switched off, there's nothing to check.)
+        if existing.provider_transaction_ref and settings.interswitch_merchant_code:
+            from app.interswitch_payments import interswitch_says_paid  # avoid an import cycle
+
+            try:
+                paid = interswitch_says_paid(existing)
+            except HTTPException:
+                raise HTTPException(
+                    status_code=503,
+                    detail="We couldn't check your card checkout with Interswitch just now. "
+                           "Please try again in a minute.",
+                ) from None
+            if paid:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Your card payment for this ride went through. Choose “Card or wallet” and "
+                           "tap “Verify payment” to finish.",
+                )
+        old_reference = existing.provider_transaction_ref
+        existing.method = "bank_transfer"
+        existing.status = "pending"
+        existing.provider_transaction_ref = None
+        existing.transfer_reference = None
+        record_audit(
+            db, user.id, "payment.method_switched", existing,
+            f"Switched from unpaid Interswitch checkout ({old_reference or 'no reference'}) to bank transfer.",
+        )
+        db.commit()
+        db.refresh(existing)
+        return payment_result(existing)
     if existing:
         return payment_result(existing)
 
