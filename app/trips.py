@@ -17,6 +17,7 @@ from app.auth import get_current_user
 from app.config import settings
 from app.database import get_db
 from app.dispatch import haversine_m
+from app.points import request_point
 from app.models import (
     AuditLog,
     Driver,
@@ -129,13 +130,6 @@ def trail_points(db: Session, ride_id: int, limit: int = 500) -> list[list[float
 # --------------------------------------------------------------------------
 
 
-def _place(db: Session, place_id: int | None, text: str) -> dict:
-    place = db.get(Place, place_id) if place_id else None
-    return {"name": place.name if place else text,
-            "latitude": place.latitude if place else None,
-            "longitude": place.longitude if place else None}
-
-
 def trip_vehicle(db: Session, ride: Ride, request: RideRequest) -> Vehicle | None:
     if ride.vehicle_id:
         return db.get(Vehicle, ride.vehicle_id)
@@ -148,8 +142,8 @@ def tracking_view(db: Session, ride: Ride, *, include_pin: bool, public: bool) -
     driver = db.get(Driver, ride.driver_id)
     driver_user = db.get(User, driver.user_id) if driver else None
     vehicle = trip_vehicle(db, ride, request)
-    pickup = _place(db, request.origin_place_id, request.origin_text)
-    destination = _place(db, request.destination_place_id, request.destination_text)
+    pickup = request_point(db, request, "origin")
+    destination = request_point(db, request, "destination")
 
     location = None
     if driver and ride.status in ACTIVE and driver.last_latitude is not None and driver.location_updated_at:

@@ -41,6 +41,7 @@ function FormulaCard({ formula, draft, setDraft, onSaved }) {
     try {
       const body = {
         road_factor: Number(draft.road_factor),
+        allow_custom_points: Boolean(draft.allow_custom_points),
         vehicles: draft.vehicles.map((v) => ({
           ...v, base: Number(v.base || 0), per_km: Number(v.per_km || 0), minimum: Number(v.minimum || 0),
           round_to: Math.max(1, Number(v.round_to || 1)), extra_passenger: Number(v.extra_passenger || 0),
@@ -65,6 +66,14 @@ function FormulaCard({ formula, draft, setDraft, onSaved }) {
       </div>
       <p className="muted small">Price = starting fare + (price per km × road distance), never below the minimum, rounded to the nearest step.</p>
       <Alert tone="error">{error}</Alert>
+      <label className="check-row fc-allow">
+        <input type="checkbox" checked={Boolean(draft.allow_custom_points)}
+          onChange={(event) => setDraft((d) => ({ ...d, allow_custom_points: event.target.checked }))} />
+        <span>
+          <strong>Riders can drop a pin</strong> for a place that isn’t on the list. It’s priced with this formula
+          from the road distance (pins must be within 8 km of a listed place).
+        </span>
+      </label>
       <div className="fc-vehicles">
         {draft.vehicles.map((v, i) => (
           <fieldset key={v.vehicle_type} className={`fc-vehicle ${v.enabled ? '' : 'is-off'}`}>

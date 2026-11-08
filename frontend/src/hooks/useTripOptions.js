@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { apiRequest } from '../services/authService.js'
+import { isPin, stopOf } from '../utils/stops.js'
 
 /**
  * Loads service areas, the places in the chosen area and the fare options
@@ -60,16 +61,23 @@ export default function useTripOptions({
     originId && destinationId && String(originId) !== String(destinationId),
   )
   const fareKey = routeSelected
-    ? `${originId}|${destinationId}|${passengerCount || 1}`
+    ? JSON.stringify([String(originId), String(destinationId), String(passengerCount || 1)])
     : ''
 
   useEffect(() => {
     if (!fareKey) return undefined
     let active = true
-    const [origin, destination, count] = fareKey.split('|')
-    apiRequest(
-      `/api/v1/place-fare-options?origin_place_id=${encodeURIComponent(origin)}&destination_place_id=${encodeURIComponent(destination)}&passenger_count=${encodeURIComponent(count)}`,
-    )
+    const [origin, destination, count] = JSON.parse(fareKey)
+    // A dropped pin is priced by distance; listed places use their route fares.
+    const request = isPin(origin) || isPin(destination)
+      ? apiRequest('/api/v1/point-fare-options', {
+        method: 'POST',
+        body: JSON.stringify({ origin: stopOf(origin), destination: stopOf(destination), passenger_count: Number(count) }),
+      }).then((data) => data?.options || [])
+      : apiRequest(
+        `/api/v1/place-fare-options?origin_place_id=${encodeURIComponent(origin)}&destination_place_id=${encodeURIComponent(destination)}&passenger_count=${encodeURIComponent(count)}`,
+      )
+    request
       .then((data) => {
         if (active) setFareResult({ key: fareKey, items: Array.isArray(data) ? data : [], error: '' })
       })

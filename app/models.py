@@ -139,6 +139,14 @@ class RideRequest(Base):
     delivery_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     fragile: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
     dispatch_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    # A pin the rider dropped when the place isn't on EkiMove's list (the
+    # matching *_place_id is then empty), and how the price was worked out.
+    origin_latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    origin_longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    destination_latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    destination_longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    distance_m: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pricing: Mapped[str | None] = mapped_column(String(12), nullable=True)
 
 
 class Ride(Base):

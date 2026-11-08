@@ -10,6 +10,8 @@ import useTripOptions from '../../hooks/useTripOptions.js'
 import { apiRequest } from '../../services/authService.js'
 import { formatNaira, isMotorcycle } from '../../utils/format.js'
 import PlacePicker from '../../components/booking/PlacePicker.jsx'
+import DropPinSheet from '../../components/booking/DropPinSheet.jsx'
+import { bookingStops, pinOf, pinValue } from '../../utils/stops.js'
 import Select from '../../components/ui/Select.jsx'
 import useBookingRules from '../../hooks/useBookingRules.js'
 import WhenPicker from '../../components/booking/WhenPicker.jsx'
@@ -58,10 +60,15 @@ export default function BookRidePage() {
   const [pickupTime, setPickupTime] = useState(null)
   const [promo, setPromo] = useState(null)
   const [saved, setSaved] = useState([])
+  const [dropping, setDropping] = useState(null)
+  const [pinsEnabled, setPinsEnabled] = useState(false)
   const [giftCodes, setGiftCodes] = useState([])
 
   useEffect(() => {
     let active = true
+    apiRequest('/api/v1/points/settings')
+      .then((data) => active && setPinsEnabled(Boolean(data?.enabled)))
+      .catch(() => {})
     Promise.resolve()
       .then(() => listSavedPlaces())
       .then((list) => active && Array.isArray(list) && setSaved(list))
@@ -148,13 +155,13 @@ export default function BookRidePage() {
 
       if (name === 'origin_place_id') {
         next.origin_text =
-          places.find((place) => String(place.id) === value)?.name || ''
+          pinOf(value)?.label || places.find((place) => String(place.id) === value)?.name || ''
         next.vehicle_type = ''
       }
 
       if (name === 'destination_place_id') {
         next.destination_text =
-          places.find((place) => String(place.id) === value)?.name || ''
+          pinOf(value)?.label || places.find((place) => String(place.id) === value)?.name || ''
         next.vehicle_type = ''
       }
 
@@ -207,8 +214,7 @@ export default function BookRidePage() {
       const result = await apiRequest('/api/v1/ride-requests', {
         method: 'POST',
         body: JSON.stringify({
-          origin_place_id: Number(form.origin_place_id),
-          destination_place_id: Number(form.destination_place_id),
+          ...bookingStops(form.origin_place_id, form.destination_place_id),
           vehicle_type: vehicleType,
           passenger_count: Number(form.passenger_count),
           ...(pickupTime ? { scheduled_for: toApiTime(pickupTime) } : {}),
@@ -356,12 +362,14 @@ export default function BookRidePage() {
               <PlacePicker label="Pickup" name="origin_place_id" value={form.origin_place_id} places={places}
                 onChange={(id) => updateField({ target: { name: 'origin_place_id', value: id } })}
                 disabled={!areaId || loadingPlaces} loading={loadingPlaces} required
-                hint={form.origin_text && !form.origin_place_id ? `You said: “${form.origin_text}”` : undefined} />
+                hint={form.origin_text && !form.origin_place_id ? `You said: “${form.origin_text}”` : undefined}
+                onDropPin={pinsEnabled ? (current) => setDropping({ field: 'origin_place_id', current }) : null} />
               <PlacePicker label="Destination" name="destination_place_id" value={form.destination_place_id}
                 places={places}
                 onChange={(id) => updateField({ target: { name: 'destination_place_id', value: id } })}
                 disabled={!areaId || loadingPlaces} loading={loadingPlaces} required
-                hint={form.destination_text && !form.destination_place_id ? `You said: “${form.destination_text}”` : undefined} />
+                hint={form.destination_text && !form.destination_place_id ? `You said: “${form.destination_text}”` : undefined}
+                onDropPin={pinsEnabled ? (current) => setDropping({ field: 'destination_place_id', current }) : null} />
             </div>
 
             <SavedPlacesBar saved={saved} places={places} originId={form.origin_place_id}
@@ -422,7 +430,7 @@ export default function BookRidePage() {
               )}
 
               {fareOptions.map((option) => (
-                <label className="choice" key={option.fare_id}>
+                <label className="choice" key={option.fare_id || option.vehicle_type}>
                   <input
                     type="radio"
                     name="vehicle_type"
@@ -435,7 +443,10 @@ export default function BookRidePage() {
                   </span>
                   <span className="choice-body">
                     <span className="choice-title">{vehicleLabel(option.vehicle_type)}</span>
-                    <span className="choice-sub">{vehicleBlurb(option.vehicle_type)}</span>
+                    <span className="choice-sub">
+                      {vehicleBlurb(option.vehicle_type)}
+                      {option.distance_km != null && ` · about ${option.distance_km} km`}
+                    </span>
                   </span>
                   <span className="choice-price">{formatNaira(option.quoted_fare, { decimals: 0 })}</span>
                 </label>
@@ -477,6 +488,16 @@ export default function BookRidePage() {
             </div>
           </div>
         </form>
+      )}
+      {dropping && (
+        <DropPinSheet
+          title={dropping.field === 'origin_place_id' ? 'Drop your pickup pin' : 'Drop your destination pin'}
+          initial={dropping.current} allowHere={dropping.field === 'origin_place_id'}
+          onCancel={() => setDropping(null)}
+          onDone={(point) => {
+            updateField({ target: { name: dropping.field, value: pinValue(point) } })
+            setDropping(null)
+          }} />
       )}
     </AppShell>
   )

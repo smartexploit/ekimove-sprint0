@@ -36,6 +36,7 @@ MATRIX_CELLS = 1000
 DEFAULT_ROAD_FACTOR = 1.35
 DEFAULT_FORMULA = {
     "road_factor": DEFAULT_ROAD_FACTOR,
+    "allow_custom_points": False,
     "vehicles": [
         {"vehicle_type": "motorcycle", "label": "Okada", "enabled": True, "base": 300, "per_km": 100,
          "minimum": 400, "round_to": 50, "extra_passenger": 0},
@@ -60,6 +61,9 @@ class VehicleFormula(BaseModel):
 class Formula(BaseModel):
     model_config = ConfigDict(extra="forbid")
     road_factor: float = Field(default=DEFAULT_ROAD_FACTOR, ge=1.0, le=2.5)
+    # Riders may drop a pin for a place that isn't on the list; it is priced
+    # with this formula from the road distance.
+    allow_custom_points: bool = False
     vehicles: list[VehicleFormula] = Field(min_length=1, max_length=8)
 
     @field_validator("vehicles")

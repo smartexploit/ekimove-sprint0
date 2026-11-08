@@ -6103,3 +6103,111 @@ def test_places_get_pins_automatically(client, monkeypatch):
     passenger = login(client, *PASSENGER_LOGIN)
     assert client.post("/api/v1/admin/locations/places/auto-pin", json={"service_area_id": ids["area_id"]},
                        headers=passenger).status_code == 403
+
+
+# ---------- Dropped pins (places not on the list) ----------
+import app.points as points_module
+
+
+def _enable_pins(client, admin, allow=True):
+    current = client.get(f"/api/v1/admin/fare-calculator?service_area_id={_calc_area.area_id}",
+                         headers=admin).json()["formula"]
+    current["allow_custom_points"] = allow
+    current["vehicles"][0].update(base=0, per_km=400, minimum=300, round_to=50)
+    assert client.put("/api/v1/admin/fare-calculator/formula", json=current, headers=admin).status_code == 200
+
+
+def test_rider_can_book_a_dropped_pin(client, monkeypatch):
+    monkeypatch.setattr(settings, "geoapify_api_key", None)
+    admin = login(client, *ADMIN_LOGIN)
+    passenger = login(client, *PASSENGER_LOGIN)
+    area_id, (a, b, c), _manual = _calc_area(client)
+    _calc_area.area_id = area_id
+    pin = {"latitude": 7.6250, "longitude": 5.2200, "label": "  Blue gate\nopposite   the church "}
+    quote_body = {"origin": {"place_id": a}, "destination": {"point": pin}}
+    # Switched off until the admin allows it.
+    assert client.get("/api/v1/points/settings").json() == {"enabled": False}
+    assert client.post("/api/v1/point-fare-options", json=quote_body).status_code == 409
+    _enable_pins(client, admin)
+    assert client.get("/api/v1/points/settings").json() == {"enabled": True}
+    quote = client.post("/api/v1/point-fare-options", json=quote_body)
+    assert quote.status_code == 200, quote.text
+    okada = next(o for o in quote.json()["options"] if o["vehicle_type"] == "motorcycle")
+    # 0.025° ≈ 2.78 km straight × 1.35 ≈ 3.75 km × ₦400 = ₦1,500 (to the nearest ₦50).
+    assert 3.6 < okada["distance_km"] < 3.9 and okada["quoted_fare"] == "1500.00" and okada["pricing"] == "distance"
+    # Pins far from any served place are refused; so are an empty choice and the same spot twice.
+    far = {"latitude": 6.5244, "longitude": 3.3792, "label": "Lagos Island"}
+    refused = client.post("/api/v1/point-fare-options", json={"origin": {"place_id": a}, "destination": {"point": far}})
+    assert refused.status_code == 422 and "outside the area" in refused.json()["detail"]
+    assert client.post("/api/v1/point-fare-options", json={"origin": {}, "destination": {"point": pin}}).status_code == 422
+    assert client.post("/api/v1/point-fare-options", json={"origin": {"point": pin}, "destination": {"point": pin}}).status_code == 422
+    # Booking: the server works out the price; the rider can't send one.
+    booked = client.post("/api/v1/ride-requests", headers=passenger, json={
+        "origin_place_id": a, "destination_point": pin, "vehicle_type": "motorcycle", "passenger_count": 1})
+    assert booked.status_code == 201, booked.text
+    body = booked.json()
+    assert body["quoted_fare"] == "1500.00" and body["destination_text"] == "Blue gate opposite the church"
+    assert body["destination_zone_id"] == 1
+    with session_for(client) as db:
+        request = db.get(RideRequest, body["id"])
+        assert request.destination_place_id is None and request.pricing == "distance"
+        assert request.destination_latitude == 7.625 and 3600 < request.distance_m < 3900
+        assert points_module.request_point(db, request, "destination") == {
+            "name": "Blue gate opposite the church", "latitude": 7.625, "longitude": 5.22}
+        assert points_module.request_point(db, request, "origin")["name"] == "Calc A"
+        request.status = "cancelled"
+        db.commit()
+    assert client.post("/api/v1/ride-requests", headers=passenger, json={
+        "origin_place_id": a, "destination_point": pin, "vehicle_type": "motorcycle", "quoted_fare": "10"}
+    ).status_code == 422
+    # Too many passengers for an okada gets the usual message.
+    crowded = client.post("/api/v1/ride-requests", headers=passenger, json={
+        "origin_place_id": a, "destination_point": pin, "vehicle_type": "motorcycle", "passenger_count": 5})
+    assert crowded.status_code == 422 and "motorcycle" in crowded.json()["detail"].lower()
+    # Turning it off stops new pin bookings.
+    _enable_pins(client, admin, allow=False)
+    assert client.post("/api/v1/ride-requests", headers=passenger, json={
+        "origin_point": pin, "destination_place_id": c, "vehicle_type": "motorcycle"}).status_code == 409
+
+
+def test_road_distance_and_pin_description(client, monkeypatch):
+    seen = {}
+
+    class Route:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"features": [{"properties": {"distance": 4321}}]}
+
+    def fake_get(url, timeout, params, headers=None):
+        seen[url] = params
+        if "routing" in url:
+            return Route()
+
+        class Reverse:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"results": [{"name": "Mercy Pharmacy", "street": "Ajilosun Road", "suburb": "Ajilosun"}]}
+        return Reverse()
+
+    monkeypatch.setattr(settings, "geoapify_api_key", "geo-key")
+    monkeypatch.setattr(points_module.requests, "get", fake_get)
+    meters, source = points_module.road_meters({"latitude": 7.6, "longitude": 5.2},
+                                               {"latitude": 7.62, "longitude": 5.22}, 1.35)
+    assert (meters, source) == (4321, "road")
+    assert seen[points_module.ROUTING_URL]["waypoints"] == "7.6,5.2|7.62,5.22"
+    passenger = login(client, *PASSENGER_LOGIN)
+    assert client.get("/api/v1/points/describe?latitude=7.63&longitude=5.23").status_code == 401
+    monkeypatch.setattr(settings, "geocoding_enabled", True)
+    described = client.get("/api/v1/points/describe?latitude=7.63&longitude=5.23", headers=passenger).json()
+    assert described == {"label": "Mercy Pharmacy, Ajilosun Road, Ajilosun"}
+    # Lookup failures fall back to the estimate / no suggestion.
+    monkeypatch.setattr(points_module.requests, "get",
+                        lambda *a, **k: (_ for _ in ()).throw(points_module.requests.ConnectionError("down")))
+    meters, source = points_module.road_meters({"latitude": 7.6, "longitude": 5.2},
+                                               {"latitude": 7.62, "longitude": 5.22}, 1.35)
+    assert source == "estimate" and meters > 3000
+    assert client.get("/api/v1/points/describe?latitude=7.63&longitude=5.23", headers=passenger).json() == {"label": None}

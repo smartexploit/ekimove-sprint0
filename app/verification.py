@@ -34,6 +34,7 @@ from app.models import (
 from app.photo_storage import PhotoStorageError, delete_driver_photo, download_driver_photo, upload_driver_photo
 from app.trip_chat import messages_for
 from app.calls import calls_for_ride
+from app.points import request_point
 from app.trips import ACTIVE, short_name, trail_points
 
 router = APIRouter(prefix="/api/v1", tags=["verification"])
@@ -312,6 +313,11 @@ def _coords(place: Place | None) -> dict | None:
     return {"latitude": place.latitude, "longitude": place.longitude, "name": place.name}
 
 
+def _point_coords(db: Session, request: RideRequest, end: str) -> dict | None:
+    point = request_point(db, request, end)
+    return point if point["latitude"] is not None and point["longitude"] is not None else None
+
+
 @router.get("/admin/live-map")
 def admin_live_map(db: Session = Depends(get_db), _admin: User = Depends(require_super_admin)) -> dict:
     now = _now()
@@ -347,8 +353,8 @@ def admin_live_map(db: Session = Depends(get_db), _admin: User = Depends(require
             "service_type": request.service_type, "recipient": request.recipient_name,
             "passenger": passenger.full_name if passenger else None, "passenger_phone": (passenger.phone or passenger.email) if passenger else None,
             "driver": driver_user.full_name if driver_user else None,
-            "pickup": _coords(db.get(Place, request.origin_place_id) if request.origin_place_id else None),
-            "destination": _coords(db.get(Place, request.destination_place_id) if request.destination_place_id else None),
+            "pickup": _point_coords(db, request, "origin"),
+            "destination": _point_coords(db, request, "destination"),
             "driver_location": ({"latitude": driver.last_latitude, "longitude": driver.last_longitude}
                                 if driver and driver.last_latitude is not None else None),
         })
@@ -373,8 +379,8 @@ def admin_ride_trail(ride_id: int, db: Session = Depends(get_db), _admin: User =
         "assigned_at": _iso(ride.assigned_at), "arrived_at": _iso(ride.arrived_at),
         "started_at": _iso(ride.started_at), "completed_at": _iso(ride.completed_at),
         "cancelled_at": _iso(ride.cancelled_at),
-        "pickup": _coords(db.get(Place, request.origin_place_id) if request.origin_place_id else None),
-        "destination": _coords(db.get(Place, request.destination_place_id) if request.destination_place_id else None),
+        "pickup": _point_coords(db, request, "origin"),
+        "destination": _point_coords(db, request, "destination"),
         "trail": trail_points(db, ride.id, 2000),
         "messages": messages_for(db, ride),
         "calls": calls_for_ride(db, ride),

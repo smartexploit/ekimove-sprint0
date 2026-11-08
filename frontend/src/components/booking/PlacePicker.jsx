@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { MapPin, Search, X } from 'lucide-react'
 import { indexPlaces, searchPlaces } from '../../utils/placeSearch.js'
+import { pinOf } from '../../utils/stops.js'
 
 /**
  * Pickup / destination picker with search: type a place, street, junction
@@ -8,7 +9,7 @@ import { indexPlaces, searchPlaces } from '../../utils/placeSearch.js'
  */
 export default function PlacePicker({
   label, value, onChange, places, disabled = false, loading = false, placeholder = 'Search a place, street or junction',
-  name, required = false, hint,
+  name, required = false, hint, onDropPin = null,
 }) {
   const id = useId()
   const listId = `${id}-list`
@@ -20,7 +21,9 @@ export default function PlacePicker({
 
   const index = useMemo(() => indexPlaces(places || []), [places])
   const results = useMemo(() => searchPlaces(index, query), [index, query])
-  const selected = (places || []).find((place) => String(place.id) === String(value))
+  const pin = pinOf(value)
+  const selected = pin ? { id: value, name: `📍 ${pin.label}` }
+    : (places || []).find((place) => String(place.id) === String(value))
 
   useEffect(() => {
     const option = listRef.current?.querySelector(`[data-index="${active}"]`)
@@ -43,6 +46,13 @@ export default function PlacePicker({
     inputRef.current?.blur()
   }
 
+  function dropPin() {
+    setOpen(false)
+    setQuery('')
+    inputRef.current?.blur()
+    onDropPin(pin)
+  }
+
   function onKeyDown(event) {
     if (!open && (event.key === 'ArrowDown' || event.key === 'Enter')) {
       event.preventDefault()
@@ -51,13 +61,14 @@ export default function PlacePicker({
     }
     if (event.key === 'ArrowDown') {
       event.preventDefault()
-      setActive((i) => Math.min(i + 1, results.length - 1))
+      setActive((i) => Math.min(i + 1, results.length - (onDropPin ? 0 : 1)))
     } else if (event.key === 'ArrowUp') {
       event.preventDefault()
       setActive((i) => Math.max(i - 1, 0))
     } else if (event.key === 'Enter') {
       event.preventDefault()
       if (results[active]) choose(results[active].place)
+      else if (onDropPin && active === results.length) dropPin()
     } else if (event.key === 'Escape') {
       setOpen(false)
       setQuery('')
@@ -82,7 +93,7 @@ export default function PlacePicker({
           aria-expanded={open}
           aria-controls={listId}
           aria-autocomplete="list"
-          aria-activedescendant={open && results[active] ? `${id}-opt-${active}` : undefined}
+          aria-activedescendant={open && (results[active] || (onDropPin && active === results.length)) ? `${id}-opt-${active}` : undefined}
           autoComplete="off"
           autoCorrect="off"
           spellCheck={false}
@@ -123,7 +134,8 @@ export default function PlacePicker({
           onMouseDown={(event) => event.preventDefault()}>
           {results.length === 0 ? (
             <li className="place-empty" role="presentation">
-              No place matches “{query}”. Try a nearby landmark, junction or the area’s name.
+              No place matches “{query}”.{' '}
+              {onDropPin ? 'Try a nearby landmark, or drop a pin on the map below.' : 'Try a nearby landmark, junction or the area’s name.'}
             </li>
           ) : results.map(({ place, via }, i) => (
             <li
@@ -145,6 +157,17 @@ export default function PlacePicker({
               </span>
             </li>
           ))}
+          {onDropPin && (
+            <li id={`${id}-opt-${results.length}`} data-index={results.length} role="option" aria-selected={false}
+              className={`place-option place-drop ${active === results.length ? 'is-active' : ''}`}
+              onMouseEnter={() => setActive(results.length)} onClick={dropPin}>
+              <MapPin size={16} aria-hidden="true" />
+              <span>
+                <span className="place-name">Not on the list? Drop a pin on the map</span>
+                <span className="place-meta">Priced by distance</span>
+              </span>
+            </li>
+          )}
         </ul>
       )}
       {hint && <span className="field-hint">{hint}</span>}

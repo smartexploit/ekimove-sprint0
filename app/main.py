@@ -19,6 +19,7 @@ from app.scheduling import router as scheduling_router
 from app.trip_chat import router as trip_chat_router
 from app.data_rights import router as data_rights_router
 from app.site_content import router as site_content_router
+from app.points import PointIn, Stop, distance_quotes, resolve_stop, router as points_router
 from app.calls import router as calls_router
 from app.launch_checklist import router as launch_checklist_router
 from app.fare_calculator import router as fare_calculator_router
@@ -114,6 +115,7 @@ app.include_router(trip_chat_router)
 app.include_router(data_rights_router)
 app.include_router(deliveries_router)
 app.include_router(site_content_router)
+app.include_router(points_router)
 app.include_router(calls_router)
 app.include_router(launch_checklist_router)
 app.include_router(fare_calculator_router)
@@ -192,6 +194,9 @@ class RideRequestCreate(BaseModel):
     # Book for later: pickup time (30 minutes to 7 days ahead).
     scheduled_for: datetime | None = None
     promo_code: str | None = Field(default=None, max_length=40)
+    # A pin dropped on the map for a spot that isn't on the list (priced per km).
+    origin_point: PointIn | None = None
+    destination_point: PointIn | None = None
 
 class RideStatusUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -221,8 +226,8 @@ class IncidentReviewUpdate(BaseModel):
 class RideRequestCreated(BaseModel):
     id: int
     passenger_user_id: int
-    origin_zone_id: int
-    destination_zone_id: int
+    origin_zone_id: int | None = None
+    destination_zone_id: int | None = None
     origin_text: str
     destination_text: str
     vehicle_type: str
@@ -1167,11 +1172,29 @@ def create_ride_request(
         )
     ensure_passenger_may_book(db, current_user)
 
-    use_places = (
+    use_points = payload.origin_point is not None or payload.destination_point is not None
+    use_places = not use_points and (
         payload.origin_place_id is not None
         or payload.destination_place_id is not None
     )
-    if use_places:
+    custom = None
+    if use_points:
+        if payload.origin_zone_id is not None or payload.destination_zone_id is not None:
+            raise HTTPException(status_code=422, detail="Provide places or pins, without zone IDs")
+        start = resolve_stop(db, Stop(place_id=payload.origin_place_id, point=payload.origin_point), "pickup")
+        end = resolve_stop(db, Stop(place_id=payload.destination_place_id, point=payload.destination_point),
+                           "destination")
+        options, meters = distance_quotes(db, start, end, payload.passenger_count)
+        option = next((o for o in options if o["vehicle_type"] == payload.vehicle_type), None)
+        too_many = payload.passenger_count > max_passengers(booking_rules(db), payload.vehicle_type)
+        if option is None and not too_many:
+            raise HTTPException(status_code=422, detail="That vehicle isn't available for this trip.")
+        custom = {"start": start, "end": end, "meters": meters,
+                  "amount": Decimal(option["quoted_fare"]) if option else Decimal("0")}
+        origin, destination = db.get(Zone, start["zone_id"]), db.get(Zone, end["zone_id"])
+        origin_text, destination_text = start["name"], end["name"]
+        fare = True  # priced by distance below
+    elif use_places:
         if (
             payload.origin_place_id is None
             or payload.destination_place_id is None
@@ -1286,13 +1309,22 @@ def create_ride_request(
             detail = f"A {payload.vehicle_type} can carry {limit} passengers at most."
         raise HTTPException(status_code=422, detail=detail)
 
-    calculated = quote_amount(rules, fare, payload.vehicle_type, payload.passenger_count)
+    if custom is not None:
+        calculated = custom["amount"]
+    else:
+        calculated = quote_amount(rules, fare, payload.vehicle_type, payload.passenger_count)
     scheduled_for = check_pickup_time(db, payload.scheduled_for)
 
+    if custom is not None:
+        origin_place_id = custom["start"]["place"].id if custom["start"]["place"] else None
+        destination_place_id = custom["end"]["place"].id if custom["end"]["place"] else None
+    else:
+        origin_place_id = origin_place.id if use_places else None
+        destination_place_id = destination_place.id if use_places else None
     request = RideRequest(
         passenger_user_id=current_user.id,
-        origin_place_id=origin_place.id if use_places else None,
-        destination_place_id=destination_place.id if use_places else None,
+        origin_place_id=origin_place_id,
+        destination_place_id=destination_place_id,
         origin_text=origin_text,
         destination_text=destination_text,
         vehicle_type=payload.vehicle_type,
@@ -1302,6 +1334,15 @@ def create_ride_request(
         scheduled_for=scheduled_for,
         dispatch_status="scheduled" if scheduled_for else None,
     )
+    if custom is not None:
+        request.pricing, request.distance_m = "distance", custom["meters"]
+        if custom["start"]["place"] is None:
+            request.origin_latitude, request.origin_longitude = custom["start"]["latitude"], custom["start"]["longitude"]
+        if custom["end"]["place"] is None:
+            request.destination_latitude = custom["end"]["latitude"]
+            request.destination_longitude = custom["end"]["longitude"]
+    else:
+        request.pricing = "route" if use_places else "zone"
 
     db.add(request)
     if payload.promo_code and payload.promo_code.strip():

@@ -40,6 +40,7 @@ from app.auth import get_current_user
 from app.config import settings
 from app.database import get_db
 from app.earnings import split_fare
+from app.points import request_point
 from app.models import (
     AppSetting,
     AuditLog,
@@ -185,7 +186,8 @@ def ranked_drivers(db: Session, ride_request: RideRequest) -> list[tuple[Driver,
         )
     ).all()
 
-    pickup = db.get(Place, ride_request.origin_place_id) if ride_request.origin_place_id else None
+    point = request_point(db, ride_request, "origin")
+    pickup = point if point["latitude"] is not None and point["longitude"] is not None else None
     fresh_after = _now() - timedelta(minutes=LOCATION_FRESH_MINUTES)
     located, unlocated = [], []
     for driver in drivers:
@@ -193,12 +195,12 @@ def ranked_drivers(db: Session, ride_request: RideRequest) -> list[tuple[Driver,
             continue
         if matching_vehicle(db, driver.id, ride_request) is None:
             continue
-        has_fix = (pickup is not None and pickup.latitude is not None and pickup.longitude is not None
+        has_fix = (pickup is not None
                    and driver.last_latitude is not None and driver.last_longitude is not None
                    and (_as_utc(driver.location_updated_at) or fresh_after) > fresh_after)
         if has_fix:
             located.append((driver, haversine_m(driver.last_latitude, driver.last_longitude,
-                                                pickup.latitude, pickup.longitude)))
+                                                pickup["latitude"], pickup["longitude"])))
         else:
             unlocated.append((driver, None))
     located.sort(key=lambda item: item[1])
