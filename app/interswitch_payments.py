@@ -18,6 +18,12 @@ from app.database import get_db
 from app.models import AuditLog, Payment, Ride, RideRequest, User
 
 logger = logging.getLogger(__name__)
+
+
+def card_payments_enabled() -> bool:
+    """Card checkout shows only when switched on and fully configured."""
+    return bool(settings.interswitch_enabled and settings.interswitch_merchant_code
+                and settings.interswitch_pay_item_id)
 router = APIRouter(prefix="/api/v1/payments", tags=["interswitch"])
 
 
@@ -70,10 +76,10 @@ def initiate_interswitch(
     if user.role != "passenger":
         raise HTTPException(status_code=403, detail="Passenger access required.")
 
-    if not settings.interswitch_merchant_code or not settings.interswitch_pay_item_id:
+    if not card_payments_enabled():
         raise HTTPException(
             status_code=503,
-            detail="Interswitch checkout is not configured on the server.",
+            detail="Card payments aren't available yet. Please pay by bank transfer.",
         )
 
     mode = settings.interswitch_mode.strip().upper()

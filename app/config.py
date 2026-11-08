@@ -87,6 +87,8 @@ class Settings(BaseSettings):
         return cleaned or None
 
     # Interswitch Web Checkout. TEST is the safe default.
+    # Card checkout is off until EkiMove has a live Interswitch merchant account.
+    interswitch_enabled: bool = False
     interswitch_merchant_code: str | None = None
     interswitch_pay_item_id: str | None = None
     interswitch_mode: str = "TEST"

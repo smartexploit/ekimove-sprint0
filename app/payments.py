@@ -106,8 +106,9 @@ def initiate_payment(
     if existing and existing.method == "interswitch" and existing.status in ("pending", "rejected"):
         # The passenger started a card checkout but now wants to pay by bank
         # transfer. First make sure the card payment didn't go through.
+        paid: bool | None = False
         # (If Interswitch has since been switched off, there's nothing to check.)
-        if existing.provider_transaction_ref and settings.interswitch_merchant_code:
+        if existing.provider_transaction_ref and settings.interswitch_enabled and settings.interswitch_merchant_code:
             from app.interswitch_payments import interswitch_says_paid  # avoid an import cycle
 
             try:
@@ -127,8 +128,12 @@ def initiate_payment(
         existing.status = "pending"
         existing.provider_transaction_ref = None
         existing.transfer_reference = None
-        note = ("Interswitch could not be checked; finance should confirm this card reference wasn't paid"
-                if paid is None and old_reference else "Interswitch reports it unpaid")
+        if paid is None:
+            note = "Interswitch could not be checked; finance should confirm this card reference wasn't paid"
+        elif settings.interswitch_enabled and settings.interswitch_merchant_code:
+            note = "Interswitch reports it unpaid"
+        else:
+            note = "Card checkout is switched off; finance should confirm this card reference wasn't paid"
         record_audit(
             db, user.id, "payment.method_switched", existing,
             f"Switched from Interswitch checkout ({old_reference or 'no reference'}) to bank transfer. {note}.",

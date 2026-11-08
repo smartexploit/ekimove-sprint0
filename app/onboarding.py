@@ -298,7 +298,7 @@ def _app(path: str) -> str:
 PASSENGER_STEPS = [
     "Choose your pickup and destination. You see the full fare before you book.",
     "We ring nearby drivers at once. The first to accept is shown to you with their plate number.",
-    "Pay through EkiMove (transfer or card) so your trip is recorded.",
+    "Pay through EkiMove by bank transfer so your trip is recorded.",
     "When the driver arrives, check the plate, then give them your pickup PIN.",
     "Share your live trip with family, and use SOS if anything feels wrong.",
 ]

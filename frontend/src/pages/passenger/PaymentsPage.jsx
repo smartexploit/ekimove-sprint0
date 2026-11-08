@@ -126,13 +126,14 @@ export default function PaymentsPage() {
       active = false
     }
   }, [effectiveRideId])
-  const { instant_transfers: instant } = useBusinessInfo()
+  const { instant_transfers: instant, card_payments: card } = useBusinessInfo()
+  const cardOn = Boolean(card?.enabled)
   const [instantUnavailable, setInstantUnavailable] = useState(false)
   const instantOn = Boolean(instant?.enabled) && !instantUnavailable
   const unpaidCard = currentPayment?.method === 'interswitch' && ['pending', 'rejected'].includes(currentPayment?.status)
   const transferStarted = currentPayment?.method === 'bank_transfer'
   // Open on the method the passenger actually started for this ride.
-  const method = methodChoice ?? (currentPayment?.method === 'interswitch' && currentPayment.status !== 'confirmed'
+  const method = !cardOn ? 'bank_transfer' : methodChoice ?? (currentPayment?.method === 'interswitch' && currentPayment.status !== 'confirmed'
     ? 'interswitch' : 'bank_transfer')
   const isPaid =
     currentPayment?.status === 'confirmed' ||
@@ -354,6 +355,7 @@ export default function PaymentsPage() {
               </Select>
             </label>
 
+            {cardOn && (
             <fieldset className="choice-list">
               <legend className="choice-legend">Payment method</legend>
               <label className="choice">
@@ -391,6 +393,7 @@ export default function PaymentsPage() {
                 </span>
               </label>
             </fieldset>
+            )}
 
             {method === 'bank_transfer' && instantOn ? (
               <>
@@ -427,8 +430,8 @@ export default function PaymentsPage() {
                   <Alert tone="success">This ride is paid. Your driver can start the trip.</Alert>
                 ) : unpaidCard ? (
                   <Alert tone="info">
-                    You started a card payment for this ride, but it wasn’t completed. To pay by bank transfer
-                    instead, send exactly {amountDue != null ? formatNaira(amountDue) : 'the fare'} to the account
+                    {cardOn ? 'You started a card payment for this ride, but it wasn’t completed. To pay by bank transfer instead, send' : 'Card payments aren’t available right now, so please pay by bank transfer: send'}
+                    {' '}exactly {amountDue != null ? formatNaira(amountDue) : 'the fare'} to the account
                     above, then tap <strong>I’ve sent the money</strong> and enter your transfer reference.
                   </Alert>
                 ) : currentPayment?.status === 'rejected' ? (

@@ -135,7 +135,7 @@ export function PublicFooter() {
 
         <div className="footer-base">
           <span>© {new Date().getFullYear()} EkiMove. Ekiti, on the move.</span>
-          <span>Cashless rides: bank transfer or Interswitch.</span>
+          <span>Cashless rides: pay by bank transfer.</span>
         </div>
       </div>
     </footer>

@@ -81,7 +81,7 @@ export const POLICIES = [
         'Your driver sees your first name and last initial, pickup and destination, and whether your ID is verified. Passengers see their driver’s first name and last initial, vehicle and plate number, rating and live location during the trip.',
         'Anyone you send a trip-sharing link to can see that trip’s status, driver details and map until two hours after it ends, or until you stop sharing.',
         'EkiMove staff see what they need to run and protect the service, including ID photos and trip trails, and every review is recorded.',
-        'Service providers that process data for us: payment partners (Paystack, Interswitch), photo storage (Cloudinary), hosting (Render), maps (OpenStreetMap or Geoapify), text-message and email providers (to send sign-in and reset codes), your phone’s notification service (if you turn notifications on), error monitoring (without your name or contact details) and, if you use the Atọ́nà assistant, an AI provider that processes your chat messages to reply.',
+        'Service providers that process data for us: payment partners (Paystack, and Interswitch if card payments are offered), photo storage (Cloudinary), hosting (Render), maps (OpenStreetMap or Geoapify), text-message and email providers (to send sign-in and reset codes), your phone’s notification service (if you turn notifications on), error monitoring (without your name or contact details) and, if you use the Atọ́nà assistant, an AI provider that processes your chat messages to reply.',
         'Authorities, when the law requires it or to protect someone’s safety.',
       ]],
       ['How long we keep it', [

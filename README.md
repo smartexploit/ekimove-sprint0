@@ -103,6 +103,8 @@ Passengers pay by bank transfer into a **personal EkiMove account number** (a Pa
 
 **To go live:** EkiMove needs a registered business on Paystack with dedicated virtual accounts enabled (some business types must validate the customer's BVN first; Paystack's default limit is 1,000 accounts). Set `PAYSTACK_SECRET_KEY` on the API and add the webhook URL in the Paystack dashboard. Until then the app keeps the existing manual bank-transfer and Interswitch flows. If Paystack hasn't enabled Dedicated Virtual Accounts yet (the app shows "Dedicated NUBAN is not available for your business"), set `PAYSTACK_VIRTUAL_ACCOUNTS_ENABLED=false`: passengers pay into the `BANK_TRANSFER_*` account as before, while the Paystack key keeps working for driver payouts. The Payments page also falls back to that account automatically if account creation is refused. Refunds are recorded in the app but sent by hand from the bank for now.
 
+**Card payments (Interswitch)** are off until EkiMove has a live merchant account: set `INTERSWITCH_ENABLED=true` together with `INTERSWITCH_MERCHANT_CODE`, `INTERSWITCH_PAY_ITEM_ID` and `INTERSWITCH_MODE=LIVE` to show the "Card or wallet" option again. While it's off, passengers only see bank transfer, and any card checkout started earlier switches to bank transfer when they tap "I've sent the money" (the old card reference is kept in the audit log). While a ride is unpaid, passengers can switch between card and transfer; once a transfer reference is submitted, card checkout is blocked so nobody pays twice.
+
 ## Driver earnings and payouts
 EkiMove keeps `COMMISSION_PERCENT` (10% by default) of every fare; the driver keeps the rest.
 

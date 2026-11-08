@@ -289,7 +289,7 @@ export default function BookRidePage() {
 
           <Alert tone="warning">
             Your ride isn't confirmed yet, and nothing has been paid. You'll pay
-            by bank transfer or Interswitch once a driver is assigned. A payment
+            by bank transfer once a driver is assigned. A payment
             screenshot alone doesn't confirm payment.
           </Alert>
 
@@ -460,8 +460,8 @@ export default function BookRidePage() {
 
             <p className="row muted small" style={{ flexWrap: 'nowrap', alignItems: 'flex-start' }}>
               <Wallet size={18} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />
-              You'll pay after a driver is assigned, by bank transfer or
-              Interswitch. Cash isn't accepted.
+              You'll pay by bank transfer after a driver is assigned. Cash
+              isn't accepted.
             </p>
 
             <div className="bottom-bar">

@@ -10,6 +10,7 @@ const EMPTY = {
   },
   support: { phone: null, email: null, whatsapp: null },
   instant_transfers: { enabled: false },
+  card_payments: { enabled: false },
   cancellation: { free_seconds: 120, fee_motorcycle: 0, fee_car: 0 },
 }
 
@@ -25,6 +26,7 @@ function loadBusinessInfo() {
           bank_transfer: { ...EMPTY.bank_transfer, ...(data?.bank_transfer || {}) },
           support: { ...EMPTY.support, ...(data?.support || {}) },
           instant_transfers: { ...EMPTY.instant_transfers, ...(data?.instant_transfers || {}) },
+          card_payments: { ...EMPTY.card_payments, ...(data?.card_payments || {}) },
           cancellation: { ...EMPTY.cancellation, ...(data?.cancellation || {}) },
         }
         return cached

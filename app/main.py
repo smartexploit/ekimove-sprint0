@@ -6,6 +6,7 @@ from typing import Literal
 from app.payments import router as payments_router
 from app.interswitch_payments import router as interswitch_payments_router
 from app.instant_payments import instant_transfers_enabled, router as instant_payments_router
+from app.interswitch_payments import card_payments_enabled
 from app.cancellations import router as cancellations_router
 from app import notifications, promos
 from app.scheduling import check_pickup_time, iso_utc
@@ -604,7 +605,7 @@ def database_health_check() -> dict[str, str]:
 def payment_policy() -> dict[str, object]:
     """Expose supported payment methods and confirmation rules."""
     return {
-        "supported_methods": ["bank_transfer", "interswitch"],
+        "supported_methods": ["bank_transfer", "interswitch"] if card_payments_enabled() else ["bank_transfer"],
         "cash_enabled": False,
         "instant_transfers_enabled": instant_transfers_enabled(),
         "confirmation_rule": "server_side_provider_verification_or_authorized_reconciliation",
@@ -626,6 +627,7 @@ def business_info() -> dict[str, object]:
     account_name = settings.bank_transfer_account_name
     return {
         "instant_transfers": {"enabled": instant_transfers_enabled()},
+        "card_payments": {"enabled": card_payments_enabled()},
         "cancellation": {
             "free_seconds": settings.cancellation_free_seconds,
             "fee_motorcycle": settings.cancellation_fee_motorcycle,

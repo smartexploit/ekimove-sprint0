@@ -113,7 +113,7 @@ export default function DashboardPage() {
               <Wallet size={22} aria-hidden="true" />
             </span>
             <h2>Payments</h2>
-            <p>Pay for an assigned ride by bank transfer or Interswitch. No cash.</p>
+            <p>Pay for an assigned ride by bank transfer. No cash.</p>
           </Link>
           <Link className="action-card" to="/support">
             <span className="action-icon" style={{ background: 'var(--laterite-100)', color: 'var(--laterite-700)' }}>

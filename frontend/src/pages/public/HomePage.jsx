@@ -239,7 +239,7 @@ export default function HomePage() {
             </span>
             <div>
               <h3>Cashless and accountable</h3>
-              <p>Pay by bank transfer or Interswitch. Every payment is verified before it counts.</p>
+              <p>Pay by bank transfer. Every payment is verified before it counts.</p>
             </div>
           </div>
         </section>

@@ -426,9 +426,9 @@ def tool_get_payment_and_support_info(ctx: ToolContext) -> dict:
         "status": "ok",
         "payment_policy": payment_policy(),
         "how_to_pay": (
-            "Passengers pay after a driver is assigned, from the Payments page: by bank "
-            "transfer (then submit the transfer reference) or Interswitch card/wallet "
-            "checkout. Cash is not accepted. A bank transfer is confirmed only after the "
+            "Passengers pay after a driver is assigned, from the Payments page, by bank "
+            "transfer (then submit the transfer reference). Card checkout is offered only "
+            "when payment_policy.supported_methods includes interswitch. Cash is not accepted. A bank transfer is confirmed only after the "
             "EkiMove team verifies it; a screenshot alone does not confirm payment."
         ),
         "bank_transfer": info["bank_transfer"],

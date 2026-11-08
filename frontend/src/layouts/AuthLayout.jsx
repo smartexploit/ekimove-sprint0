@@ -42,7 +42,7 @@ export default function AuthLayout({
           </li>
           <li className="row" style={{ color: 'var(--green-200)', fontWeight: 600 }}>
             <Wallet size={20} color="#F2B33D" aria-hidden="true" />
-            Cashless: bank transfer or Interswitch
+            Cashless: pay by bank transfer
           </li>
         </ul>
 

@@ -461,7 +461,7 @@ def test_interswitch_initiation_rejects_missing_credentials(
 
     assert response.status_code == 503
     assert response.json()["detail"] == (
-        "Interswitch checkout is not configured on the server."
+        "Card payments aren't available yet. Please pay by bank transfer."
     )
 
     # The configuration guard must run before a payment is created.
@@ -485,7 +485,7 @@ def test_supported_payment_methods_policy(client):
     response = client.get("/api/v1/policy/payments")
     assert response.status_code == 200
     body = response.json()
-    assert body["supported_methods"] == ["bank_transfer", "interswitch"]
+    assert body["supported_methods"] == ["bank_transfer"]  # card checkout is off by default
     assert body["cash_enabled"] is False
     assert body["screenshot_alone_confirms_payment"] is False
 
@@ -1838,6 +1838,8 @@ def test_interswitch_initiation_uses_server_fare_and_reuses_payment(
     from decimal import Decimal
 
     monkeypatch.setattr(settings, "interswitch_merchant_code", "TEST-MERCHANT")
+
+    monkeypatch.setattr(settings, "interswitch_enabled", True)
     monkeypatch.setattr(settings, "interswitch_pay_item_id", "TEST-PAYITEM")
     monkeypatch.setattr(settings, "interswitch_mode", "TEST")
 
@@ -1903,6 +1905,8 @@ def test_interswitch_verification_confirms_matching_provider_payment(
     import app.interswitch_payments as interswitch_module
 
     monkeypatch.setattr(settings, "interswitch_merchant_code", "TEST-MERCHANT")
+
+    monkeypatch.setattr(settings, "interswitch_enabled", True)
     monkeypatch.setattr(settings, "interswitch_pay_item_id", "TEST-PAYITEM")
 
     passenger_headers, _, request_id = create_assigned_ride(client)
@@ -2021,6 +2025,8 @@ def test_interswitch_verification_rejects_mismatched_provider_data(
     import app.interswitch_payments as interswitch_module
 
     monkeypatch.setattr(settings, "interswitch_merchant_code", "TEST-MERCHANT")
+
+    monkeypatch.setattr(settings, "interswitch_enabled", True)
     monkeypatch.setattr(settings, "interswitch_pay_item_id", "TEST-PAYITEM")
 
     passenger_headers, _, request_id = create_assigned_ride(client)
@@ -2086,6 +2092,8 @@ def test_interswitch_verification_does_not_reconfirm_refunded_payment(
     import app.interswitch_payments as interswitch_module
 
     monkeypatch.setattr(settings, "interswitch_merchant_code", "TEST-MERCHANT")
+
+    monkeypatch.setattr(settings, "interswitch_enabled", True)
     monkeypatch.setattr(settings, "interswitch_pay_item_id", "TEST-PAYITEM")
 
     passenger_headers, _, request_id = create_assigned_ride(client)
@@ -2158,6 +2166,8 @@ def test_interswitch_verification_handles_provider_connection_error(
     import app.interswitch_payments as interswitch_module
 
     monkeypatch.setattr(settings, "interswitch_merchant_code", "TEST-MERCHANT")
+
+    monkeypatch.setattr(settings, "interswitch_enabled", True)
     monkeypatch.setattr(settings, "interswitch_pay_item_id", "TEST-PAYITEM")
 
     passenger_headers, _, request_id = create_assigned_ride(client)
@@ -2284,6 +2294,8 @@ def test_interswitch_verification_selects_mode_specific_requery_url(
     import app.interswitch_payments as interswitch_module
 
     monkeypatch.setattr(settings, "interswitch_merchant_code", "TEST-MERCHANT")
+
+    monkeypatch.setattr(settings, "interswitch_enabled", True)
     monkeypatch.setattr(settings, "interswitch_pay_item_id", "TEST-PAYITEM")
     monkeypatch.setattr(settings, "interswitch_mode", mode)
 
@@ -6907,6 +6919,7 @@ def test_team_accounts_sign_in_with_email_only(client):
 
 def _start_card_checkout(client, monkeypatch):
     monkeypatch.setattr(settings, "interswitch_merchant_code", "TEST-MERCHANT")
+    monkeypatch.setattr(settings, "interswitch_enabled", True)
     monkeypatch.setattr(settings, "interswitch_pay_item_id", "TEST-PAYITEM")
     monkeypatch.setattr(settings, "interswitch_mode", "TEST")
     passenger, _, request_id = create_assigned_ride(client)
@@ -6998,6 +7011,7 @@ def test_unpaid_answer_on_an_http_error_counts_as_unpaid(client, monkeypatch):
 
 def test_unpaid_bank_transfer_can_switch_to_card(client, monkeypatch):
     monkeypatch.setattr(settings, "interswitch_merchant_code", "TEST-MERCHANT")
+    monkeypatch.setattr(settings, "interswitch_enabled", True)
     monkeypatch.setattr(settings, "interswitch_pay_item_id", "TEST-PAYITEM")
     monkeypatch.setattr(settings, "interswitch_mode", "TEST")
     passenger, _, request_id = create_assigned_ride(client)
@@ -7007,3 +7021,30 @@ def test_unpaid_bank_transfer_can_switch_to_card(client, monkeypatch):
                        json={"customer_email": "passenger@example.com"})
     assert card.status_code == 200, card.text
     assert card.json()["payment"]["method"] == "interswitch" and card.json()["checkout"]["txn_ref"]
+
+
+def test_card_checkout_is_off_until_switched_on(client, monkeypatch):
+    monkeypatch.setattr(settings, "interswitch_merchant_code", "TEST-MERCHANT")
+    monkeypatch.setattr(settings, "interswitch_pay_item_id", "TEST-PAYITEM")
+    monkeypatch.setattr(settings, "interswitch_enabled", False)
+    info = client.get("/api/v1/business-info").json()
+    assert info["card_payments"] == {"enabled": False}
+    assert client.get("/api/v1/policy/payments").json()["supported_methods"] == ["bank_transfer"]
+    passenger, _, request_id = create_assigned_ride(client)
+    ride_id = get_ride_id_from_request(client, request_id, passenger)
+    blocked = client.post(f"/api/v1/payments/rides/{ride_id}/interswitch/initiate", headers=passenger,
+                          json={"customer_email": "passenger@example.com"})
+    assert blocked.status_code == 503 and "bank transfer" in blocked.json()["detail"]
+    monkeypatch.setattr(settings, "interswitch_enabled", True)
+    assert client.get("/api/v1/business-info").json()["card_payments"] == {"enabled": True}
+
+
+def test_old_card_checkout_switches_to_transfer_when_card_is_off(client, monkeypatch):
+    passenger, ride_id, _checkout = _start_card_checkout(client, monkeypatch)
+    monkeypatch.setattr(settings, "interswitch_enabled", False)
+    switched = client.post(f"/api/v1/payments/rides/{ride_id}/initiate", headers=passenger)
+    assert switched.status_code == 200, switched.text
+    assert switched.json()["method"] == "bank_transfer"
+    submitted = client.post(f"/api/v1/payments/rides/{ride_id}/submit-transfer", headers=passenger,
+                            json={"transfer_reference": "TRF-445566"})
+    assert submitted.status_code == 200 and submitted.json()["status"] == "awaiting_confirmation"
