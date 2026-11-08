@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { CheckCircle2, Package } from 'lucide-react'
 import AppShell from '../../layouts/AppShell.jsx'
 import Alert from '../../components/ui/Alert.jsx'
+import { TRIP_BOOKED_EVENT } from '../../utils/tripStage.js'
 import PlacePicker from '../../components/booking/PlacePicker.jsx'
 import DropPinSheet from '../../components/booking/DropPinSheet.jsx'
 import { bookingStops, pinValue } from '../../utils/stops.js'
@@ -102,6 +103,7 @@ export default function SendPackagePage() {
         ...(pickupTime ? { scheduled_for: toApiTime(pickupTime) } : {}),
         ...(promo ? { promo_code: promo.code } : {}),
       }))
+      window.dispatchEvent(new Event(TRIP_BOOKED_EVENT))
     } catch (err) {
       setError(err.message || 'Could not book the delivery.')
     } finally {

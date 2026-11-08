@@ -119,12 +119,14 @@ EkiMove keeps `COMMISSION_PERCENT` (10% by default) of every fare; the driver ke
 - Passengers can pick **Car**, **Motorcycle** or **Move a load** straight from their dashboard; the choice is kept while they pick the route.
 
 ## Automatic driver assignment
-New requests (and accepted load quotes) are offered to one driver at a time:
+*Admin → Dispatch → Automatic dispatch* has two modes:
 
-- **Who is asked first:** among approved, online, free drivers with a matching approved vehicle, the **nearest** by straight-line distance, when the pickup place has coordinates (set them under *Places & fares*) and the driver's phone shared its location in the last 15 minutes. Otherwise the driver who has **waited longest** for a trip.
-- **The offer:** a card pops up on every driver screen with the route, distance, passengers and what they'll earn after commission, with a countdown, vibration and a short beep. **Accept** creates the trip; **Decline** or no answer passes it to the next driver. A driver going offline or being suspended passes their offer on.
-- **Fallback:** after the set number of drivers (5 by default) the request is marked **Needs you** on *Admin → Dispatch*, where admins can always assign by hand (that withdraws any live offer). The switch, the seconds to accept (30 by default) and the number of drivers to try are on that page.
-- **No extra server needed:** the engine runs whenever drivers, passengers or admins have the app open (their pages check every few seconds). The database allows only one live offer per request and per driver. Optionally, a Render Cron Job every minute can call `POST /api/v1/internal/dispatch/run` with the same `X-Cron-Token` header as the payout job.
+- **All free drivers at once (default, fastest):** a new request (or accepted load quote) rings at the same moment on every approved, online driver with a matching approved vehicle (motorcycle requests go to motorcycle drivers, car requests to car drivers) who is **not on a trip** and not already looking at another offer. The first to accept gets it; the offer disappears from everyone else's screen and they get a "taken" notice. Drivers who come online or finish a trip during the countdown join the round. If nobody accepts, a new round starts, up to the set number of rounds, then the request is marked **Needs you** and admins get a notification.
+- **One driver at a time:** the nearest free driver (when the pickup has coordinates and the driver's location is fresh), otherwise the one who has waited longest, is asked first; decline or no answer passes it on.
+- **The offer:** a full-screen card with the route, distance, passengers, earnings after commission, a countdown, vibration and a ringing tone that repeats until the driver answers. With notifications on, a phone notification rings even when the app is closed.
+- **Admins** can always assign by hand (that withdraws live offers). The **Drivers** list on the same page shows who is free, on a trip or offline, with **Call** and **Message** buttons (messages open a support conversation the driver sees in the app).
+- **No extra server needed:** the engine runs whenever drivers, passengers or admins have the app open. The database allows only one live offer per driver, and only one trip per request, so two drivers can't both win. Optionally, a Render Cron Job every minute can call `POST /api/v1/internal/dispatch/run` with the same `X-Cron-Token` header as the payout job.
+- **Passenger guide:** after booking, a pop-up walks the passenger through each step: finding a driver (and how many phones it is ringing on), driver accepted → pay, driver on the way, driver arrived (with the pickup PIN), on the trip, and rate. "Got it" shrinks it to a bar they can reopen.
 - Drivers share location only while online, and only if they allow it on their phone.
 
 ## Trust and safety

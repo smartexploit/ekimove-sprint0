@@ -11,6 +11,7 @@ import {
 } from '../../services/dispatchService.js'
 import { formatNaira } from '../../utils/format.js'
 import { vehicleLabel } from '../../utils/vehicles.js'
+import { playTone, unlockAudio } from '../../utils/callTones.js'
 
 const POLL_MS = 3000
 // Often enough for passengers to watch the driver approach on the map.
@@ -53,6 +54,7 @@ export default function OfferWatcher() {
   const [error, setError] = useState('')
   const [location, setLocation] = useState('unknown')
   const lastOfferId = useRef(null)
+  const [fullSeconds, setFullSeconds] = useState(30)
 
   // Poll for offers while the page is visible.
   useEffect(() => {
@@ -69,8 +71,8 @@ export default function OfferWatcher() {
             setSecondsLeft(next.seconds_left)
             if (next.id !== lastOfferId.current) {
               lastOfferId.current = next.id
+              setFullSeconds(Math.max(next.seconds_left, 10))
               setError('')
-              navigator.vibrate?.([300, 150, 300])
               beep()
             }
           }
@@ -85,6 +87,18 @@ export default function OfferWatcher() {
       window.clearInterval(timer)
       document.removeEventListener('visibilitychange', check)
     }
+  }, [])
+
+  // Ring and vibrate while a new trip is waiting for an answer.
+  const ringing = Boolean(offer) && secondsLeft > 0
+  useEffect(() => {
+    if (!ringing) return undefined
+    return playTone('ring')
+  }, [ringing])
+
+  useEffect(() => {
+    window.addEventListener('pointerdown', unlockAudio, { once: true })
+    return () => window.removeEventListener('pointerdown', unlockAudio)
   }, [])
 
   // Local countdown between polls.
@@ -135,7 +149,9 @@ export default function OfferWatcher() {
   if (offer && secondsLeft > 0) {
     const urgent = secondsLeft <= 10
     return (
-      <section className="offer-card" role="alertdialog" aria-labelledby="offer-title" aria-describedby="offer-route">
+      <div className="offer-overlay">
+      <section className="offer-card" role="alertdialog" aria-modal="true" aria-labelledby="offer-title"
+        aria-describedby="offer-route">
         <div className="row row-between">
           <p id="offer-title" className="offer-eyebrow">
             <BellRing size={18} aria-hidden="true" /> New {offer.service_type === 'haulage' ? 'load job' : 'trip'} for you
@@ -143,8 +159,11 @@ export default function OfferWatcher() {
           <span className={`offer-timer ${urgent ? 'is-urgent' : ''}`} aria-live="polite">{secondsLeft}s</span>
         </div>
         <div className="offer-bar" aria-hidden="true">
-          <span style={{ width: `${Math.min(100, (secondsLeft / 30) * 100)}%` }} />
+          <span style={{ width: `${Math.min(100, (secondsLeft / fullSeconds) * 100)}%` }} />
         </div>
+        {offer.drivers_notified > 1 && (
+          <p className="offer-race">Sent to {offer.drivers_notified} nearby drivers. First to accept gets it.</p>
+        )}
         <p id="offer-route" className="offer-route">
           {offer.origin_text} <span aria-hidden="true">→</span><span className="sr-only">to</span> {offer.destination_text}
         </p>
@@ -171,6 +190,7 @@ export default function OfferWatcher() {
           </button>
         </div>
       </section>
+      </div>
     )
   }
 

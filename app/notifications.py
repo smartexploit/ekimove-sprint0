@@ -33,9 +33,23 @@ def _driver_user_id(db: Session, driver_id: int) -> int | None:
 
 def trip_offered(db: Session, request: RideRequest, driver: Driver, seconds: int) -> None:
     kind = {"haulage": "Load", "delivery": "Delivery"}.get(request.service_type, "Trip")
-    notify(db, driver.user_id, f"New {kind.lower()} offer · {_naira(request.quoted_fare)}",
-           f"{_route(request)}. Accept within {seconds} seconds.", url="/driver/trips", tag=f"offer-{request.id}",
-           urgent=True, ttl=max(seconds, 30))
+    notify(db, driver.user_id, f"New {kind.lower()} request · {_naira(request.quoted_fare)}",
+           f"{_route(request)}. First to accept gets it. Open EkiMove to accept.", url="/driver/trips",
+           tag=f"offer-{request.id}", urgent=True, ttl=max(seconds, 30), extra={"offer": True})
+
+
+def offer_taken(db: Session, request_id: int, driver_ids: list[int]) -> None:
+    """Replace the ringing offer on other drivers' phones."""
+    user_ids = [uid for uid in (_driver_user_id(db, d) for d in driver_ids) if uid]
+    if user_ids:
+        notify(db, user_ids, "Trip taken", "Another driver accepted this request. Stay online for the next one.",
+               url="/driver/status", tag=f"offer-{request_id}", ttl=120)
+
+
+def needs_admin(db: Session, request: RideRequest) -> None:
+    notify_admins(db, f"No driver yet · request #{request.id}",
+                  f"{_route(request)} ({request.vehicle_type}). Assign a driver in Dispatch.",
+                  url="/admin/dispatch", tag=f"dispatch-{request.id}", urgent=True)
 
 
 def scheduled_search_started(db: Session, request: RideRequest) -> None:

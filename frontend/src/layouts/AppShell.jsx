@@ -9,6 +9,7 @@ import {
   Wallet,
 } from 'lucide-react'
 import useSupportUnread from '../hooks/useSupportUnread.js'
+import TripGuide from '../components/trips/TripGuide.jsx'
 import AlertsPrompt from '../components/account/AlertsPrompt.jsx'
 import OfferWatcher from '../components/driver/OfferWatcher.jsx'
 import Logo from '../components/brand/Logo.jsx'
@@ -108,6 +109,7 @@ export default function AppShell({
         <div className="container">
           {role === 'driver' && <OfferWatcher />}
           <AlertsPrompt role={role} />
+          {role === 'passenger' && <TripGuide />}
           {!hideHead && (title || actions) && (
             <div className="page-head">
               <div>

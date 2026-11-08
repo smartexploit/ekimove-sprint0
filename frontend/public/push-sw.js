@@ -24,6 +24,10 @@ self.addEventListener('push', (event) => {
     options.requireInteraction = true
     options.vibrate = [800, 400, 800, 400, 800, 400, 800]
     options.actions = [{ action: 'answer', title: 'Answer' }]
+  } else if (data.offer) {
+    // A new trip request for drivers: ring until they look.
+    options.requireInteraction = true
+    options.vibrate = [600, 250, 600, 250, 600, 250, 600]
   } else if (String(data.tag || '').startsWith('chat-')) {
     options.vibrate = [300, 150, 300]
   }

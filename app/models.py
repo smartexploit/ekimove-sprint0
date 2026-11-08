@@ -322,10 +322,10 @@ class RideOffer(Base):
             "status IN ('pending', 'accepted', 'declined', 'expired', 'withdrawn')",
             name="ck_ride_offers_status",
         ),
-        # At most one live offer per request and per driver, enforced by
-        # the database so two app servers can never double-offer.
-        Index("uq_ride_offers_pending_request", "request_id", unique=True,
-              sqlite_where=text("status = 'pending'"), postgresql_where=text("status = 'pending'")),
+        # At most one live offer per driver, enforced by the database so two
+        # app servers can never double-offer. (A request may be offered to
+        # many drivers at once; the ride's unique request_id means only the
+        # first to accept gets it.)
         Index("uq_ride_offers_pending_driver", "driver_id", unique=True,
               sqlite_where=text("status = 'pending'"), postgresql_where=text("status = 'pending'")),
     )

@@ -13,6 +13,8 @@ from __future__ import annotations
 from decimal import ROUND_HALF_UP, Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
@@ -121,6 +123,7 @@ class SettingsUpdate(BaseModel):
     auto_dispatch_enabled: bool | None = None
     dispatch_offer_seconds: int | None = Field(default=None, ge=15, le=120)
     dispatch_max_offers: int | None = Field(default=None, ge=1, le=20)
+    dispatch_mode: Literal["all", "one"] | None = None
     require_verified_passengers: bool | None = None
     require_contact_verification: bool | None = None
     referral_enabled: bool | None = None
@@ -185,6 +188,8 @@ def admin_update_settings(
         changes["dispatch_offer_seconds"] = str(payload.dispatch_offer_seconds)
     if payload.dispatch_max_offers is not None:
         changes["dispatch_max_offers"] = str(payload.dispatch_max_offers)
+    if payload.dispatch_mode is not None:
+        changes["dispatch_mode"] = payload.dispatch_mode
     if payload.require_verified_passengers is not None:
         changes["require_verified_passengers"] = "true" if payload.require_verified_passengers else "false"
     if payload.require_contact_verification is not None:

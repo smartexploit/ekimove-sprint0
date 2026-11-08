@@ -1,8 +1,15 @@
-"""Automatic dispatch: offer each request to the best-placed driver.
+"""Automatic dispatch: offer each request to drivers.
 
 How it works
 ------------
-* A new (or accepted load) request is offered to one eligible driver at a
+* Mode "all" (the default): a new request is offered at once to every free,
+  online driver with the right vehicle (motorcycle bookings to motorcycle
+  drivers, car bookings to car drivers). The first to accept gets it and
+  the others' offers are withdrawn. A round lasts ``dispatch_offer_seconds``;
+  drivers who come online (or finish a trip) during a round join it. Drivers
+  on a trip get no offers until it ends. After ``dispatch_max_offers``
+  rounds with no taker, the request is flagged for an admin.
+* Mode "one": the request is offered to one eligible driver at a
   time. The driver has ``dispatch_offer_seconds`` to accept or decline.
 * Eligible: approved, online, active account, an approved vehicle of the
   right type and size, not already on a trip, not holding another offer,
@@ -36,7 +43,7 @@ from sqlalchemy.orm import Session
 
 from app import notifications
 from app.app_settings import seats_needed
-from app.auth import get_current_user
+from app.auth import get_current_user, require_super_admin
 from app.config import settings
 from app.database import get_db
 from app.earnings import split_fare
@@ -57,7 +64,8 @@ router = APIRouter(prefix="/api/v1", tags=["dispatch"])
 
 BUSY_RIDE_STATUSES = ("assigned", "driver_arriving", "in_progress")
 LOCATION_FRESH_MINUTES = 15
-DEFAULTS = {"auto_dispatch_enabled": "true", "dispatch_offer_seconds": "30", "dispatch_max_offers": "5"}
+DEFAULTS = {"auto_dispatch_enabled": "true", "dispatch_offer_seconds": "30", "dispatch_max_offers": "5",
+            "dispatch_mode": "all"}
 _throttle_lock = threading.Lock()
 _last_run = 0.0
 MIN_SECONDS_BETWEEN_RUNS = 2.0
@@ -88,6 +96,7 @@ def dispatch_rules(db: Session) -> dict:
         "auto_dispatch_enabled": get("auto_dispatch_enabled") == "true",
         "dispatch_offer_seconds": as_int("dispatch_offer_seconds", 15, 120),
         "dispatch_max_offers": as_int("dispatch_max_offers", 1, 20),
+        "dispatch_mode": "one" if get("dispatch_mode") == "one" else "all",
     }
 
 
@@ -105,11 +114,16 @@ def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> int:
 
 
 def withdraw_offers(db: Session, request_id: int, keep_offer_id: int | None = None) -> None:
+    """Close the other drivers' offers (someone took it, or an admin assigned it)."""
+    others = []
     for offer in db.scalars(select(RideOffer).where(RideOffer.request_id == request_id,
                                                    RideOffer.status == "pending")).all():
         if offer.id != keep_offer_id:
             offer.status = "withdrawn"
             offer.responded_at = _now()
+            others.append(offer.driver_id)
+    if others:
+        notifications.offer_taken(db, request_id, others)
 
 
 def driver_is_busy(db: Session, driver_id: int) -> bool:
@@ -174,8 +188,15 @@ def _idle_since(db: Session, driver: Driver) -> datetime:
     return max(candidates) if candidates else datetime(2000, 1, 1, tzinfo=timezone.utc)
 
 
-def ranked_drivers(db: Session, ride_request: RideRequest) -> list[tuple[Driver, int | None]]:
-    tried = set(db.scalars(select(RideOffer.driver_id).where(RideOffer.request_id == ride_request.id)).all())
+def ranked_drivers(db: Session, ride_request: RideRequest,
+                   broadcast: bool = False) -> list[tuple[Driver, int | None]]:
+    """Eligible drivers, nearest first. One-at-a-time skips everyone already
+    offered this request; broadcast only skips those who declined it or
+    already have it on screen."""
+    offered = select(RideOffer.driver_id).where(RideOffer.request_id == ride_request.id)
+    if broadcast:
+        offered = offered.where(RideOffer.status.in_(("declined", "pending")))
+    tried = set(db.scalars(offered).all())
     holding = set(db.scalars(select(RideOffer.driver_id).where(RideOffer.status == "pending")).all())
     busy = set(db.scalars(select(Ride.driver_id).where(Ride.status.in_(BUSY_RIDE_STATUSES))).all())
     drivers = db.scalars(
@@ -211,11 +232,7 @@ def ranked_drivers(db: Session, ride_request: RideRequest) -> list[tuple[Driver,
 def _offer_next(db: Session, ride_request: RideRequest, rules: dict) -> None:
     """Offer one waiting request to the best eligible driver and commit."""
     if ride_request.dispatch_attempts >= rules["dispatch_max_offers"]:
-        if ride_request.dispatch_status != "manual":
-            ride_request.dispatch_status = "manual"
-            db.add(AuditLog(actor_user_id=None, action="dispatch.needs_admin", entity_type="ride_request",
-                            entity_id=str(ride_request.id),
-                            details=f"No driver accepted after {ride_request.dispatch_attempts} offers."))
+        _needs_admin(db, ride_request, ride_request.dispatch_attempts, broadcast=False)
         db.commit()
         return
     candidates = ranked_drivers(db, ride_request)
@@ -236,6 +253,49 @@ def _offer_next(db: Session, ride_request: RideRequest, rules: dict) -> None:
         # Another server offered this request (or this driver) a moment ago;
         # the next run picks up from there.
         db.rollback()
+
+
+def _needs_admin(db: Session, ride_request: RideRequest, rounds: int, broadcast: bool) -> None:
+    if ride_request.dispatch_status == "manual":
+        return
+    ride_request.dispatch_status = "manual"
+    what = f"{rounds} rounds to all free drivers" if broadcast else f"{rounds} offers"
+    db.add(AuditLog(actor_user_id=None, action="dispatch.needs_admin", entity_type="ride_request",
+                    entity_id=str(ride_request.id), details=f"No driver accepted after {what}."))
+    notifications.needs_admin(db, ride_request)
+
+
+def _offer_to_all(db: Session, ride_request: RideRequest, rules: dict, expires_at: datetime | None = None) -> int:
+    """Offer the request to every eligible driver not already holding it.
+    With expires_at, drivers join the round already running. Returns how
+    many drivers were offered it."""
+    count = 0
+    for driver, distance in ranked_drivers(db, ride_request, broadcast=True):
+        expiry = expires_at or (_now() + timedelta(seconds=rules["dispatch_offer_seconds"]))
+        try:
+            with db.begin_nested():
+                db.add(RideOffer(request_id=ride_request.id, driver_id=driver.id, status="pending",
+                                 distance_m=distance, offered_at=_now(), expires_at=expiry))
+        except IntegrityError:
+            continue  # this driver was just offered something else
+        seconds = max(5, int((expiry - _now()).total_seconds()))
+        notifications.trip_offered(db, ride_request, driver, seconds)
+        count += 1
+    return count
+
+
+def _broadcast_round(db: Session, ride_request: RideRequest, rules: dict) -> None:
+    """Start a new round: offer the request to all free matching drivers."""
+    if ride_request.dispatch_attempts >= rules["dispatch_max_offers"]:
+        _needs_admin(db, ride_request, ride_request.dispatch_attempts, broadcast=True)
+        db.commit()
+        return
+    if _offer_to_all(db, ride_request, rules):
+        ride_request.dispatch_attempts += 1
+        ride_request.dispatch_status = "offering"
+    else:
+        ride_request.dispatch_status = "searching"
+    db.commit()
 
 
 def advance_dispatch(db: Session, force: bool = False) -> None:
@@ -266,9 +326,19 @@ def advance_dispatch(db: Session, force: bool = False) -> None:
         from app.scheduling import due_for_dispatch
 
         lead = schedule_lead_minutes(db)
+        broadcast = rules["dispatch_mode"] == "all"
         for request_id in waiting_ids:
-            if db.scalar(select(RideOffer.id).where(RideOffer.request_id == request_id,
-                                                    RideOffer.status == "pending")):
+            live = db.scalars(select(RideOffer).where(RideOffer.request_id == request_id,
+                                                      RideOffer.status == "pending")).all()
+            if live:
+                if broadcast:
+                    # Drivers who just came online or finished a trip join
+                    # the round that's already running.
+                    ride_request = db.get(RideRequest, request_id)
+                    if ride_request is not None and ride_request.status == "requested":
+                        expiry = min(_as_utc(o.expires_at) for o in live)
+                        if expiry - now > timedelta(seconds=5) and _offer_to_all(db, ride_request, rules, expiry):
+                            db.commit()
                 continue
             ride_request = db.get(RideRequest, request_id)
             if ride_request is None or ride_request.status != "requested":
@@ -279,7 +349,10 @@ def advance_dispatch(db: Session, force: bool = False) -> None:
             if ride_request.dispatch_status == "scheduled":
                 ride_request.dispatch_status = None
                 notifications.scheduled_search_started(db, ride_request)
-            _offer_next(db, ride_request, rules)
+            if broadcast:
+                _broadcast_round(db, ride_request, rules)
+            else:
+                _offer_next(db, ride_request, rules)
     except SQLAlchemyError:
         db.rollback()
 
@@ -346,6 +419,8 @@ def offer_result(db: Session, offer: RideOffer) -> dict:
         "fare": str(gross),
         "commission": str(commission),
         "earning": str(net),
+        "drivers_notified": db.scalar(select(func.count(RideOffer.id)).where(
+            RideOffer.request_id == ride_request.id, RideOffer.status == "pending")) or 0,
     }
 
 
@@ -405,8 +480,10 @@ def driver_went_offline(db: Session, driver: Driver) -> None:
 
 def dispatch_summary(db: Session, ride_request: RideRequest) -> dict:
     """Dispatch state shown to admins and passengers."""
-    offer = db.scalar(select(RideOffer).where(RideOffer.request_id == ride_request.id,
-                                             RideOffer.status == "pending"))
+    live = db.scalars(select(RideOffer).where(RideOffer.request_id == ride_request.id,
+                                             RideOffer.status == "pending")
+                      .order_by(RideOffer.distance_m.is_(None), RideOffer.distance_m)).all()
+    offer = live[0] if live else None
     current = None
     if offer is not None:
         driver = db.get(Driver, offer.driver_id)
@@ -427,8 +504,40 @@ def dispatch_summary(db: Session, ride_request: RideRequest) -> dict:
         "dispatch_attempts": ride_request.dispatch_attempts,
         "declined_or_missed": declined,
         "current_offer": current,
+        "drivers_notified": len(live),
+        "dispatch_mode": dispatch_rules(db)["dispatch_mode"],
         "waiting_seconds": max(0, int((_now() - created).total_seconds())),
     }
+
+
+# --------------------------------------------------------------------------
+# Admin: every driver at a glance (free / on a trip / offline)
+# --------------------------------------------------------------------------
+
+
+@router.get("/admin/dispatch/drivers")
+def admin_driver_roster(db: Session = Depends(get_db), _admin: User = Depends(require_super_admin)) -> list[dict]:
+    rows = db.execute(select(Driver, User).join(User, Driver.user_id == User.id)
+                      .where(Driver.verification_status == "approved", User.is_active.is_(True))).all()
+    busy = dict(db.execute(select(Ride.driver_id, Ride.id).where(Ride.status.in_(BUSY_RIDE_STATUSES))).all())
+    offers = dict(db.execute(select(RideOffer.driver_id, RideOffer.request_id)
+                             .where(RideOffer.status == "pending")).all())
+    fresh_after = _now() - timedelta(minutes=LOCATION_FRESH_MINUTES)
+    out = []
+    for driver, user in rows:
+        vehicles = db.scalars(select(Vehicle).where(Vehicle.driver_id == driver.id,
+                                                    Vehicle.is_approved.is_(True))).all()
+        state = "on_trip" if driver.id in busy else ("free" if driver.is_online else "offline")
+        located = driver.last_latitude is not None and (_as_utc(driver.location_updated_at) or fresh_after) > fresh_after
+        out.append({
+            "driver_id": driver.id, "user_id": user.id, "name": user.full_name, "phone": user.phone,
+            "state": state, "ride_id": busy.get(driver.id), "offer_request_id": offers.get(driver.id),
+            "vehicles": [{"type": v.vehicle_type, "plate": v.plate_number} for v in vehicles],
+            "location_fresh": bool(located),
+        })
+    order = {"free": 0, "on_trip": 1, "offline": 2}
+    out.sort(key=lambda d: (order[d["state"]], (d["name"] or "").lower()))
+    return out
 
 
 # --------------------------------------------------------------------------

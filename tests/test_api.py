@@ -3666,6 +3666,13 @@ def current_offer(client, driver_headers):
     return response.json()["offer"]
 
 
+def one_at_a_time(client):
+    """Switch dispatch to offering one driver at a time."""
+    with session_for(client) as db:
+        db.merge(AppSetting(key="dispatch_mode", value="one"))
+        db.commit()
+
+
 def expire_offers(client):
     with session_for(client) as db:
         for offer in db.query(RideOffer).filter(RideOffer.status == "pending").all():
@@ -3694,6 +3701,7 @@ def test_new_request_is_offered_and_driver_accepts(client):
 
 
 def test_decline_moves_the_request_to_the_next_driver(client):
+    one_at_a_time(client)
     add_second_driver(client)
     _, request_id = new_request(client)
     first = login(client, *DRIVER_LOGIN)
@@ -3711,6 +3719,7 @@ def test_decline_moves_the_request_to_the_next_driver(client):
 
 
 def test_unanswered_offers_cascade_then_go_to_the_admin(client):
+    one_at_a_time(client)
     admin = login(client, *ADMIN_LOGIN)
     client.put("/api/v1/admin/settings", json={"dispatch_max_offers": 2}, headers=admin)
     add_second_driver(client)
@@ -3743,6 +3752,7 @@ def test_accepting_too_late_is_refused(client):
 
 
 def test_nearest_driver_gets_the_offer(client):
+    one_at_a_time(client)
     ids = _seed_place_route(client)
     add_second_driver(client)
     with session_for(client) as db:
@@ -4501,7 +4511,7 @@ def test_trip_events_notify_the_right_phones(client, quiet_messaging_and_push):
     _, request_id = new_request(client, passenger)
     client.get("/api/v1/driver/offers/current", headers=driver)
     offers = [json.loads(p["payload"]) for p in pushed if "driver-phone" in p["endpoint"]]
-    assert offers and offers[0]["title"].startswith("New trip offer")
+    assert offers and offers[0]["title"].startswith("New trip request")
     assert offers[0]["url"] == "/driver/trips"
     assert [p for p in pushed if "driver-phone" in p["endpoint"]][0]["urgent"] is True
     offer = client.get("/api/v1/driver/offers/current", headers=driver).json()["offer"]
@@ -5030,7 +5040,7 @@ def test_delivery_end_to_end_with_code(client, outbox, monkeypatch, quiet_messag
 
     offer = current_offer(client, driver)
     assert offer["service_type"] == "delivery" and offer["delivery_size"] == "medium" and offer["fragile"] is True
-    assert any(json.loads(p["payload"])["title"].startswith("New delivery offer")
+    assert any(json.loads(p["payload"])["title"].startswith("New delivery request")
                for p in quiet_messaging_and_push)
     assert client.post(f"/api/v1/driver/offers/{offer['id']}/accept", headers=driver).status_code == 200
 
@@ -6360,3 +6370,103 @@ def test_call_keeps_ringing_until_answered(client, quiet_messaging_and_push, mon
     assert all(json.loads(r["payload"])["tag"] == f"call-{call_id}" for r in reminders)
     assert naps and all(n == 1 for n in naps)
     del time_module
+
+
+# ---------- Broadcast dispatch: all free matching drivers at once ----------
+def add_driver(client, user_id, driver_id, vehicle_id, phone, vehicle_type, online=True):
+    with session_for(client) as db:
+        db.add(User(id=user_id, phone=phone, full_name=f"Driver {driver_id}", role="driver", is_active=True,
+                    password_hash=hash_password("Driver-Extra-Password-9!")))
+        db.flush()
+        db.add(Driver(id=driver_id, user_id=user_id, verification_status="approved", is_online=online))
+        db.flush()
+        db.add(Vehicle(id=vehicle_id, driver_id=driver_id, vehicle_type=vehicle_type,
+                       plate_number=f"EKM-{driver_id:03d}", capacity=1 if vehicle_type == "motorcycle" else 4,
+                       is_approved=True))
+        db.commit()
+    return login(client, phone, "Driver-Extra-Password-9!")
+
+
+def test_request_goes_to_all_free_matching_drivers(client, quiet_messaging_and_push):
+    add_second_driver(client)  # a second car ("standard") driver
+    okada = add_driver(client, 30, 3, 31, "08000000030", "motorcycle")
+    first, second = login(client, *DRIVER_LOGIN), login(client, *SECOND_DRIVER_LOGIN)
+    subscribe(client, second, "https://fcm.googleapis.com/fcm/send/second-driver")
+    passenger, request_id = new_request(client)  # a car ("standard") booking
+    offers = {"first": current_offer(client, first), "second": current_offer(client, second)}
+    assert offers["first"]["request_id"] == request_id and offers["second"]["request_id"] == request_id
+    assert current_offer(client, okada) is None  # motorcycle drivers don't get car bookings
+    pushed = [json.loads(p["payload"]) for p in quiet_messaging_and_push if "second-driver" in p["endpoint"]]
+    assert pushed[-1]["offer"] is True and "First to accept" in pushed[-1]["body"]
+    mine = next(r for r in client.get("/api/v1/ride-requests/my-rides", headers=passenger).json() if r["id"] == request_id)
+    assert mine["drivers_notified"] == 2
+    # The first to accept gets it; the other offer closes.
+    won = client.post(f"/api/v1/driver/offers/{offers['second']['id']}/accept", headers=second)
+    assert won.status_code == 200, won.text
+    lost = client.post(f"/api/v1/driver/offers/{offers['first']['id']}/accept", headers=first)
+    assert lost.status_code == 409 and "another driver" in lost.json()["detail"]
+    assert current_offer(client, first) is None
+    # The busy driver gets nothing new until the trip ends; the free one does.
+    _, next_request = new_request(client, headers=login(client, "08000000002", "Second-Test-Password-2!"))
+    assert current_offer(client, second) is None
+    assert current_offer(client, first)["request_id"] == next_request
+
+
+def test_drivers_join_a_running_round_and_rounds_end_with_the_admin(client, quiet_messaging_and_push):
+    admin = login(client, *ADMIN_LOGIN)
+    subscribe(client, admin, "https://fcm.googleapis.com/fcm/send/admin-phone")
+    client.put("/api/v1/admin/settings", json={"dispatch_max_offers": 2}, headers=admin)
+    add_second_driver(client, online=False)
+    first, second = login(client, *DRIVER_LOGIN), login(client, *SECOND_DRIVER_LOGIN)
+    _, request_id = new_request(client)
+    offer = current_offer(client, first)
+    assert current_offer(client, second) is None  # offline
+    with session_for(client) as db:
+        db.get(Driver, 2).is_online = True
+        db.commit()
+    joined = current_offer(client, second)
+    assert joined and joined["request_id"] == request_id
+    assert abs(joined["seconds_left"] - offer["seconds_left"]) <= 2  # same round
+    # One driver declines: the other still has it.
+    client.post(f"/api/v1/driver/offers/{offer['id']}/decline", headers=first)
+    assert current_offer(client, second)["request_id"] == request_id
+    # Nobody takes it: round 2 goes to whoever hasn't declined, then the admin is alerted.
+    expire_offers(client)
+    again = current_offer(client, second)
+    assert again and again["request_id"] == request_id and current_offer(client, first) is None
+    expire_offers(client)
+    current_offer(client, second)
+    pending = next(r for r in client.get("/api/v1/admin/ride-requests/pending", headers=admin).json()
+                   if r["id"] == request_id)
+    assert pending["dispatch_status"] == "manual" and pending["dispatch_attempts"] == 2
+    alerts = [json.loads(p["payload"]) for p in quiet_messaging_and_push if "admin-phone" in p["endpoint"]]
+    assert any(a["title"].startswith("No driver yet") for a in alerts)
+    # The admin can still assign by hand.
+    assigned = client.post(f"/api/v1/admin/ride-requests/{request_id}/assign", json={"driver_id": 2}, headers=admin)
+    assert assigned.status_code == 201, assigned.text
+
+
+def test_admin_sees_drivers_and_can_message_them(client, quiet_messaging_and_push):
+    admin = login(client, *ADMIN_LOGIN)
+    passenger_headers, _admin, request_id = create_assigned_ride(client)  # driver 1 on a trip
+    add_second_driver(client)
+    add_driver(client, 30, 3, 31, "08000000030", "motorcycle", online=False)
+    roster = client.get("/api/v1/admin/dispatch/drivers", headers=admin)
+    assert roster.status_code == 200
+    states = {d["driver_id"]: d for d in roster.json()}
+    assert states[1]["state"] == "on_trip" and states[1]["ride_id"]
+    assert states[2]["state"] == "free" and states[2]["phone"] == "08000000010"
+    assert states[3]["state"] == "offline" and states[3]["vehicles"][0]["type"] == "motorcycle"
+    assert [d["state"] for d in roster.json()] == ["free", "on_trip", "offline"]
+    assert client.get("/api/v1/admin/dispatch/drivers", headers=passenger_headers).status_code == 403
+    # Message a driver first; it shows in their support inbox.
+    second = login(client, *SECOND_DRIVER_LOGIN)
+    subscribe(client, second, "https://fcm.googleapis.com/fcm/send/second-inbox")
+    started = client.post("/api/v1/admin/support/threads", headers=admin,
+                          json={"user_id": 10, "subject": "Trip near EKSU", "message": "Please go online at 4pm."})
+    assert started.status_code == 201, started.text
+    inbox = client.get("/api/v1/support/threads", headers=second).json()
+    assert inbox and inbox[0]["subject"] == "Trip near EKSU"
+    assert any("second-inbox" in p["endpoint"] for p in quiet_messaging_and_push)
+    assert client.post("/api/v1/admin/support/threads", headers=admin,
+                       json={"user_id": 999, "subject": "Hello", "message": "Hi"}).status_code == 404

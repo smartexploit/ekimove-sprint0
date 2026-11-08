@@ -9,6 +9,7 @@ import { vehicleBlurb, vehicleLabel } from '../../utils/vehicles.js'
 import useTripOptions from '../../hooks/useTripOptions.js'
 import { apiRequest } from '../../services/authService.js'
 import { formatNaira, isMotorcycle } from '../../utils/format.js'
+import { TRIP_BOOKED_EVENT } from '../../utils/tripStage.js'
 import PlacePicker from '../../components/booking/PlacePicker.jsx'
 import DropPinSheet from '../../components/booking/DropPinSheet.jsx'
 import { bookingStops, pinOf, pinValue } from '../../utils/stops.js'
@@ -223,6 +224,7 @@ export default function BookRidePage() {
       })
 
       setRide(result)
+      window.dispatchEvent(new Event(TRIP_BOOKED_EVENT))
     } catch (err) {
       setError(err.message)
     } finally {

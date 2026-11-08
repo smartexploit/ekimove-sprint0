@@ -28,7 +28,7 @@ function LiveRide({ ride, onChanged, emergencyContact }) {
   const step = progressIndex(status)
 
   return (
-    <section className="live-card" aria-labelledby={`ride-${ride.id}-title`}>
+    <section className="live-card" id={`ride-${ride.id}`} aria-labelledby={`ride-${ride.id}-title`}>
       <div className="row row-between">
         <StatusBadge status={status} />
         <span className="small" style={{ color: 'var(--green-200)' }}>

@@ -37,7 +37,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -54,7 +54,7 @@ from app.contacts import (ContactError, clean_email, clean_name, clean_phone, em
                           international_number, is_email, password_problem, phone_taken)
 from app.database import engine, get_db
 from app.driver_applications import router as driver_applications_router
-from app.models import AuditLog, Driver, Fare, Incident, Payment, Place, PlaceFare, Ride, RideRequest, ServiceArea, User, Vehicle, Zone
+from app.models import AuditLog, Driver, Fare, Incident, Payment, Place, PlaceFare, Ride, RideOffer, RideRequest, ServiceArea, User, Vehicle, Zone
 
 from app.admin_driver_verification import router as admin_driver_verification_router
 from app.rate_limit import (
@@ -1028,6 +1028,11 @@ def list_my_ride_requests(
 
     request_ids = [item.id for item in requests]
     requests_by_id = {item.id: item for item in requests}
+    waiting = [item.id for item in requests if item.status == "requested"]
+    live_offers = dict(db.execute(
+        select(RideOffer.request_id, func.count(RideOffer.id))
+        .where(RideOffer.request_id.in_(waiting), RideOffer.status == "pending")
+        .group_by(RideOffer.request_id)).all()) if waiting else {}
     place_ids = {item.origin_place_id for item in requests if item.origin_place_id}
     place_areas = dict(db.execute(select(Place.id, Place.service_area_id).where(Place.id.in_(place_ids))).all()) \
         if place_ids else {}
@@ -1079,6 +1084,7 @@ def list_my_ride_requests(
                 "share_path": f"/t/{ride.share_token}" if ride.share_token else None,
                 "id": ride_id,
                 "status": ride_status,
+                "arrived": ride.arrived_at is not None,
                 "driver_name": _short_display_name(driver_full_name),
                 "vehicle_plate": vehicle.plate_number if vehicle else None,
             }
@@ -1097,6 +1103,7 @@ def list_my_ride_requests(
             "service_type": ride_request.service_type,
             "load_description": ride_request.load_description,
             "dispatch_status": ride_request.dispatch_status,
+            "drivers_notified": live_offers.get(ride_request.id, 0),
             "quote_terms": ride_request.quote_terms,
             "scheduled_for": iso_utc(ride_request.scheduled_for),
             "discount_amount": str(Decimal(ride_request.discount_amount or 0)),
@@ -1142,6 +1149,7 @@ def list_my_ride_requests(
                     "chat_unread",
                     "delivery_code",
                     "share_path",
+                    "arrived",
                 )
             },
         }

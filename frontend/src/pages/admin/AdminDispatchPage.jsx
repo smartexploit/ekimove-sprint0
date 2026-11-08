@@ -7,6 +7,7 @@ import { apiRequest } from '../../services/authService.js'
 import { formatNaira } from '../../utils/format.js'
 import { vehicleLabel } from '../../utils/vehicles.js'
 import AutoDispatchCard from '../../components/admin/AutoDispatchCard.jsx'
+import DriverRoster from '../../components/admin/DriverRoster.jsx'
 
 function waited(seconds) {
   if (seconds < 60) return `${seconds}s`
@@ -15,6 +16,14 @@ function waited(seconds) {
 
 function DispatchState({ request }) {
   const offer = request.current_offer
+  if (offer && request.drivers_notified > 1) {
+    return (
+      <p className="small dispatch-state">
+        <span className="badge badge-bright">Ringing</span> {request.drivers_notified} drivers · {offer.seconds_left}s
+        left · round {request.dispatch_attempts}
+      </p>
+    )
+  }
   if (offer) {
     return (
       <p className="small dispatch-state">
@@ -33,7 +42,8 @@ function DispatchState({ request }) {
   if (request.dispatch_status === 'manual') {
     return (
       <p className="small dispatch-state">
-        <span className="badge badge-red">Needs you</span> No driver accepted after {request.dispatch_attempts} tries
+        <span className="badge badge-red">Needs you</span> No driver accepted after {request.dispatch_attempts}{' '}
+        {request.dispatch_mode === 'all' ? 'rounds' : 'tries'}. Assign one below, or call a driver.
       </p>
     )
   }
@@ -157,6 +167,7 @@ export default function AdminDispatchPage() {
     >
       <div className="stack">
         <AutoDispatchCard />
+        <DriverRoster />
         <Alert tone="error">{error}</Alert>
         <Alert tone="success">{notice}</Alert>
 

@@ -253,6 +253,30 @@ def staff_reply(thread_id: int, payload: NewMessage, db: Session = Depends(get_d
     return thread_detail(db, thread, for_staff=True)
 
 
+class StaffNewThread(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    user_id: int = Field(gt=0)
+    subject: str = Field(min_length=3, max_length=160)
+    message: str = Field(min_length=1, max_length=2000)
+
+
+@router.post("/admin/support/threads", status_code=201)
+def staff_start_thread(payload: StaffNewThread, db: Session = Depends(get_db),
+                       admin: User = Depends(require_super_admin)) -> dict:
+    """Message any passenger or driver first (e.g. a driver about a trip)."""
+    user = db.get(User, payload.user_id)
+    if user is None or user.role == "super_admin" or user.removed_at is not None:
+        raise HTTPException(status_code=404, detail="Person not found.")
+    now = _now()
+    thread = SupportThread(user_id=user.id, subject=payload.subject[:160], status="open", created_at=now,
+                           last_message_at=now)
+    db.add(thread)
+    db.flush()
+    post_message(db, thread, admin, payload.message, from_staff=True)
+    db.commit()
+    return thread_detail(db, thread, for_staff=True)
+
+
 class ThreadStatus(BaseModel):
     model_config = ConfigDict(extra="forbid")
     status: Literal["open", "closed"]
