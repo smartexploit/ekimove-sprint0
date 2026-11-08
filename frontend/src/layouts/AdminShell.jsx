@@ -10,6 +10,7 @@ import {
   LifeBuoy,
   Map as MapIcon,
   Truck,
+  MapPinned,
   UserCog,
   Users,
   MapPin,
@@ -39,6 +40,7 @@ const NAV = [
   ['/admin/drivers', 'Driver verification', ShieldCheck],
   ['/admin/locations', 'Places & fares', MapPin],
   ['/admin/fares', 'Fare calculator', Calculator],
+  ['/admin/pins', 'Pin check', MapPinned],
   ['/admin/website', 'SEO & website', Globe],
   ['/admin/team', 'Team & access', UserCog],
 ]

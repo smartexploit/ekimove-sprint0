@@ -250,6 +250,16 @@ The frontend is a separate Render **Static Site** (`ekimove.com.ng`, also `ekimo
 - **Redirects/Rewrites:** source `/*`, destination `/index.html`, action **Rewrite**, so links such as `/login` or `/my-rides` open directly.
 - **Headers** (Settings → Headers, path `/*`): `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `Strict-Transport-Security: max-age=31536000`, and `Content-Security-Policy: frame-ancestors 'none'`. These stop other sites showing EkiMove inside a frame to trick people into tapping. The full content security policy is already built into the page itself.
 
+## Pin check (accurate map pins)
+Fares come from the road distance between pins (Geoapify road routes when `GEOAPIFY_API_KEY` is set), so *Admin → Pin check* keeps every place's pin right. It flags places with **no pin**, a pin **guessed from the name**, **the same spot as another place** (within 30 m), a pin **outside the service area**, or a pin far (150 m+) from where **trips really happen**. Staff with the *Map pins* permission (preset "Field agent"), and super-admins, can:
+
+- **I'm here: set pin**: stand at the place; the phone's GPS reading (it waits for the sharpest one and refuses readings less precise than 50 m) becomes the pin.
+- **Add a place where I'm standing**: name it and pick the zone (pre-filled from the nearest place); places already listed within 60 m are shown so nobody adds a duplicate.
+- **Use trip location**: when three or more trips agree, move the pin to where drivers actually started or ended them (recorded automatically from the driver's position at trip start and end).
+- **Pin is right**: confirm a guessed pin without moving it.
+
+Whenever a pin is set or a place is added, its road distances to every other pinned place in the area are re-measured and its automatic route prices are updated straight away (hand-set prices are never changed), so a new place is bookable at once. Riders who drop a pin see their **recent spots** for one-tap reuse, and can **suggest a public spot** for the list (homes are not accepted); suggestions for the same spot are grouped, staff approve or reject them, and the riders are notified when it's added. Every change is in the audit log.
+
 ## Team & access (staff accounts)
 Super-admins add team members under *Admin → Team & access*. Each gets their own sign-in with a **work email on EkiMove's domain** (`STAFF_EMAIL_DOMAIN`, default `ekimove.com.ng`; set the address up in Cloudflare Email Routing first) and a one-time temporary password they replace at first sign-in. Staff accounts can only sign in with that email, not a phone number, so a team member's personal passenger account stays separate. A member can be added as **Staff** with chosen areas, or as **Super-admin** with full access (for a co-founder). The founder's account is the **owner** (`users.is_owner`; migration 0021 marks the oldest super-admin): nobody can change, suspend, reset or remove it, and only the owner can add, suspend, reset or remove other super-admins. Any super-admin can manage ordinary staff, including *Suspend* (signed out everywhere until reactivated). Staff areas:
 
@@ -260,6 +270,7 @@ Super-admins add team members under *Admin → Team & access*. Each gets their o
 | Support | Support inbox, People (look-up only), live map, incidents |
 | Finance | Payments, deposits, refunds, driver payouts and earnings, reports, load quotes |
 | Website and promotions | SEO & website text, launch status, promo codes |
+| Map pins | Pin check: set pins on site, add places, review riders' suggested places |
 
 Presets: Dispatcher, Driver reviewer (reviews and dispatch), Support agent (support and dispatch), Finance, Website editor. Only super-admins can change fares, places and zones, the fare calculator, app settings (dispatchers can see the dispatch mode but not change it), suspend, remove or reset passwords for customers, see the launch checklist, or manage the team. Staff get phone notifications only for their own areas (for example, support staff for new support messages and SOS, driver reviewers for new applications). *Remove access* switches off console access and signs out remembered phones; adding the same work email again restores the account. Every change is in the audit log.
 

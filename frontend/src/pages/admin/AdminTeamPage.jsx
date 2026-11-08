@@ -12,8 +12,9 @@ const PRESET_LABELS = {
   support_agent: 'Support agent',
   finance: 'Finance',
   website_editor: 'Website editor',
+  field_agent: 'Field agent (pins)',
 }
-const SHORT = { dispatch: 'Dispatch', drivers: 'Driver reviews', support: 'Support', finance: 'Finance', website: 'Website' }
+const SHORT = { dispatch: 'Dispatch', drivers: 'Driver reviews', support: 'Support', finance: 'Finance', website: 'Website', pins: 'Map pins' }
 
 function formatWhen(value) {
   if (!value) return 'Never signed in'

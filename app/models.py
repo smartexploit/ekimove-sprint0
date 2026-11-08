@@ -558,6 +558,10 @@ class Place(Base):
     # "manual": placed by staff; "auto": found from the name (check it).
     pin_source: Mapped[str | None] = mapped_column(String(8), nullable=True)
     pin_label: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # When someone confirmed the pin is right (on site, from trips, or by eye).
+    pin_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    pin_verified_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(
         String(16), default="pending", nullable=False, index=True
@@ -825,3 +829,42 @@ class DeviceSession(Base):
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PlacePinEvidence(Base):
+    """Where a place really is, as seen on the ground: the driver's position
+    when a trip started or ended there, or a reading taken on site."""
+
+    __tablename__ = "place_pin_evidence"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    place_id: Mapped[int] = mapped_column(ForeignKey("places.id", ondelete="CASCADE"), index=True)
+    latitude: Mapped[float] = mapped_column(Float)
+    longitude: Mapped[float] = mapped_column(Float)
+    accuracy_m: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source: Mapped[str] = mapped_column(String(16))  # trip_start, trip_end, on_site
+    ride_id: Mapped[int | None] = mapped_column(ForeignKey("rides.id", ondelete="SET NULL"), nullable=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class PlaceSuggestion(Base):
+    """A public spot a rider suggested for EkiMove's list, waiting for staff."""
+
+    __tablename__ = "place_suggestions"
+    __table_args__ = (
+        CheckConstraint("status IN ('pending', 'approved', 'rejected')", name="ck_place_suggestions_status"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    latitude: Mapped[float] = mapped_column(Float)
+    longitude: Mapped[float] = mapped_column(Float)
+    accuracy_m: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(String(12), default="pending", nullable=False, index=True)
+    place_id: Mapped[int | None] = mapped_column(ForeignKey("places.id", ondelete="SET NULL"), nullable=True)
+    reviewed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"),
+                                                            nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

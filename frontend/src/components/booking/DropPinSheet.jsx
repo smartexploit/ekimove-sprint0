@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Crosshair, MapPin, X } from 'lucide-react'
+import { Clock, Crosshair, MapPin, X } from 'lucide-react'
 import LazyMap from '../map/LazyMap.jsx'
 import { apiRequest } from '../../services/authService.js'
 
@@ -15,6 +15,10 @@ export default function DropPinSheet({
   const [typed, setTyped] = useState(Boolean(initial?.label))
   const [locating, setLocating] = useState(false)
   const [error, setError] = useState('')
+  const [accuracy, setAccuracy] = useState(null)
+  const [recent, setRecent] = useState([])
+  const [suggest, setSuggest] = useState(false)
+  const [placeName, setPlaceName] = useState('')
   const lookup = useRef(0)
   const inputRef = useRef(null)
 
@@ -36,6 +40,19 @@ export default function DropPinSheet({
     return () => window.clearTimeout(timer)
   }, [pin, typed])
 
+  // The rider's own recent spots, to reuse with one tap.
+  useEffect(() => {
+    let active = true
+    apiRequest('/api/v1/points/recent')
+      .then((data) => {
+        if (active) setRecent(data?.spots || [])
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [])
+
   useEffect(() => {
     const onKey = (event) => event.key === 'Escape' && onCancel()
     window.addEventListener('keydown', onKey)
@@ -52,6 +69,7 @@ export default function DropPinSheet({
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         setPin({ latitude: pos.coords.latitude, longitude: pos.coords.longitude })
+        setAccuracy(Math.round(pos.coords.accuracy))
         setLocating(false)
       },
       () => {
@@ -76,10 +94,29 @@ export default function DropPinSheet({
         <LazyMap markers={markers} height={Math.max(300, Math.min(480, Math.round(window.innerHeight * 0.5)))} follow label="Tap to drop your pin"
           onPick={(point) => {
             setPin({ latitude: point.lat, longitude: point.lng })
+            setAccuracy(null)
             setError('')
           }} />
       </div>
       <div className="pin-sheet-form">
+        {recent.length > 0 && (
+          <div className="stack stack-sm">
+            <span className="field-label pin-head-title"><Clock size={14} aria-hidden="true" /> Your recent spots</span>
+            <div className="recent-spots">
+              {recent.map((spot) => (
+                <button key={`${spot.latitude},${spot.longitude}`} type="button" className="chip"
+                  onClick={() => {
+                    setPin({ latitude: spot.latitude, longitude: spot.longitude })
+                    setLabel(spot.label)
+                    setTyped(true)
+                    setAccuracy(null)
+                  }}>
+                  {spot.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {allowHere && (
           <button type="button" className="btn btn-sm" onClick={here} disabled={locating}>
             <Crosshair size={16} aria-hidden="true" /> {locating ? 'Finding you…' : 'Use where I am now'}
@@ -95,9 +132,34 @@ export default function DropPinSheet({
             }} />
           <span className="field-hint">A landmark, gate colour or shop name helps the driver.</span>
         </label>
+        {pin && (
+          <div className="stack stack-sm suggest-box">
+            <label className="check-row">
+              <input type="checkbox" checked={suggest} onChange={(event) => setSuggest(event.target.checked)} />
+              <span>Suggest this spot for EkiMove’s list, so everyone can pick it</span>
+            </label>
+            {suggest && (
+              <label className="field">
+                <span className="field-label">What do people call this place?</span>
+                <input className="input" maxLength={120} value={placeName} placeholder="e.g. Mercy Pharmacy, Okesa"
+                  onChange={(event) => setPlaceName(event.target.value)} />
+                <span className="field-hint">Public places only, like shops, schools or junctions. Never your home. EkiMove checks every suggestion.</span>
+              </label>
+            )}
+          </div>
+        )}
         {error && <p className="field-hint field-hint-error" role="alert">{error}</p>}
-        <button type="button" className="btn btn-primary btn-block" disabled={!ready}
-          onClick={() => onDone({ ...pin, label: label.trim() })}>
+        <button type="button" className="btn btn-primary btn-block" disabled={!ready || (suggest && placeName.trim().length < 3)}
+          onClick={() => {
+            if (suggest && placeName.trim().length >= 3) {
+              apiRequest('/api/v1/places/suggestions', {
+                method: 'POST',
+                body: JSON.stringify({ name: placeName.trim(), latitude: pin.latitude, longitude: pin.longitude,
+                  accuracy_m: accuracy }),
+              }).catch(() => {})
+            }
+            onDone({ ...pin, label: label.trim() })
+          }}>
           {pin ? 'Use this spot' : 'Tap the map first'}
         </button>
       </div>

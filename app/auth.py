@@ -142,6 +142,7 @@ STAFF_PERMISSIONS = {
     "support": "Support: support inbox, looking up people and trips, SOS",
     "finance": "Finance: payments, deposits, refunds, payouts and reports",
     "website": "Website and promotions: website text, launch status and promo codes",
+    "pins": "Map pins: check place pins, set pins on site, add places and review riders' suggestions",
 }
 
 

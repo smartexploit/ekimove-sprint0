@@ -30,6 +30,7 @@ from app.deliveries import check_delivery_code, recipient_text, router as delive
 from app.support import router as support_router
 from app.onboarding import router as onboarding_router, welcome_passenger
 from app.staff import router as staff_router
+from app.pins import record_trip_evidence, router as pins_router
 from app.haulage import router as haulage_router
 from app.verification import client_fingerprint, ensure_passenger_may_book, record_policy_acceptance, router as verification_router
 from app.trips import check_pickup_pin, my_rating, passenger_verified, rating_summary, router as trips_router, short_name as trip_short_name
@@ -128,6 +129,7 @@ app.include_router(launch_checklist_router)
 app.include_router(fare_calculator_router)
 app.include_router(onboarding_router)
 app.include_router(staff_router)
+app.include_router(pins_router)
 
 class LoginRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
@@ -1698,8 +1700,12 @@ def update_driver_ride_status(
         ride.arrived_at = now
     elif payload.status == "in_progress":
         ride.started_at = now
+        if status_request is not None:
+            record_trip_evidence(db, ride, status_request, "origin")
     elif payload.status == "completed":
         ride.completed_at = now
+        if status_request is not None:
+            record_trip_evidence(db, ride, status_request, "destination")
         # Credit the driver: fare minus EkiMove's commission.
         record_trip_earning(db, ride)
     recipient_sms = None

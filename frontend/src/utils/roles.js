@@ -18,6 +18,7 @@ export const ADMIN_PAGES = {
   '/admin/fares': 'super',
   '/admin/website': ['website'],
   '/admin/team': 'super',
+  '/admin/pins': ['pins'],
 }
 
 export const STAFF_ROLES = ['super_admin', 'staff']

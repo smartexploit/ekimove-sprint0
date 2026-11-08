@@ -6734,7 +6734,7 @@ def add_staff_member(client, admin, permissions, email="tolu@ekimove.com.ng", ro
 def test_super_admin_adds_staff_with_a_temporary_password(client):
     admin = login(client, *ADMIN_LOGIN)
     listing = client.get("/api/v1/admin/staff", headers=admin).json()
-    assert {p["key"] for p in listing["permissions"]} == {"dispatch", "drivers", "support", "finance", "website"}
+    assert {p["key"] for p in listing["permissions"]} == {"dispatch", "drivers", "support", "finance", "website", "pins"}
     assert "support_agent" in listing["presets"]
     member, headers = add_staff_member(client, admin, ["support", "dispatch"])
     me = client.get("/api/v1/auth/me", headers=headers).json()
@@ -6742,7 +6742,7 @@ def test_super_admin_adds_staff_with_a_temporary_password(client):
     assert me["must_change_password"] is False and me["email"] == "tolu@ekimove.com.ng" and me["phone"] is None
     team = client.get("/api/v1/admin/staff", headers=admin).json()["team"]
     assert any(t["id"] == member["id"] and t["last_sign_in"] for t in team)
-    assert len(client.get("/api/v1/auth/me", headers=admin).json()["staff_permissions"]) == 5
+    assert len(client.get("/api/v1/auth/me", headers=admin).json()["staff_permissions"]) == 6
 
 
 def test_staff_need_a_work_email_and_sign_in_with_it(client):
@@ -6843,7 +6843,7 @@ def test_super_admin_can_add_a_second_super_admin(client, quiet_messaging_and_pu
     admin = login(client, *ADMIN_LOGIN)
     member, partner = add_staff_member(client, admin, [], email="partner@ekimove.com.ng", role="super_admin")
     me = client.get("/api/v1/auth/me", headers=partner).json()
-    assert me["role"] == "super_admin" and len(me["staff_permissions"]) == 5
+    assert me["role"] == "super_admin" and len(me["staff_permissions"]) == 6
     # Full access, including the team and settings.
     for path in ["/api/v1/admin/staff", "/api/v1/admin/settings", "/api/v1/admin/locations/fares"]:
         assert client.get(path, headers=partner).status_code == 200, path
@@ -7048,3 +7048,207 @@ def test_old_card_checkout_switches_to_transfer_when_card_is_off(client, monkeyp
     submitted = client.post(f"/api/v1/payments/rides/{ride_id}/submit-transfer", headers=passenger,
                             json={"transfer_reference": "TRF-445566"})
     assert submitted.status_code == 200 and submitted.json()["status"] == "awaiting_confirmation"
+
+
+# --- Pin check: flags, set pin on site, new places, trip evidence, rider suggestions ---
+
+from app.models import PlaceDistance, PlacePinEvidence, PlaceSuggestion
+
+
+def _pin_area(client):
+    """_calc_area plus a guessed pin and two places stacked on one spot."""
+    area_id, ids, manual_id = _calc_area(client)
+    with session_for(client) as db:
+        db.get(Place, ids[2]).pin_source = "auto"
+        stacked = Place(service_area_id=area_id, zone_id=1, name="Calc Stack", status="active",
+                        latitude=7.6000, longitude=5.2200, pin_source="manual")
+        db.add(stacked)
+        db.commit()
+        return area_id, ids, manual_id, stacked.id
+
+
+def test_pin_check_flags_problem_pins(client, monkeypatch):
+    monkeypatch.setattr(settings, "geoapify_api_key", None)
+    admin = login(client, *ADMIN_LOGIN)
+    _area, (a, b, c), _manual, stacked = _pin_area(client)
+    data = client.get("/api/v1/admin/pins?view=attention", headers=admin).json()
+    flags = {p["name"]: {f["key"] for f in p["flags"]} for p in data["places"]}
+    assert "guessed" in flags["Calc C"]
+    assert "shared_spot" in flags["Calc A"] and "shared_spot" in flags["Calc Stack"]
+    assert "no_pin" in flags["Calc No Pin"]
+    assert data["summary"]["attention"] >= 4 and data["max_accuracy_m"] == 50
+    stack_row = next(p for p in data["places"] if p["id"] == stacked)
+    assert stack_row["shared_with"] == ["Calc A"]
+    # Confirming a guessed pin clears the flag.
+    assert client.post(f"/api/v1/admin/pins/places/{c}/confirm", headers=admin).status_code == 200
+    data = client.get("/api/v1/admin/pins?view=all&q=calc c", headers=admin).json()
+    assert data["places"][0]["flags"] == [] and data["places"][0]["checked"] is True
+
+
+def test_set_pin_on_site_moves_it_and_reprices_routes(client, monkeypatch):
+    monkeypatch.setattr(settings, "geoapify_api_key", None)
+    admin = login(client, *ADMIN_LOGIN)
+    _area, (a, b, c), manual_id, stacked = _pin_area(client)
+    url = f"/api/v1/admin/pins/places/{stacked}/on-site"
+    blurry = client.post(url, headers=admin, json={"latitude": 7.605, "longitude": 5.22, "accuracy_m": 180})
+    assert blurry.status_code == 422 and "Step outside" in blurry.json()["detail"]
+    far = client.post(url, headers=admin, json={"latitude": 6.5244, "longitude": 3.3792, "accuracy_m": 8})
+    assert far.status_code == 422 and "outside" in far.json()["detail"]
+    good = client.post(url, headers=admin, json={"latitude": 7.6050, "longitude": 5.2200, "accuracy_m": 9})
+    assert good.status_code == 200, good.text
+    body = good.json()
+    assert 540 < body["moved_m"] < 570
+    assert body["prices"]["routes"] == 6 and body["prices"]["prices"] == 12  # 3 places × 2 ways × 2 vehicles
+    with session_for(client) as db:
+        place = db.get(Place, stacked)
+        assert place.pin_source == "field" and place.pin_verified_at is not None and "±9 m" in place.pin_label
+        to_a = db.scalar(select(PlaceFare).where(PlaceFare.origin_place_id == stacked,
+                                                 PlaceFare.destination_place_id == a,
+                                                 PlaceFare.vehicle_type == "motorcycle"))
+        assert to_a is not None and to_a.pricing_source == "auto" and to_a.is_active
+        assert db.get(PlaceFare, manual_id).base_amount == Decimal("5000.00")  # hand-set price untouched
+        assert db.scalar(select(func.count(PlaceDistance.id)).where(
+            PlaceDistance.origin_place_id == stacked)) == 3
+        assert db.scalar(select(PlacePinEvidence.source).where(PlacePinEvidence.place_id == stacked)) == "on_site"
+    flags = {p["id"]: p["flags"] for p in client.get("/api/v1/admin/pins?view=all", headers=admin).json()["places"]}
+    assert flags[stacked] == [] and flags[a] == []
+
+
+def test_add_a_new_place_where_you_stand(client, monkeypatch):
+    monkeypatch.setattr(settings, "geoapify_api_key", None)
+    admin = login(client, *ADMIN_LOGIN)
+    area_id, (a, b, c), _manual = _calc_area(client)
+    near = client.get("/api/v1/admin/pins/nearby?latitude=7.6102&longitude=5.2205", headers=admin).json()
+    assert near["places"][0]["id"] == b and near["places"][0]["meters"] < 100
+    made = client.post("/api/v1/admin/pins/places", headers=admin, json={
+        "name": "  Mercy   Pharmacy ", "zone_id": 1, "place_type": "landmark",
+        "latitude": 7.6150, "longitude": 5.2200, "accuracy_m": 6})
+    assert made.status_code == 201, made.text
+    assert made.json()["name"] == "Mercy Pharmacy" and made.json()["prices"] == 12
+    with session_for(client) as db:
+        place = db.get(Place, made.json()["place_id"])
+        assert place.service_area_id == area_id and place.status == "active" and place.pin_source == "field"
+    passenger = login(client, *PASSENGER_LOGIN)
+    quote = client.get(f"/api/v1/place-fare-options?origin_place_id={a}&destination_place_id="
+                       f"{made.json()['place_id']}", headers=passenger)
+    assert quote.status_code == 200 and quote.json(), quote.text
+    again = client.post("/api/v1/admin/pins/places", headers=admin, json={
+        "name": "Mercy Pharmacy", "zone_id": 1, "service_area_id": area_id,
+        "latitude": 7.6151, "longitude": 5.2200, "accuracy_m": 6})
+    assert again.status_code == 409
+
+
+def test_trips_show_where_a_place_really_is(client, monkeypatch):
+    monkeypatch.setattr(settings, "geoapify_api_key", None)
+    admin = login(client, *ADMIN_LOGIN)
+    _area, (a, b, c), _manual = _calc_area(client)
+    with session_for(client) as db:
+        for i in range(3):  # three trips started ~400 m north of the pin
+            db.add(PlacePinEvidence(place_id=a, latitude=7.6036 + i * 0.00002, longitude=5.2200,
+                                    source="trip_start"))
+        db.commit()
+    row = next(p for p in client.get("/api/v1/admin/pins?view=attention", headers=admin).json()["places"]
+               if p["id"] == a)
+    assert "trips_disagree" in {f["key"] for f in row["flags"]}
+    assert row["suggestion"]["samples"] == 3 and 380 < row["suggestion"]["meters_from_pin"] < 420
+    moved = client.post(f"/api/v1/admin/pins/places/{a}/use-trips", headers=admin)
+    assert moved.status_code == 200 and moved.json()["prices"]["prices"] > 0
+    assert client.post(f"/api/v1/admin/pins/places/{b}/use-trips", headers=admin).status_code == 409
+
+
+def test_a_real_trip_records_where_it_started_and_ended(client):
+    from app.models import Driver as DriverModel
+
+    passenger, _admin, request_id = create_assigned_ride(client)
+    ride_id = get_ride_id_from_request(client, request_id, passenger)
+    with session_for(client) as db:
+        area = ServiceArea(name="Trip Area", slug="trip-area", status="active")
+        db.add(area)
+        db.flush()
+        start = Place(service_area_id=area.id, zone_id=1, name="Trip Start", status="active",
+                      latitude=7.62, longitude=5.22)
+        end = Place(service_area_id=area.id, zone_id=2, name="Trip End", status="active",
+                    latitude=7.63, longitude=5.23)
+        db.add_all([start, end])
+        db.flush()
+        request = db.get(RideRequest, request_id)
+        request.origin_place_id, request.destination_place_id = start.id, end.id
+        ride = db.get(Ride, ride_id)
+        db.add(Payment(ride_id=ride_id, amount=ride.agreed_fare, method="bank_transfer", status="confirmed"))
+        driver = db.get(DriverModel, ride.driver_id)
+        driver.last_latitude, driver.last_longitude = 7.6205, 5.2202
+        driver.location_updated_at = datetime.now(timezone.utc)
+        db.commit()
+        start_id, end_id = start.id, end.id
+    driver = login(client, *DRIVER_LOGIN)
+    url = f"/api/v1/driver/rides/{ride_id}/status"
+    assert client.patch(url, json={"status": "driver_arriving"}, headers=driver).status_code == 200
+    assert client.patch(url, json={"status": "in_progress", "pickup_pin": ride_pin(client, ride_id)},
+                        headers=driver).status_code == 200
+    with session_for(client) as db:
+        d = db.get(DriverModel, db.get(Ride, ride_id).driver_id)
+        d.last_latitude, d.last_longitude = 7.6301, 5.2299
+        d.location_updated_at = datetime.now(timezone.utc)
+        db.commit()
+    assert client.patch(url, json={"status": "completed"}, headers=driver).status_code == 200
+    with session_for(client) as db:
+        rows = db.scalars(select(PlacePinEvidence).order_by(PlacePinEvidence.id)).all()
+        assert [(r.place_id, r.source) for r in rows] == [(start_id, "trip_start"), (end_id, "trip_end")]
+        assert rows[0].latitude == 7.6205 and rows[1].latitude == 7.6301
+
+
+def test_riders_suggest_spots_and_staff_approve_them(client, monkeypatch, quiet_messaging_and_push):
+    monkeypatch.setattr(settings, "geoapify_api_key", None)
+    admin = login(client, *ADMIN_LOGIN)
+    area_id, (a, b, c), _manual = _calc_area(client)
+    passenger = login(client, *PASSENGER_LOGIN)
+    subscribe(client, passenger, "https://fcm.googleapis.com/fcm/send/rider-suggests")
+    assert client.post("/api/v1/places/suggestions", headers=passenger, json={
+        "name": "Lagos spot", "latitude": 6.52, "longitude": 3.38}).status_code == 422
+    first = client.post("/api/v1/places/suggestions", headers=passenger, json={
+        "name": "Grace Bakery", "latitude": 7.6120, "longitude": 5.2210, "accuracy_m": 12})
+    assert first.status_code == 201 and "check this spot" in first.json()["message"]
+    driver = login(client, *DRIVER_LOGIN)
+    assert client.post("/api/v1/places/suggestions", headers=driver, json={
+        "name": "Grace Bakery junction", "latitude": 7.61203, "longitude": 5.22102}).status_code == 201
+    listing = client.get("/api/v1/admin/pins/suggestions", headers=admin).json()["suggestions"]
+    assert len(listing) == 1 and listing[0]["suggested_by"] == 2
+    assert listing[0]["other_names"] == ["Grace Bakery junction"]
+    assert listing[0]["nearest_place"]["zone_id"] == 1
+    assert client.get("/api/v1/admin/pins", headers=admin).json()["summary"]["suggestions"] == 2
+    approved = client.post(f"/api/v1/admin/pins/suggestions/{listing[0]['id']}/approve", headers=admin,
+                           json={"name": "Grace Bakery", "zone_id": 1, "service_area_id": area_id})
+    assert approved.status_code == 201 and approved.json()["approved"] == 2
+    with session_for(client) as db:
+        place = db.get(Place, approved.json()["place_id"])
+        assert place.pin_source == "rider" and place.status == "active"
+        assert db.scalar(select(func.count(PlaceSuggestion.id)).where(PlaceSuggestion.status == "pending")) == 0
+    assert any("is now on the list" in json.loads(p["payload"])["body"] for p in quiet_messaging_and_push)
+    # Rejecting.
+    other = client.post("/api/v1/places/suggestions", headers=passenger, json={
+        "name": "My house", "latitude": 7.6180, "longitude": 5.2210}).json()["id"]
+    assert client.post(f"/api/v1/admin/pins/suggestions/{other}/reject", headers=admin).status_code == 200
+    assert client.get("/api/v1/admin/pins/suggestions", headers=admin).json()["suggestions"] == []
+
+
+def test_pin_tools_need_the_pins_permission(client):
+    admin = login(client, *ADMIN_LOGIN)
+    _m, support = add_staff_member(client, admin, ["support"], email="sup@ekimove.com.ng")
+    assert client.get("/api/v1/admin/pins", headers=support).status_code == 403
+    _m, field = add_staff_member(client, admin, ["pins"], email="field@ekimove.com.ng")
+    assert client.get("/api/v1/admin/pins", headers=field).status_code == 200
+    assert client.get("/api/v1/admin/pins/suggestions", headers=field).status_code == 200
+
+
+def test_riders_see_their_recent_dropped_spots(client):
+    passenger = login(client, *PASSENGER_LOGIN)
+    with session_for(client) as db:
+        user_id = db.scalar(select(User.id).where(User.phone == PASSENGER_LOGIN[0]))
+        for i, label in enumerate(["Blue gate by the church", "Blue gate by the church", "Okesa junction"]):
+            db.add(RideRequest(passenger_user_id=user_id,
+                               origin_text=label, destination_text="Somewhere", vehicle_type="motorcycle",
+                               passenger_count=1, quoted_fare=Decimal("500"), status="cancelled",
+                               origin_latitude=7.61 + (0.02 if i == 2 else 0), origin_longitude=5.22))
+        db.commit()
+    spots = client.get("/api/v1/points/recent", headers=passenger).json()["spots"]
+    assert [s["label"] for s in spots] == ["Okesa junction", "Blue gate by the church"]

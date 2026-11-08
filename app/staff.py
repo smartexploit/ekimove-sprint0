@@ -34,6 +34,7 @@ PRESETS = {
     "support_agent": ["support", "dispatch"],
     "finance": ["finance"],
     "website_editor": ["website"],
+    "field_agent": ["pins"],
 }
 
 
