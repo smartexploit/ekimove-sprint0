@@ -3,7 +3,7 @@ import { Crosshair } from 'lucide-react'
 import LazyMap from '../map/LazyMap.jsx'
 
 /** Tap the map (or use this phone's location) to set a place's pin. */
-export default function PinPicker({ latitude, longitude, onChange, name }) {
+export default function PinPicker({ latitude, longitude, onChange, name, autoLabel = null }) {
   const [locating, setLocating] = useState(false)
   const [error, setError] = useState('')
   const lat = latitude === '' || latitude == null ? null : Number(latitude)
@@ -36,7 +36,13 @@ export default function PinPicker({ latitude, longitude, onChange, name }) {
   return (
     <div className="field pin-picker">
       <span className="field-label">Map pin</span>
-      <span className="field-hint">Tap the exact spot on the map. Fares are worked out from the road distance between pins.</span>
+      <span className="field-hint">
+        Leave empty when adding a place and EkiMove will try to find it on the map from its name. Tap the map to
+        set or move the pin. Fares are worked out from the road distance between pins.
+      </span>
+      {autoLabel && (
+        <span className="pin-auto-note">Found automatically: {autoLabel}. Check it’s the right spot, and tap the map to move it if not.</span>
+      )}
       <LazyMap markers={markers} height={240} follow label="Tap to place the pin" onPick={(p) => set(p.lat, p.lng)} />
       <div className="row" style={{ gap: 8 }}>
         <button type="button" className="btn btn-sm" onClick={here} disabled={locating}>

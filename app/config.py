@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     atona_rate_limit_window_seconds: int = 600
     # Optional map and geocoding provider; disabled without a key.
     geoapify_api_key: str | None = None
+    # Find map pins for new places automatically from their names
+    # (Geoapify when its key is set, otherwise OpenStreetMap Nominatim).
+    geocoding_enabled: bool = True
 
     @field_validator("geoapify_api_key", mode="before")
     @classmethod

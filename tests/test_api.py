@@ -150,6 +150,7 @@ def bypass_redis_rate_limiter_in_tests(monkeypatch):
     import app.rate_limit as rate_limit_module
 
     rate_limit_module.reset_memory_counters()
+    monkeypatch.setattr(settings, "geocoding_enabled", False)  # no map lookups in tests
     monkeypatch.setattr(settings, "redis_url", None)
     monkeypatch.setattr(settings, "redis_host", None)
     monkeypatch.setattr(
@@ -5995,3 +5996,110 @@ def test_launch_status_switch(client):
     assert client.get("/api/v1/public/site").json()["site"]["launch_status"] == "live"
     content["site"]["launch_status"] = "launched"
     assert client.put("/api/v1/admin/site", json=content, headers=admin).status_code == 422
+
+
+# ---------- Automatic map pins ----------
+import app.geocode as geocode_module
+import app.admin_locations as admin_locations_module
+
+
+def test_find_pin_stays_inside_the_area(monkeypatch):
+    calls = []
+
+    def fake_search(text, center):
+        calls.append(text)
+        if text.startswith("Okesa"):
+            # A same-named place far away is ignored; the local one is used.
+            return [{"lat": 9.05, "lon": 7.49, "label": "Okesa, Abuja"},
+                    {"lat": 7.6180, "lon": 5.2270, "label": "Okesa, Ado-Ekiti"}]
+        return []
+
+    monkeypatch.setattr(settings, "geoapify_api_key", None)
+    monkeypatch.setattr(geocode_module, "_nominatim", fake_search)
+    found = geocode_module.find_pin("Okesa", geocode_module.ADO_EKITI_CENTER)
+    assert found["label"] == "Okesa, Ado-Ekiti" and found["latitude"] == 7.618
+    assert calls == ["Okesa, Ado-Ekiti, Ekiti State, Nigeria"]
+    # Nothing near: tries address, name and other names, then gives up.
+    calls.clear()
+    assert geocode_module.find_pin("Unknown Spot", geocode_module.ADO_EKITI_CENTER, address="Ikere Road",
+                                   aliases="Junction A, Junction B") is None
+    assert calls == ["Unknown Spot, Ikere Road, Ado-Ekiti, Ekiti State, Nigeria",
+                     "Unknown Spot, Ado-Ekiti, Ekiti State, Nigeria",
+                     "Junction A, Ado-Ekiti, Ekiti State, Nigeria", "Junction B, Ado-Ekiti, Ekiti State, Nigeria"]
+
+
+def test_geoapify_lookup_request(monkeypatch):
+    seen = {}
+
+    class Reply:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"results": [{"lat": 7.62, "lon": 5.22, "formatted": "Fajuyi Park, Ado-Ekiti"}]}
+
+    def fake_get(url, timeout, params):
+        seen.update(url=url, params=params)
+        return Reply()
+
+    monkeypatch.setattr(settings, "geoapify_api_key", "geo-key")
+    monkeypatch.setattr(geocode_module.requests, "get", fake_get)
+    found = geocode_module.find_pin("Fajuyi Park", (7.6233, 5.2214))
+    assert found == {"latitude": 7.62, "longitude": 5.22, "label": "Fajuyi Park, Ado-Ekiti",
+                     "query": "Fajuyi Park, Ado-Ekiti, Ekiti State, Nigeria"}
+    assert seen["url"] == geocode_module.GEOAPIFY_URL and seen["params"]["apiKey"] == "geo-key"
+    assert seen["params"]["filter"] == "circle:5.2214,7.6233,25000"
+
+
+def test_places_get_pins_automatically(client, monkeypatch):
+    admin = login(client, *ADMIN_LOGIN)
+    ids = _seed_place_route(client)
+    monkeypatch.setattr(settings, "geocoding_enabled", True)
+    known = {"Ajilosun": (7.633, 5.235), "Adebayo": (7.64, 5.23)}
+
+    def fake_find(name, center, address=None, aliases=None, city=None, max_queries=4):
+        if name in known:
+            return {"latitude": known[name][0], "longitude": known[name][1], "label": f"{name}, Ado-Ekiti",
+                    "query": name}
+        return None
+
+    monkeypatch.setattr(admin_locations_module, "find_pin", fake_find)
+    base = {"service_area_id": ids["area_id"], "zone_id": 1, "status": "active"}
+    created = client.post("/api/v1/admin/locations/places", json={**base, "name": "Ajilosun"}, headers=admin).json()
+    assert created["latitude"] == 7.633 and created["pin_source"] == "auto" and "Ado-Ekiti" in created["pin_label"]
+    manual = client.post("/api/v1/admin/locations/places", headers=admin,
+                         json={**base, "name": "Hand Pinned", "latitude": 7.6, "longitude": 5.2}).json()
+    assert manual["pin_source"] == "manual"
+    missing = client.post("/api/v1/admin/locations/places", json={**base, "name": "Nowhere Junction"},
+                          headers=admin).json()
+    assert missing["latitude"] is None and missing["pin_source"] is None
+    # Moving an automatic pin by hand makes it a staff pin.
+    moved = client.patch(f"/api/v1/admin/locations/places/{created['id']}", headers=admin,
+                         json={"latitude": 7.634, "longitude": 5.236}).json()
+    assert moved["pin_source"] == "manual" and moved["pin_label"] is None
+    # Bulk: places without pins, in batches, skipping ones already tried.
+    with session_for(client) as db:
+        db.add(Place(service_area_id=ids["area_id"], zone_id=1, name="Adebayo", status="active"))
+        db.commit()
+    statuses, tried, rounds = {}, [], 0
+    while True:
+        page = client.post("/api/v1/admin/locations/places/auto-pin", headers=admin,
+                           json={"service_area_id": ids["area_id"], "skip_ids": tried}).json()
+        rounds += 1
+        for r in page["results"]:
+            statuses[r["name"]] = r["status"]
+            tried.append(r["id"])
+        if not page["remaining"]:
+            break
+    assert statuses["Adebayo"] == "pinned" and statuses["Nowhere Junction"] == "not_found"
+    assert rounds >= 2 and len(tried) == len(set(tried))  # paged, each place tried once
+    again = client.post("/api/v1/admin/locations/places/auto-pin", headers=admin,
+                        json={"service_area_id": ids["area_id"], "skip_ids": tried}).json()
+    assert again["results"] == [] and again["remaining"] == 0
+    # Re-checking named places never overwrites a staff pin.
+    kept = client.post("/api/v1/admin/locations/places/auto-pin", headers=admin,
+                       json={"service_area_id": ids["area_id"], "place_ids": [created["id"]]}).json()
+    assert kept["results"][0]["status"] == "kept"
+    passenger = login(client, *PASSENGER_LOGIN)
+    assert client.post("/api/v1/admin/locations/places/auto-pin", json={"service_area_id": ids["area_id"]},
+                       headers=passenger).status_code == 403

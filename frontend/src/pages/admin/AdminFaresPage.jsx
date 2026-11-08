@@ -198,6 +198,7 @@ export default function AdminFaresPage() {
   const [shown, setShown] = useState(PAGE)
   const [edits, setEdits] = useState({})
   const [replace, setReplace] = useState({})
+  const [pinProgress, setPinProgress] = useState('')
   const setData = useCallback((result) => {
     setDataRaw(result)
     setDraft(result.formula)
@@ -278,6 +279,38 @@ export default function AdminFaresPage() {
     }
   }
 
+  async function autoPin() {
+    setBusy('pins')
+    setError('')
+    setNotice('')
+    const tried = []
+    let found = 0
+    let missed = []
+    try {
+      for (let round = 0; round < 40; round += 1) {
+        const result = await apiRequest('/api/v1/admin/locations/places/auto-pin', {
+          method: 'POST', body: JSON.stringify({ service_area_id: Number(areaId), skip_ids: tried }),
+        })
+        result.results.forEach((r) => {
+          tried.push(r.id)
+          if (r.status === 'pinned') found += 1
+          if (r.status === 'not_found') missed = [...missed, r.name]
+        })
+        setPinProgress(`${tried.length} checked`)
+        if (!result.remaining || !result.results.length) break
+      }
+      setNotice(`Found ${found} pin${found === 1 ? '' : 's'} automatically.`
+        + (missed.length ? ` Not found on the map: ${missed.join(', ')}. Add those by hand in Places & fares.` : '')
+        + (found ? ' Check them below, then press “Measure road distances”.' : ''))
+      await load(areaId)
+    } catch (err) {
+      setError(err.message || 'Could not find pins.')
+    } finally {
+      setBusy('')
+      setPinProgress('')
+    }
+  }
+
   async function apply() {
     const editList = Object.entries(edits).filter(([, v]) => v !== '').map(([key, amount]) => {
       const [o, d, vehicle] = key.split('|')
@@ -354,9 +387,30 @@ export default function AdminFaresPage() {
             </p>
             {data.missing_pins.length > 0 && (
               <Alert tone="warning">
-                These places have no pin, so they can’t be priced yet: {data.missing_pins.map((p) => p.name).join(', ')}.{' '}
-                <Link to="/admin/locations">Add pins in Places & fares</Link>.
+                {data.missing_pins.length} place{data.missing_pins.length === 1 ? ' has' : 's have'} no pin, so{' '}
+                {data.missing_pins.length === 1 ? 'it' : 'they'} can’t be priced yet: {data.missing_pins.map((p) => p.name).join(', ')}.
               </Alert>
+            )}
+            {data.missing_pins.length > 0 && (
+              <div className="row" style={{ gap: 8 }}>
+                <button type="button" className="btn btn-primary btn-sm" onClick={autoPin} disabled={Boolean(busy)}>
+                  <MapPinned size={16} aria-hidden="true" />{' '}
+                  {busy === 'pins' ? `Finding pins… ${pinProgress}` : 'Find pins automatically'}
+                </button>
+                <Link className="small" to="/admin/locations">Or place them by hand in Places & fares</Link>
+              </div>
+            )}
+            {data.auto_pins.length > 0 && (
+              <details className="fc-auto-pins">
+                <summary>{data.auto_pins.length} pin{data.auto_pins.length === 1 ? ' was' : 's were'} found automatically: please check {data.auto_pins.length === 1 ? 'it' : 'them'}</summary>
+                <p className="muted small">
+                  Public maps can be wrong for local landmarks. Open each place in Places & fares and move the pin if needed.
+                  A wrong pin gives a wrong price.
+                </p>
+                <ul className="plain-list small">
+                  {data.auto_pins.map((p) => <li key={p.id}><strong>{p.name}</strong>: {p.label}</li>)}
+                </ul>
+              </details>
             )}
             {!data.map_service && (
               <p className="muted small">

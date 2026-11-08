@@ -82,8 +82,8 @@ export default function AdminLocationsPage() {
     setError('')
     setNotice('')
     try {
-      await action()
-      setNotice('Saved successfully.')
+      const message = await action()
+      setNotice(typeof message === 'string' ? message : 'Saved successfully.')
       await loadData()
     } catch (e) {
       setError(e.message || 'Save failed.')
@@ -222,14 +222,22 @@ export default function AdminLocationsPage() {
       notes: placeForm.notes.trim() || null,
     }
     runSave(async () => {
-      await apiRequest(
+      const saved = await apiRequest(
         editingPlace
           ? `/api/v1/admin/locations/places/${editingPlace}`
           : '/api/v1/admin/locations/places',
         { method: editingPlace ? 'PATCH' : 'POST', body: JSON.stringify(payload) },
       )
+      const created = !editingPlace
       setPlaceForm(emptyPlace)
       setEditingPlace(null)
+      if (created && saved?.pin_source === 'auto') {
+        return `Saved. Map pin found automatically (${saved.pin_label}). Open the place and check the pin is in the right spot.`
+      }
+      if (created && saved && saved.latitude == null) {
+        return `Saved, but “${saved.name}” wasn’t found on the map. Edit it and tap the map to add its pin.`
+      }
+      return undefined
     })
   }
 
@@ -562,6 +570,11 @@ export default function AdminLocationsPage() {
                     {input('Latitude (optional)', placeForm.latitude, (v) => setPlaceForm({ ...placeForm, latitude: v }), { required: false, type: 'number', step: 'any' })}
                     {input('Longitude (optional)', placeForm.longitude, (v) => setPlaceForm({ ...placeForm, longitude: v }), { required: false, type: 'number', step: 'any' })}
                     <PinPicker latitude={placeForm.latitude} longitude={placeForm.longitude} name={placeForm.name}
+                      autoLabel={(() => {
+                        const current = places.find((p) => p.id === editingPlace)
+                        return current?.pin_source === 'auto' && String(current.latitude) === String(placeForm.latitude)
+                          ? current.pin_label || 'from the place name' : null
+                      })()}
                       onChange={(latitude, longitude) => setPlaceForm((f) => ({ ...f, latitude, longitude }))} />
                     {input('Notes (optional)', placeForm.notes, (v) => setPlaceForm({ ...placeForm, notes: v }), { required: false })}
                     {select(
@@ -591,6 +604,9 @@ export default function AdminLocationsPage() {
                     <div>
                       <p className="record-title">{p.name}</p>
                       <p className="record-meta">#{p.id} · {areaName(p.service_area_id)} · Zone #{p.zone_id}</p>
+                      <p className={`record-meta pin-state ${p.latitude == null ? 'is-missing' : p.pin_source === 'auto' ? 'is-auto' : ''}`}>
+                        {p.latitude == null ? 'No map pin yet' : p.pin_source === 'auto' ? 'Pin found automatically: check it' : 'Pin placed'}
+                      </p>
                     </div>
                     <div className="row" style={{ gap: 8 }}>
                       <StatusBadge status={p.status} kind="area" />

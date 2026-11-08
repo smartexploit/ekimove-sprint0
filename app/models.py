@@ -504,6 +504,9 @@ class Place(Base):
     aliases: Mapped[str | None] = mapped_column(Text, nullable=True)
     latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # "manual": placed by staff; "auto": found from the name (check it).
+    pin_source: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    pin_label: Mapped[str | None] = mapped_column(String(200), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(
         String(16), default="pending", nullable=False, index=True

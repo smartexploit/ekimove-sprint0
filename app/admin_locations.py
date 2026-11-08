@@ -8,6 +8,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth import require_super_admin
+from app.config import settings
+from app.geocode import ADO_EKITI_CENTER, find_pin
 from app.database import get_db
 from app.models import AuditLog, Fare, Place, PlaceFare, RideRequest, SavedPlace, ServiceArea, User, Zone
 
@@ -120,6 +122,8 @@ def _place_dict(place: Place) -> dict:
         "aliases": place.aliases, "latitude": place.latitude,
         "longitude": place.longitude, "notes": place.notes,
         "status": place.status,
+        "pin_source": place.pin_source if place.latitude is not None else None,
+        "pin_label": place.pin_label,
     }
 
 
@@ -252,6 +256,11 @@ def create_place(
     _valid_area(db, payload.service_area_id)
     _valid_zone(db, payload.zone_id)
     place = Place(**payload.model_dump())
+    if place.latitude is not None and place.longitude is not None:
+        place.pin_source = "manual"
+    else:
+        place.latitude = place.longitude = None
+        _auto_pin(db, place, max_queries=2)  # quick, so saving stays fast
     db.add(place)
     db.flush()
     _audit(db, admin, "location.place_created", "place", place.id, f"Created place {place.name}")
@@ -279,8 +288,14 @@ def update_place(
         _valid_area(db, changes["service_area_id"])
     if changes.get("zone_id") is not None:
         _valid_zone(db, changes["zone_id"])
+    before = (place.latitude, place.longitude)
     for key, value in changes.items():
         setattr(place, key, value)
+    if (place.latitude, place.longitude) != before:
+        if place.latitude is not None and place.longitude is not None:
+            place.pin_source, place.pin_label = "manual", None
+        else:
+            place.latitude = place.longitude = place.pin_source = place.pin_label = None
     _audit(db, admin, "location.place_updated", "place", place.id, f"Updated fields: {', '.join(changes)}")
     _save(db, "A place with this name already exists in this service area")
     db.refresh(place)
@@ -714,3 +729,73 @@ def remove_place_fare(fare_id: int, db: Session = Depends(get_db),
     _audit(db, admin, "location.place_fare_removed", "place_fare", fare_id, f"Removed route fare {label}")
     db.commit()
     return {"removed": True, "kind": "route fare", "name": label}
+
+
+# ---------- Automatic map pins ----------
+def _area_center(db: Session, area_id: int) -> tuple[float, float]:
+    """Middle of the area's hand-placed pins, or Ado-Ekiti when there are none."""
+    rows = db.execute(select(Place.latitude, Place.longitude).where(
+        Place.service_area_id == area_id, Place.pin_source == "manual",
+        Place.latitude.is_not(None), Place.longitude.is_not(None))).all()
+    if rows:
+        return (sum(r[0] for r in rows) / len(rows), sum(r[1] for r in rows) / len(rows))
+    return ADO_EKITI_CENTER
+
+
+def _auto_pin(db: Session, place: Place, max_queries: int = 4) -> bool:
+    """Try to find a pin from the place's name; never fails the request."""
+    if not settings.geocoding_enabled:
+        return False
+    found = find_pin(place.name, _area_center(db, place.service_area_id), place.address_text, place.aliases,
+                     max_queries=max_queries)
+    if found is None:
+        return False
+    place.latitude, place.longitude = found["latitude"], found["longitude"]
+    place.pin_source, place.pin_label = "auto", found["label"]
+    return True
+
+
+class AutoPinIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    service_area_id: int = Field(gt=0)
+    # Specific places to look up again; empty means places without a pin.
+    place_ids: list[int] = Field(default_factory=list, max_length=200)
+    # Places already tried in this run (skipped, so the console can page through).
+    skip_ids: list[int] = Field(default_factory=list, max_length=2000)
+
+
+AUTO_PIN_BATCH = 10
+
+
+@router.post("/places/auto-pin")
+def auto_pin_places(payload: AutoPinIn, db: Session = Depends(get_db),
+                    admin: User = Depends(require_super_admin)) -> dict:
+    _valid_area(db, payload.service_area_id)
+    if not settings.geocoding_enabled:
+        raise HTTPException(status_code=503, detail="Automatic map pins are switched off (GEOCODING_ENABLED).")
+    query = select(Place).where(Place.service_area_id == payload.service_area_id, Place.status != "inactive")
+    if payload.place_ids:
+        query = query.where(Place.id.in_(payload.place_ids))
+    else:
+        query = query.where((Place.latitude.is_(None)) | (Place.longitude.is_(None)))
+    if payload.skip_ids:
+        query = query.where(Place.id.not_in(payload.skip_ids))
+    places = db.scalars(query.order_by(Place.name)).all()
+    # The free OpenStreetMap service allows one lookup a second, so smaller batches.
+    size = AUTO_PIN_BATCH if settings.geoapify_api_key else 4
+    batch, remaining = places[:size], len(places) - min(len(places), size)
+    results = []
+    for place in batch:
+        if place.pin_source == "manual" and place.latitude is not None:
+            results.append({"id": place.id, "name": place.name, "status": "kept"})
+            continue
+        ok = _auto_pin(db, place)
+        results.append({"id": place.id, "name": place.name, "status": "pinned" if ok else "not_found",
+                        "latitude": place.latitude if ok else None, "longitude": place.longitude if ok else None,
+                        "label": place.pin_label if ok else None})
+    pinned = sum(1 for r in results if r["status"] == "pinned")
+    if pinned:
+        _audit(db, admin, "location.places_auto_pinned", "service_area", payload.service_area_id,
+               f"Found map pins for {pinned} place(s) automatically")
+    db.commit()
+    return {"results": results, "remaining": remaining}

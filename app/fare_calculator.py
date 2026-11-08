@@ -240,6 +240,8 @@ def preview(db: Session, area_id: int) -> dict:
         "formula": rules,
         "places": len(places),
         "missing_pins": [{"id": p.id, "name": p.name} for p in places if not _has_pin(p)],
+        "auto_pins": [{"id": p.id, "name": p.name, "label": p.pin_label} for p in places
+                      if _has_pin(p) and p.pin_source == "auto"],
         "road_distances": measured, "estimated_distances": len(routes) - measured,
         "map_service": bool(settings.geoapify_api_key),
         "summary": summary, "routes": routes,

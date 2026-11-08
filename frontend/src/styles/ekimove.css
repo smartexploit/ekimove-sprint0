@@ -4712,3 +4712,20 @@ a.chip {
   padding-top: 10px;
   border-top: 1px solid var(--line);
 }
+
+.pin-state.is-auto { color: var(--gold-700); font-weight: 700; }
+.pin-state.is-missing { color: var(--laterite-700); font-weight: 700; }
+
+.pin-auto-note {
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--gold-100);
+  color: var(--gold-700);
+  font-size: 14px;
+}
+
+.fc-auto-pins summary {
+  color: var(--gold-700);
+  font-weight: 700;
+  cursor: pointer;
+}
