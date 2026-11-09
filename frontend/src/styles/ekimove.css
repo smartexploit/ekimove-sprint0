@@ -5196,3 +5196,6 @@ a.chip {
 .search-box { position: relative; max-width: 420px; }
 .search-box svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--ink-500); pointer-events: none; z-index: 1; }
 .search-box .input { padding-left: 36px; width: 100%; }
+.gmap-popup { white-space: pre-line; font: 500 13px/1.4 var(--font-body, inherit); color: #1c2a24; max-width: 220px; }
+.place-error { color: var(--laterite-700); }
+.place-attribution { padding: 6px 12px 8px; font: 500 11px/1.3 Roboto, Arial, sans-serif; color: #5e5e5e; text-align: right; }

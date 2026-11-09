@@ -33,7 +33,7 @@ from app.client_ip import client_ip
 from app.config import settings
 from app.contacts import ContactError, clean_phone
 from app.database import get_db
-from app.fare_calculator import _pins, _road_matrix, formula, price, straight_line_meters
+from app.fare_calculator import _pins, _road_matrix, formula, price, store_distance
 from app.geocode import ADO_EKITI_CENTER, MAX_DISTANCE_KM
 from app.models import (
     AuditLog, Driver, Place, PlaceDistance, PlaceFare, PlacePinEvidence, PlaceSuggestion, Ride,
@@ -191,16 +191,12 @@ def reprice_place(db: Session, place: Place) -> dict:
         vehicles = [v for v in rules["vehicles"] if v["enabled"]]
 
         def save(a: Place, b: Place, cell: dict | None) -> None:
-            if cell:
-                meters, seconds, source = int(cell["distance"]), int(cell.get("time") or 0) or None, "road"
-            else:
-                meters = int(straight_line_meters(a, b) * rules["road_factor"])
-                seconds, source = None, "estimate"
             row = stored.get((a.id, b.id))
             if row is None:
                 row = PlaceDistance(origin_place_id=a.id, destination_place_id=b.id)
                 db.add(row)
-            row.meters, row.seconds, row.source, row.pins = meters, seconds, source, _pins(a, b)
+            source = store_distance(row, cell, a, b, rules["road_factor"])
+            meters = row.meters
             counts["routes"] += 1
             counts[source] += 1
             for v in vehicles:

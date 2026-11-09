@@ -659,6 +659,9 @@ class PlaceDistance(Base):
     source: Mapped[str] = mapped_column(String(8))
     # The pins the distance was measured from, so a moved pin is re-measured.
     pins: Mapped[str] = mapped_column(String(80))
+    # Which map service measured a "road" distance: "google" or "geoapify".
+    # Google distances are re-measured after 30 days (Google's terms).
+    provider: Mapped[str | None] = mapped_column(String(12), nullable=True)
     computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

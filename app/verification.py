@@ -298,6 +298,19 @@ def accept_policies(payload: PolicyAccept, request: Request, current_user: User 
 
 @router.get("/map-config")
 def map_config() -> dict:
+    base = _tile_config()
+    if settings.google_maps_browser_key:
+        # Google's terms: Google search results and distances go on a Google
+        # map, so every map uses Google once its browser key is set. The
+        # tiles above stay as the fallback if Google's map fails to load.
+        base.update({"provider": "google", "google_key": settings.google_maps_browser_key,
+                     "google_map_id": settings.google_maps_map_id})
+    else:
+        base["provider"] = "tiles"
+    return base
+
+
+def _tile_config() -> dict:
     if settings.geoapify_api_key:
         return {"tile_url": f"https://maps.geoapify.com/v1/tile/osm-bright/{{z}}/{{x}}/{{y}}.png?apiKey={settings.geoapify_api_key}",
                 "attribution": 'Powered by <a href="https://www.geoapify.com/">Geoapify</a> | © OpenStreetMap contributors',

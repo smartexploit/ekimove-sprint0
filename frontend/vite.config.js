@@ -3,8 +3,8 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
 /**
- * Content Security Policy for the built app: only EkiMove's own scripts can
- * run, the page talks only to the EkiMove API, and forms can only post to
+ * Content Security Policy for the built app: only EkiMove's own scripts (and
+ * Google Maps) can run, the page talks only to the EkiMove API and Google Maps, and forms can only post to
  * EkiMove or Interswitch checkout. Added at build time (the dev server
  * needs inline scripts for hot reload).
  */
@@ -16,14 +16,19 @@ function contentSecurityPolicy(mode) {
   } catch {
     // An unusable address is ignored; the default API stays allowed.
   }
+  // Google Maps (shown once EkiMove's Google key is set) needs its own
+  // hosts, per Google's Content Security Policy guide for the Maps JS API.
+  const google = 'https://*.googleapis.com https://*.gstatic.com https://*.google.com'
   const policy = [
     "default-src 'self'",
-    "script-src 'self'",
+    `script-src 'self' 'unsafe-eval' blob: ${google} https://*.ggpht.com https://*.googleusercontent.com`,
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' data: https://fonts.gstatic.com",
-    "img-src 'self' data: blob: https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://maps.geoapify.com",
-    `connect-src 'self' ${[...api].join(' ')}`,
-    "worker-src 'self'",
+    "img-src 'self' data: blob: https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://maps.geoapify.com "
+      + `${google} https://*.googleusercontent.com`,
+    `connect-src 'self' ${[...api].join(' ')} ${google} data: blob:`,
+    'frame-src https://*.google.com',
+    "worker-src 'self' blob:",
     "manifest-src 'self'",
     "object-src 'none'",
     "base-uri 'self'",

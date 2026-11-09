@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app import google_maps
 from app.app_settings import booking_rules, is_motorcycle, max_passengers
 from app.auth import get_current_user
 from app.client_ip import client_ip
@@ -120,7 +121,11 @@ def resolve_stop(db: Session, stop: Stop, which: str) -> dict:
 
 
 def road_meters(a: dict, b: dict, road_factor: float) -> tuple[int, str]:
-    """Road distance between two stops (Geoapify routing), else an estimate."""
+    """Road distance between two stops (Google, else Geoapify routing), else
+    an estimate. Measured for this booking only, never stored as a pin."""
+    google = google_maps.route_matrix([(a["latitude"], a["longitude"])], [(b["latitude"], b["longitude"])])
+    if google and google[0][0]:
+        return int(google[0][0]["distance"]), "road"
     if settings.geoapify_api_key:
         try:
             response = requests.get(ROUTING_URL, timeout=8, params={

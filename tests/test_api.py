@@ -7333,3 +7333,173 @@ def test_survey_limits_and_bot_trap(client):
         pins_module.SURVEY_DAILY_LIMIT = old
     assert _survey(client, place_id=a, latitude=7.6, longitude=5.22, accuracy_m=5,
                    contact_phone="12345").status_code == 422
+
+
+# ---------- Google Maps Platform (Routes matrix, Places search, maps) ----------
+import app.google_maps as google_module
+from app.models import PlaceDistance
+
+
+class _GoogleReply:
+    def __init__(self, data, status=200):
+        self.data, self.status_code = data, status
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise google_module.requests.HTTPError(f"{self.status_code}")
+
+    def json(self):
+        return self.data
+
+
+def _fake_matrix(calls, base=5000):
+    def fake_post(url, timeout, headers, json):
+        assert url == google_module.MATRIX_URL and headers["X-Goog-Api-Key"] == "g-server"
+        assert "distanceMeters" in headers["X-Goog-FieldMask"] and json["travelMode"] == "DRIVE"
+        calls.append(json)
+        return _GoogleReply([
+            {"originIndex": i, "destinationIndex": j, "distanceMeters": base + 100 * i + j, "duration": "420s",
+             "condition": "ROUTE_EXISTS"}
+            for i in range(len(json["origins"])) for j in range(len(json["destinations"]))])
+    return fake_post
+
+
+def test_google_route_matrix_splits_big_requests(monkeypatch):
+    monkeypatch.setattr(settings, "google_maps_server_key", "g-server")
+    calls = []
+    monkeypatch.setattr(google_module.requests, "post", _fake_matrix(calls))
+    origins = [(7.6 + i / 1000, 5.2) for i in range(30)]
+    matrix = google_module.route_matrix(origins, [(7.7, 5.3), (7.71, 5.31)])
+    # 30 origins → two requests (25 + 5); indexes are put back in place.
+    assert len(calls) == 2 and len(calls[0]["origins"]) == 25 and len(calls[1]["origins"]) == 5
+    assert matrix[0][1] == {"distance": 5001, "time": 420}
+    assert matrix[26][0] == {"distance": 5100, "time": 420}  # second chunk's origin 1
+    # A missing route stays empty; a failure means "no answer" so callers fall back.
+    monkeypatch.setattr(google_module.requests, "post", lambda *a, **k: _GoogleReply(
+        [{"originIndex": 0, "destinationIndex": 0, "condition": "ROUTE_NOT_FOUND"}]))
+    assert google_module.route_matrix([(7.6, 5.2)], [(7.7, 5.3)]) == [[None]]
+    monkeypatch.setattr(google_module.requests, "post", lambda *a, **k: _GoogleReply({}, 403))
+    assert google_module.route_matrix([(7.6, 5.2)], [(7.7, 5.3)]) is None
+    monkeypatch.setattr(settings, "google_maps_server_key", None)
+    assert google_module.route_matrix([(7.6, 5.2)], [(7.7, 5.3)]) is None
+
+
+def test_fare_calculator_uses_google_and_remeasures_after_30_days(client, monkeypatch):
+    admin = login(client, *ADMIN_LOGIN)
+    area_id, (a, b, c), _manual = _calc_area(client)
+    monkeypatch.setattr(settings, "geoapify_api_key", "geo-key")
+    monkeypatch.setattr(settings, "google_maps_server_key", "g-server")
+    calls = []
+    monkeypatch.setattr(google_module.requests, "post", _fake_matrix(calls, base=3000))
+
+    def measure():
+        return client.post("/api/v1/admin/fare-calculator/distances", json={"service_area_id": area_id},
+                           headers=admin).json()
+
+    first = measure()
+    assert first["counts"]["road"] == 6 and first["map_service"] is True and len(calls) == 1
+    with session_for(client) as db:
+        rows = db.scalars(select(PlaceDistance).where(PlaceDistance.origin_place_id.in_([a, b, c]))).all()
+        assert rows and all(r.provider == "google" for r in rows)
+    # Fresh Google distances are reused...
+    assert measure()["counts"]["unchanged"] == 6 and len(calls) == 1
+    # ...but Google's terms allow keeping them for 30 days, so older ones are measured again.
+    with session_for(client) as db:
+        row = db.scalars(select(PlaceDistance).where(PlaceDistance.origin_place_id == a)).first()
+        row.computed_at = datetime.now(timezone.utc) - timedelta(days=31)
+        db.commit()
+    assert measure()["counts"]["road"] >= 1 and len(calls) == 2
+    # Distances from the old service are re-measured once Google is switched on.
+    with session_for(client) as db:
+        row = db.scalars(select(PlaceDistance).where(PlaceDistance.origin_place_id == b)).first()
+        row.provider = "geoapify"
+        db.commit()
+    assert measure()["counts"]["road"] >= 1 and len(calls) == 3
+    # If Google fails, Geoapify is tried next.
+    monkeypatch.setattr(fare_calc_module.requests, "post", lambda url, **kw: (
+        _GoogleReply({}, 500) if url == google_module.MATRIX_URL else _GoogleReply({"sources_to_targets": [
+            [{"distance": 1234, "time": 60} for _ in kw["json"]["targets"]] for _ in kw["json"]["sources"]]})))
+    refreshed = client.post("/api/v1/admin/fare-calculator/distances",
+                            json={"service_area_id": area_id, "refresh": True}, headers=admin).json()
+    assert refreshed["counts"]["road"] == 6
+    with session_for(client) as db:
+        assert db.scalars(select(PlaceDistance).where(PlaceDistance.origin_place_id == a)).first().provider == "geoapify"
+
+
+def test_dropped_pin_distance_uses_google_first(monkeypatch):
+    monkeypatch.setattr(settings, "google_maps_server_key", "g-server")
+    monkeypatch.setattr(settings, "geoapify_api_key", None)
+    calls = []
+    monkeypatch.setattr(google_module.requests, "post", _fake_matrix(calls, base=4567))
+    assert points_module.road_meters({"latitude": 7.6, "longitude": 5.2},
+                                     {"latitude": 7.62, "longitude": 5.22}, 1.35) == (4567, "road")
+    assert calls[0]["origins"][0]["waypoint"]["location"]["latLng"] == {"latitude": 7.6, "longitude": 5.2}
+    monkeypatch.setattr(google_module.requests, "post", lambda *a, **k: _GoogleReply({}, 500))
+    meters, source = points_module.road_meters({"latitude": 7.6, "longitude": 5.2},
+                                               {"latitude": 7.62, "longitude": 5.22}, 1.35)
+    assert source == "estimate" and meters > 3000
+
+
+def test_google_address_search_and_lookup(client, monkeypatch):
+    passenger = login(client, *PASSENGER_LOGIN)
+    assert client.get("/api/v1/places/search?q=Mercy").status_code == 401
+    monkeypatch.setattr(settings, "google_maps_server_key", None)
+    assert client.get("/api/v1/places/settings").json() == {"enabled": False}
+    assert client.get("/api/v1/places/search?q=Mercy", headers=passenger).json() == {"suggestions": []}
+    assert client.post("/api/v1/places/resolve", json={"place_id": "ChIJabc"}, headers=passenger).status_code == 409
+
+    monkeypatch.setattr(settings, "google_maps_server_key", "g-server")
+    seen = {}
+
+    def fake_post(url, timeout, json, headers):
+        seen["body"], seen["headers"] = json, headers
+        assert url == google_module.AUTOCOMPLETE_URL
+        return _GoogleReply({"suggestions": [
+            {"placePrediction": {"placeId": "ChIJmercy", "text": {"text": "Mercy Pharmacy, Ajilosun, Ado-Ekiti"},
+                                 "structuredFormat": {"mainText": {"text": "Mercy Pharmacy"},
+                                                      "secondaryText": {"text": "Ajilosun, Ado-Ekiti"}}}},
+            {"queryPrediction": {"text": {"text": "mercy"}}},
+        ]})
+
+    monkeypatch.setattr(google_module.requests, "post", fake_post)
+    found = client.get("/api/v1/places/search?q=Mercy%20pharm&session=abcd1234efgh", headers=passenger).json()
+    assert found == {"suggestions": [{"place_id": "ChIJmercy", "name": "Mercy Pharmacy",
+                                      "detail": "Ajilosun, Ado-Ekiti"}]}
+    body = seen["body"]
+    assert body["input"] == "Mercy pharm" and body["sessionToken"] == "abcd1234efgh"
+    assert body["includedRegionCodes"] == ["ng"] and body["locationRestriction"]["circle"]["radius"] == 25000.0
+    # Too-short text costs nothing; a bad session token is just left out.
+    seen.clear()
+    assert client.get("/api/v1/places/search?q=Me", headers=passenger).json() == {"suggestions": []} and not seen
+    client.get("/api/v1/places/search?q=Mercy&session=bad token!", headers=passenger)
+    assert "sessionToken" not in seen["body"]
+
+    def fake_get(url, timeout, params, headers):
+        assert url.endswith("/places/ChIJmercy") and params == {"sessionToken": "abcd1234efgh"}
+        assert headers["X-Goog-FieldMask"] == "id,location,formattedAddress"
+        return _GoogleReply({"id": "ChIJmercy", "location": {"latitude": 7.6301, "longitude": 5.2209},
+                             "formattedAddress": "Ajilosun Rd, Ado-Ekiti"})
+
+    monkeypatch.setattr(google_module.requests, "get", fake_get)
+    got = client.post("/api/v1/places/resolve", json={"place_id": "ChIJmercy", "session": "abcd1234efgh"},
+                      headers=passenger)
+    assert got.status_code == 200 and got.json() == {"latitude": 7.6301, "longitude": 5.2209,
+                                                     "address": "Ajilosun Rd, Ado-Ekiti"}
+    assert client.post("/api/v1/places/resolve", json={"place_id": "../../x"}, headers=passenger).status_code == 422
+    # Google failing never breaks booking: search goes quiet, a lookup says so.
+    monkeypatch.setattr(google_module.requests, "post", lambda *a, **k: _GoogleReply({}, 500))
+    monkeypatch.setattr(google_module.requests, "get", lambda *a, **k: _GoogleReply({}, 500))
+    assert client.get("/api/v1/places/search?q=Mercy", headers=passenger).json() == {"suggestions": []}
+    assert client.post("/api/v1/places/resolve", json={"place_id": "ChIJmercy"}, headers=passenger).status_code == 502
+
+
+def test_map_config_switches_to_google_maps(client, monkeypatch):
+    monkeypatch.setattr(settings, "google_maps_browser_key", None)
+    monkeypatch.setattr(settings, "geoapify_api_key", None)
+    plain = client.get("/api/v1/map-config").json()
+    assert plain["provider"] == "tiles" and "google_key" not in plain
+    monkeypatch.setattr(settings, "google_maps_browser_key", "g-browser")
+    monkeypatch.setattr(settings, "google_maps_map_id", "map123")
+    google = client.get("/api/v1/map-config").json()
+    assert google["provider"] == "google" and google["google_key"] == "g-browser"
+    assert google["google_map_id"] == "map123" and google["tile_url"]  # tiles kept as a fallback

@@ -293,6 +293,21 @@ Presets: Dispatcher, Driver reviewer (reviews and dispatch), Support agent (supp
 ## Places not on the list (dropped pins)
 When **Riders can drop a pin** is ticked in the Fare calculator, the pickup and destination search ends with "Not on the list? Drop a pin on the map". The rider taps the spot (or uses their location for pickup) and describes it ("blue gate opposite Mercy Pharmacy"); a street name is suggested from the map. The price is worked out on the server with the per-km formula from the road distance (Geoapify routing with `GEOAPIFY_API_KEY`, otherwise the straight line × 1.35). Pins must be within 8 km of an active listed place. The booking stores the pin's coordinates, so tracking, the live map and dispatch use it like a listed place. **Send a package** works the same way (for the pickup and the drop-off); the package-size extras are added to the per-km price.
 
+### Google Maps (optional)
+Set these on the Render backend to use Google; without them nothing changes:
+
+| Variable | Google key with | Used for |
+|---|---|---|
+| `GOOGLE_MAPS_SERVER_KEY` | Places API (New) + Routes API only | Road distances (Compute Route Matrix) for the Fare calculator, Pin check and dropped pins; address search |
+| `GOOGLE_MAPS_BROWSER_KEY` | Maps JavaScript API only, limited to EkiMove's websites | Every map in the app becomes a Google map |
+| `GOOGLE_MAPS_MAP_ID` | A JavaScript Map ID (Map management) | EkiMove's own pin styles on Google maps |
+
+- **Distances:** Google is tried first, then Geoapify, then the straight-line estimate. Each stored distance records which service measured it (`place_distances.provider`, migration 0024). When the service changes, or a Google distance is **older than 30 days** (Google's terms allow coordinates from Places/Routes to be kept for 30 days), *Measure road distances* measures it again. Requests are split into 25 × 25 blocks (Google's limit is 625 per request).
+- **Address search:** when riders can drop pins, typing 3+ letters in pickup/destination also shows up to 5 Google addresses within 25 km of Ado-Ekiti (after a short pause, so not every keystroke is charged; one search session per lookup). Choosing one opens the pin map at that spot to confirm, then it's priced like a dropped pin. Google places are never added to EkiMove's own list; the list's pins come from staff and the survey.
+- **Maps:** Google's terms require Google results on a Google map, so all maps switch to Google with the browser key. If Google refuses the key or can't load, the plain map is shown instead. The site's Content Security Policy allows Google's map hosts.
+- **Cost guard:** in Google Cloud set a budget alert and daily quotas per API. Keys belong only in Render, never in code or chat.
+
+
 ## Keep me signed in
 Passengers and drivers can tick **Keep me signed in on this phone** (on by default). Closing the app then doesn't sign them out: next time they see **Welcome back** and unlock with their password, or a 4–6 digit PIN they set on that phone (`app/device_sessions.py`). The phone keeps a random token; only its hash is stored. A PIN works only with that phone's token; five wrong tries forget the phone; changing or resetting the password, signing out, or suspension ends remembered phones; they expire after 60 days unused. The inactivity timeout locks to the same screen. Staff accounts always sign in fully.
 

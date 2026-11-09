@@ -53,7 +53,17 @@ class Settings(BaseSettings):
     # (Geoapify when its key is set, otherwise OpenStreetMap Nominatim).
     geocoding_enabled: bool = True
 
-    @field_validator("geoapify_api_key", mode="before")
+    # Google Maps Platform, optional. The server key (Places API (New) and
+    # Routes API) finds addresses and measures road distances; the browser
+    # key (Maps JavaScript API, limited to EkiMove's websites) shows maps.
+    # Google's terms require Google results to be shown on a Google map,
+    # so maps switch to Google when the browser key is set.
+    google_maps_server_key: str | None = None
+    google_maps_browser_key: str | None = None
+    google_maps_map_id: str | None = None
+
+    @field_validator("geoapify_api_key", "google_maps_server_key", "google_maps_browser_key", "google_maps_map_id",
+                     mode="before")
     @classmethod
     def clean_geoapify_api_key(cls, value):
         if value is None:

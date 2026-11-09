@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+from datetime import datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 
 import requests
@@ -21,6 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app import google_maps
 from app.auth import require_super_admin
 from app.config import settings
 from app.database import get_db
@@ -128,8 +130,50 @@ def _stored_distances(db: Session, places: list[Place]) -> dict[tuple[int, int],
     return {(r.origin_place_id, r.destination_place_id): r for r in rows}
 
 
+def distance_provider() -> str | None:
+    """Which map service measures road distances now."""
+    if google_maps.enabled():
+        return "google"
+    return "geoapify" if settings.geoapify_api_key else None
+
+
+def needs_remeasure(row: PlaceDistance, pins: str, refresh: bool = False) -> bool:
+    """A stored distance is measured again when asked, when a pin moved, when
+    it was only an estimate, when the map service changed, or (Google's
+    rule) when a Google distance is older than 30 days."""
+    if refresh or row.pins != pins or row.source == "estimate":
+        return True
+    provider = distance_provider()
+    if provider and row.provider != provider:
+        return True
+    if row.provider == "google" and row.computed_at is not None:
+        computed = row.computed_at if row.computed_at.tzinfo else row.computed_at.replace(tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) - computed > timedelta(days=google_maps.REFRESH_DAYS)
+    return False
+
+
+def store_distance(row: PlaceDistance, cell: dict | None, a: Place, b: Place, road_factor: float) -> str:
+    """Write one measured (or estimated) distance; returns its source."""
+    if cell:
+        row.meters, row.seconds, row.source = int(cell["distance"]), int(cell.get("time") or 0) or None, "road"
+        row.provider = cell.get("provider")
+    else:
+        row.meters, row.seconds, row.source = int(straight_line_meters(a, b) * road_factor), None, "estimate"
+        row.provider = None
+    row.pins = _pins(a, b)
+    row.computed_at = datetime.now(timezone.utc)
+    return row.source
+
+
 def _road_matrix(sources: list[Place], targets: list[Place]) -> list[list[dict | None]] | None:
-    """Road distances from Geoapify, in chunks of at most 1,000 cells."""
+    """Road distances: Google when set up, else Geoapify (chunks of at most
+    1,000 cells). Each cell says which service measured it."""
+    if not sources or not targets:
+        return None
+    google = google_maps.route_matrix([(p.latitude, p.longitude) for p in sources],
+                                      [(p.latitude, p.longitude) for p in targets])
+    if google is not None:
+        return [[dict(cell, provider="google") if cell else None for cell in row] for row in google]
     if not settings.geoapify_api_key:
         return None
     rows_per_call = max(1, MATRIX_CELLS // max(1, len(targets)))
@@ -145,7 +189,8 @@ def _road_matrix(sources: list[Place], targets: list[Place]) -> list[list[dict |
             )
             response.raise_for_status()
             for row in response.json().get("sources_to_targets", []):
-                matrix.append([cell if cell and cell.get("distance") is not None else None for cell in row])
+                matrix.append([dict(cell, provider="geoapify") if cell and cell.get("distance") is not None
+                               else None for cell in row])
         if len(matrix) != len(sources):
             raise ValueError("incomplete route matrix")
     except (requests.RequestException, ValueError):
@@ -162,7 +207,7 @@ def measure(db: Session, places: list[Place], refresh: bool = False) -> dict:
 
     def needs(a: Place, b: Place) -> bool:
         row = stored.get((a.id, b.id))
-        return refresh or row is None or row.pins != _pins(a, b) or row.source == "estimate"
+        return row is None or needs_remeasure(row, _pins(a, b), refresh)
 
     sources = [a for a in pinned if any(a.id != b.id and needs(a, b) for b in pinned)]
     matrix = _road_matrix(sources, pinned) if sources else None
@@ -175,17 +220,11 @@ def measure(db: Session, places: list[Place], refresh: bool = False) -> dict:
                 counts["unchanged"] += 1
                 continue
             cell = matrix[i][j] if matrix else None
-            if cell:
-                meters, seconds, source = int(cell["distance"]), int(cell.get("time") or 0) or None, "road"
-            else:
-                meters = int(straight_line_meters(a, b) * rules["road_factor"])
-                seconds, source = None, "estimate"
             row = stored.get((a.id, b.id))
             if row is None:
                 row = PlaceDistance(origin_place_id=a.id, destination_place_id=b.id)
                 db.add(row)
-            row.meters, row.seconds, row.source, row.pins = meters, seconds, source, _pins(a, b)
-            counts[source] += 1
+            counts[store_distance(row, cell, a, b, rules["road_factor"])] += 1
     counts["unchanged"] += sum(1 for a in pinned if a not in sources for b in pinned if a.id != b.id)
     return counts
 
@@ -247,7 +286,7 @@ def preview(db: Session, area_id: int) -> dict:
         "auto_pins": [{"id": p.id, "name": p.name, "label": p.pin_label} for p in places
                       if _has_pin(p) and p.pin_source == "auto"],
         "road_distances": measured, "estimated_distances": len(routes) - measured,
-        "map_service": bool(settings.geoapify_api_key),
+        "map_service": bool(distance_provider()),
         "summary": summary, "routes": routes,
     }
 
@@ -285,7 +324,7 @@ def measure_distances(payload: MeasureIn, db: Session = Depends(get_db),
     _area, places = _area_places(db, payload.service_area_id)
     counts = measure(db, places, payload.refresh)
     db.commit()
-    return {"counts": counts, "map_service": bool(settings.geoapify_api_key)}
+    return {"counts": counts, "map_service": bool(distance_provider())}
 
 
 class RouteKey(BaseModel):
