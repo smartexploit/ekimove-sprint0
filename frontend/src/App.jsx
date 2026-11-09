@@ -26,6 +26,7 @@ const SendPackagePage = lazy(() => import('./pages/passenger/SendPackagePage.jsx
 const ReceiptPage = lazy(() => import('./pages/account/ReceiptPage.jsx'))
 const UnlockPage = lazy(() => import('./pages/auth/UnlockPage.jsx'))
 const FaresPage = lazy(() => import('./pages/public/FaresPage.jsx'))
+const MapAPlacePage = lazy(() => import('./pages/public/MapAPlacePage.jsx'))
 const FaqPage = lazy(() => import('./pages/public/FaqPage.jsx'))
 const AreaPage = lazy(() => import('./pages/public/AreaPage.jsx'))
 const AdminFaresPage = lazy(() => import('./pages/admin/AdminFaresPage.jsx'))
@@ -71,6 +72,7 @@ export default function App() {
         <Route path="/t/:token" element={<TrackSharePage />} />
         <Route path="/unlock" element={<UnlockPage />} />
         <Route path="/fares" element={<FaresPage />} />
+        <Route path="/map-a-place" element={<MapAPlacePage />} />
         <Route path="/faq" element={<FaqPage />} />
         <Route path="/areas/:slug" element={<AreaPage />} />
         <Route path="/policies" element={<PoliciesPage />} />

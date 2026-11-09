@@ -20,13 +20,18 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from statistics import median
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+import hashlib
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, require_staff
+from app.client_ip import client_ip
+from app.config import settings
+from app.contacts import ContactError, clean_phone
 from app.database import get_db
 from app.fare_calculator import _pins, _road_matrix, formula, price, straight_line_meters
 from app.geocode import ADO_EKITI_CENTER, MAX_DISTANCE_KM
@@ -53,7 +58,11 @@ FLAG_TEXT = {
     "shared_spot": "Same spot as another place",
     "outside": "Outside the service area",
     "trips_disagree": "Trips happen somewhere else",
+    "survey_suggests": "Survey helpers sent its location",
 }
+SURVEY_MIN = 2              # agreeing survey readings needed before suggesting a pin
+SURVEY_AGREE_M = 60         # survey readings must be this close together
+SURVEY_DAILY_LIMIT = 40     # reports per phone/browser per day
 
 
 def now() -> datetime:
@@ -114,6 +123,22 @@ def record_trip_evidence(db: Session, ride: Ride, request: RideRequest, end: str
                                 user_id=None))
     except Exception:  # evidence is a bonus, never a reason to fail a trip update
         logger.exception("Couldn't record pin evidence for ride %s", ride.id)
+
+
+def survey_suggestion(rows: list[PlacePinEvidence], place: Place) -> dict | None:
+    """Where survey helpers standing at the place put it, once two or more agree."""
+    readings = [r for r in rows if r.source == "survey"]
+    if len(readings) < SURVEY_MIN:
+        return None
+    lat, lon = median(r.latitude for r in readings), median(r.longitude for r in readings)
+    close = [r for r in readings if meters_between(lat, lon, r.latitude, r.longitude) <= SURVEY_AGREE_M]
+    # Two different people must agree: one person's repeat visits don't count twice.
+    if len({r.contact_phone or r.client_key or r.id for r in close}) < SURVEY_MIN:
+        return None
+    lat, lon = median(r.latitude for r in close), median(r.longitude for r in close)
+    away = round(meters_between(lat, lon, place.latitude, place.longitude)) if _has_pin(place) else None
+    return {"latitude": round(lat, 6), "longitude": round(lon, 6), "samples": len(close),
+            "helpers": len({r.contact_phone or r.client_key for r in close}), "meters_from_pin": away}
 
 
 def trip_suggestion(rows: list[PlacePinEvidence], place: Place) -> dict | None:
@@ -259,6 +284,10 @@ def _place_rows(db: Session) -> tuple[list[dict], dict]:
         suggestion = trip_suggestion(evidence.get(p.id, []), p)
         if suggestion and (suggestion["meters_from_pin"] is None or suggestion["meters_from_pin"] > DISAGREE_M):
             flags.append("trips_disagree")
+        survey = survey_suggestion(evidence.get(p.id, []), p)
+        if survey and (survey["meters_from_pin"] is None or survey["meters_from_pin"] > SURVEY_AGREE_M) \
+                and p.pin_source != "field":
+            flags.append("survey_suggests")
         checked = p.pin_verified_at is not None and not flags
         summary["total"] += 1
         summary["attention"] += bool(flags)
@@ -274,8 +303,10 @@ def _place_rows(db: Session) -> tuple[list[dict], dict]:
             "pin_verified_at": _iso(p.pin_verified_at),
             "flags": [{"key": f, "text": FLAG_TEXT[f]} for f in flags],
             "shared_with": sorted(set(shared))[:5],
-            "trip_readings": len([r for r in evidence.get(p.id, []) if r.source != "on_site"]),
+            "trip_readings": len([r for r in evidence.get(p.id, []) if r.source in ("trip_start", "trip_end")]),
+            "survey_readings": len([r for r in evidence.get(p.id, []) if r.source == "survey"]),
             "suggestion": suggestion,
+            "survey": survey,
             "checked": checked,
         })
     return rows, summary
@@ -354,6 +385,21 @@ def use_trip_pin(place_id: int, db: Session = Depends(get_db),
         raise HTTPException(status_code=409, detail="There aren't enough trips at this place yet to suggest a pin.")
     result = _set_pin(db, place, suggestion["latitude"], suggestion["longitude"], "trips",
                       f"Moved to where {suggestion['samples']} trips happened", staff)
+    db.commit()
+    return {"place_id": place.id, **result}
+
+
+@router.post("/admin/pins/places/{place_id}/use-survey")
+def use_survey_pin(place_id: int, db: Session = Depends(get_db),
+                   staff: User = Depends(require_staff("pins"))) -> dict:
+    place = _place_or_404(db, place_id)
+    rows = db.scalars(select(PlacePinEvidence).where(PlacePinEvidence.place_id == place.id,
+                                                     PlacePinEvidence.source == "survey")).all()
+    suggestion = survey_suggestion(list(rows), place)
+    if suggestion is None:
+        raise HTTPException(status_code=409, detail="Not enough survey helpers agree on this place yet.")
+    result = _set_pin(db, place, suggestion["latitude"], suggestion["longitude"], "survey",
+                      f"Placed by {suggestion['helpers']} survey helper(s), approved by {staff.full_name}", staff)
     db.commit()
     return {"place_id": place.id, **result}
 
@@ -505,6 +551,10 @@ def my_recent_spots(db: Session = Depends(get_db), user: User = Depends(get_curr
     return {"spots": spots}
 
 
+def _who(s: PlaceSuggestion) -> str:
+    return f"u{s.user_id}" if s.user_id else (s.contact_phone or s.client_key or f"s{s.id}")
+
+
 def _similar_pending(db: Session, suggestion: PlaceSuggestion) -> list[PlaceSuggestion]:
     pending = db.scalars(select(PlaceSuggestion).where(PlaceSuggestion.status == "pending",
                                                        PlaceSuggestion.id != suggestion.id)).all()
@@ -528,7 +578,8 @@ def list_suggestions(db: Session = Depends(get_db), _staff: User = Depends(requi
                       key=lambda pair: pair[0], default=(None, None))
         rows.append({
             "id": s.id, "name": s.name, "latitude": s.latitude, "longitude": s.longitude,
-            "accuracy_m": s.accuracy_m, "suggested_by": len({g.user_id for g in group}),
+            "accuracy_m": s.accuracy_m, "suggested_by": len({_who(g) for g in group}),
+            "from_survey": any(g.source == "survey" for g in group),
             "other_names": sorted({g.name for g in group if g.name != s.name})[:4],
             "nearest_place": {"name": nearest[1].name, "meters": round(nearest[0]), "zone_id": nearest[1].zone_id,
                               "service_area_id": nearest[1].service_area_id} if nearest[1] else None,
@@ -556,7 +607,7 @@ def approve_suggestion(suggestion_id: int, payload: ApproveIn, db: Session = Dep
     place = _create_place(db, name=" ".join(payload.name.split()), zone_id=payload.zone_id,
                           service_area_id=payload.service_area_id, place_type=payload.place_type,
                           lat=suggestion.latitude, lon=suggestion.longitude, source="rider",
-                          label=f"Suggested by {len({g.user_id for g in group})} rider(s), approved by "
+                          label=f"Suggested by {len({_who(g) for g in group})} people, approved by "
                                 f"{staff.full_name}", user=staff)
     from app.push import notify  # avoid an import cycle
 
@@ -583,3 +634,134 @@ def reject_suggestion(suggestion_id: int, db: Session = Depends(get_db),
                     entity_id=str(suggestion.id), details=suggestion.name))
     db.commit()
     return {"rejected": len(group)}
+
+
+# ------------------------------------------------------------------ public "Map a place" survey
+
+def _client_key(request: Request) -> str:
+    raw = f"{client_ip(request)}|{request.headers.get('user-agent', '')[:200]}|{settings.jwt_secret_key or 'ekimove'}"
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+@router.get("/survey/places")
+def survey_places(db: Session = Depends(get_db)) -> dict:
+    """Listed places, the ones that still need a good pin first."""
+    places = db.scalars(select(Place).join(Zone, Zone.id == Place.zone_id)
+                        .where(Place.status == "active", Zone.is_active.is_(True)).order_by(Place.name)).all()
+    zones = {z.id: z.name for z in db.scalars(select(Zone)).all()}
+    rows = []
+    for p in places:
+        needed = not _has_pin(p) or (p.pin_source == "auto" and p.pin_verified_at is None)
+        rows.append({"id": p.id, "name": p.name, "zone": zones.get(p.zone_id, ""), "needed": needed})
+    rows.sort(key=lambda r: (not r["needed"], r["name"].lower()))
+    return {"places": rows, "max_accuracy_m": MAX_ACCURACY_M}
+
+
+class SurveyReportIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    place_id: int | None = Field(default=None, gt=0)
+    name: str | None = Field(default=None, max_length=120)
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    accuracy_m: float = Field(ge=0, le=5000)
+    contact_phone: str | None = Field(default=None, max_length=32)
+    website: str | None = Field(default=None, max_length=200)  # left empty by people; bots fill it in
+
+    @field_validator("name", "contact_phone", mode="before")
+    @classmethod
+    def tidy(cls, value):
+        return " ".join(value.split()) or None if isinstance(value, str) else value
+
+
+@router.post("/survey/reports", status_code=201)
+def survey_report(payload: SurveyReportIn, request: Request, db: Session = Depends(get_db)) -> dict:
+    """Someone standing at a place sends its location. No sign-in needed;
+    staff review everything before it changes a pin."""
+    if payload.website:
+        return {"thanks": True, "message": "Thank you!", "your_reports": 0}
+    if payload.accuracy_m > MAX_ACCURACY_M:
+        raise HTTPException(status_code=422, detail=f"Your phone's location is only accurate to about "
+                            f"{round(payload.accuracy_m)} m. Step outside, wait a few seconds and try again.")
+    if not in_service_area(payload.latitude, payload.longitude):
+        raise HTTPException(status_code=422, detail="That location is outside the area EkiMove covers "
+                                                    "(Ado-Ekiti and Iworoko).")
+    phone = None
+    if payload.contact_phone:
+        try:
+            phone = clean_phone(payload.contact_phone)
+        except ContactError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+    key = _client_key(request)
+    since = now() - timedelta(days=1)
+    who = [PlacePinEvidence.client_key == key] + ([PlacePinEvidence.contact_phone == phone] if phone else [])
+    who_s = [PlaceSuggestion.client_key == key] + ([PlaceSuggestion.contact_phone == phone] if phone else [])
+    from sqlalchemy import or_
+
+    today = (db.scalar(select(func.count(PlacePinEvidence.id)).where(
+        PlacePinEvidence.source == "survey", PlacePinEvidence.created_at >= since, or_(*who))) or 0) + \
+        (db.scalar(select(func.count(PlaceSuggestion.id)).where(
+            PlaceSuggestion.source == "survey", PlaceSuggestion.created_at >= since, or_(*who_s))) or 0)
+    if today >= SURVEY_DAILY_LIMIT:
+        raise HTTPException(status_code=429, detail="Thank you for all your help today! Please continue tomorrow.")
+
+    if payload.place_id:
+        place = db.get(Place, payload.place_id)
+        if place is None or place.status != "active":
+            raise HTTPException(status_code=404, detail="That place isn't on the list. Choose another one.")
+        again = db.scalar(select(func.count(PlacePinEvidence.id)).where(
+            PlacePinEvidence.place_id == place.id, PlacePinEvidence.source == "survey",
+            PlacePinEvidence.created_at >= since, or_(*who)))
+        if again:
+            raise HTTPException(status_code=409, detail=f"You've already sent {place.name} today. Thanks! "
+                                                        "Try another place.")
+        db.add(PlacePinEvidence(place_id=place.id, latitude=payload.latitude, longitude=payload.longitude,
+                                accuracy_m=round(payload.accuracy_m), source="survey", contact_phone=phone,
+                                client_key=key))
+        what = place.name
+    else:
+        name = (payload.name or "").strip()
+        if len(name) < 3:
+            raise HTTPException(status_code=422, detail="Choose the place from the list, or type its name.")
+        db.add(PlaceSuggestion(user_id=None, name=name[:120], latitude=payload.latitude, longitude=payload.longitude,
+                               accuracy_m=round(payload.accuracy_m), status="pending", source="survey",
+                               contact_phone=phone, client_key=key))
+        what = name
+    db.commit()
+    mine = None
+    if phone:
+        mine = (db.scalar(select(func.count(PlacePinEvidence.id)).where(
+            PlacePinEvidence.source == "survey", PlacePinEvidence.contact_phone == phone)) or 0) + \
+            (db.scalar(select(func.count(PlaceSuggestion.id)).where(
+                PlaceSuggestion.source == "survey", PlaceSuggestion.contact_phone == phone)) or 0)
+    return {"thanks": True, "message": f"Thank you! We've received {what}.", "your_reports": mine}
+
+
+@router.get("/admin/pins/helpers")
+def survey_helpers(db: Session = Depends(get_db), _staff: User = Depends(require_staff("pins"))) -> dict:
+    """Survey helpers who left a phone number, with how much of their work
+    turned out right, for thanking and rewarding them."""
+    places = {p.id: p for p in db.scalars(select(Place)).all()}
+    helpers: dict[str, dict] = {}
+    for r in db.scalars(select(PlacePinEvidence).where(PlacePinEvidence.source == "survey",
+                                                       PlacePinEvidence.contact_phone.is_not(None))).all():
+        h = helpers.setdefault(r.contact_phone, {"phone": r.contact_phone, "reports": 0, "confirmed": 0,
+                                                 "new_places": 0, "approved_places": 0, "last": None})
+        h["reports"] += 1
+        p = places.get(r.place_id)
+        if p is not None and _has_pin(p) and p.pin_verified_at is not None and \
+                meters_between(r.latitude, r.longitude, p.latitude, p.longitude) <= SURVEY_AGREE_M:
+            h["confirmed"] += 1
+        h["last"] = max(filter(None, [h["last"], _iso(r.created_at)]))
+    for sgg in db.scalars(select(PlaceSuggestion).where(PlaceSuggestion.source == "survey",
+                                                        PlaceSuggestion.contact_phone.is_not(None))).all():
+        h = helpers.setdefault(sgg.contact_phone, {"phone": sgg.contact_phone, "reports": 0, "confirmed": 0,
+                                                   "new_places": 0, "approved_places": 0, "last": None})
+        h["new_places"] += 1
+        h["approved_places"] += sgg.status == "approved"
+        h["last"] = max(filter(None, [h["last"], _iso(sgg.created_at)]))
+    rows = sorted(helpers.values(), key=lambda h: (-(h["confirmed"] + h["approved_places"]), -h["reports"]))
+    totals = {"reports": db.scalar(select(func.count(PlacePinEvidence.id)).where(
+        PlacePinEvidence.source == "survey")) or 0,
+        "new_places": db.scalar(select(func.count(PlaceSuggestion.id)).where(
+            PlaceSuggestion.source == "survey")) or 0}
+    return {"helpers": rows[:200], "totals": totals}

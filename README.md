@@ -260,6 +260,13 @@ Fares come from the road distance between pins (Geoapify road routes when `GEOAP
 
 Whenever a pin is set or a place is added, its road distances to every other pinned place in the area are re-measured and its automatic route prices are updated straight away (hand-set prices are never changed), so a new place is bookable at once. Riders who drop a pin see their **recent spots** for one-tap reuse, and can **suggest a public spot** for the list (homes are not accepted); suggestions for the same spot are grouped, staff approve or reject them, and the riders are notified when it's added. Every change is in the audit log.
 
+### "Map a place" public survey
+`/map-a-place` (no sign-in) lets anyone standing at a place send its GPS location: they pick it from the list (places still needing a pin come first, and no coordinates are shown) or name a new public place, and may leave a phone number for rewards. Answers never change a pin by themselves:
+- Readings for listed places appear on that place's card in Pin check. When **two different people** agree within 60 m, the place is flagged *Survey helpers sent its location* and staff can **Use survey location** (`pin_source="survey"`). Field-set pins are never flagged.
+- New places go to *New place suggestions*, marked "survey", for staff to approve or reject.
+- *Survey helpers* lists helpers by phone number with their answers, how many matched a checked pin, and places approved, which can be used for rewards.
+- Limits: readings must be accurate to 50 m and inside the service area; each phone or device can send 40 answers a day and one per place a day; a hidden field catches bots.
+
 ## Team & access (staff accounts)
 Super-admins add team members under *Admin → Team & access*. Each gets their own sign-in with a **work email on EkiMove's domain** (`STAFF_EMAIL_DOMAIN`, default `ekimove.com.ng`; set the address up in Cloudflare Email Routing first) and a one-time temporary password they replace at first sign-in. Staff accounts can only sign in with that email, not a phone number, so a team member's personal passenger account stays separate. A member can be added as **Staff** with chosen areas, or as **Super-admin** with full access (for a co-founder). The founder's account is the **owner** (`users.is_owner`; migration 0021 marks the oldest super-admin): nobody can change, suspend, reset or remove it, and only the owner can add, suspend, reset or remove other super-admins. Any super-admin can manage ordinary staff, including *Suspend* (signed out everywhere until reactivated). Staff areas:
 

@@ -842,9 +842,13 @@ class PlacePinEvidence(Base):
     latitude: Mapped[float] = mapped_column(Float)
     longitude: Mapped[float] = mapped_column(Float)
     accuracy_m: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    source: Mapped[str] = mapped_column(String(16))  # trip_start, trip_end, on_site
+    source: Mapped[str] = mapped_column(String(16))  # trip_start, trip_end, on_site, survey
     ride_id: Mapped[int | None] = mapped_column(ForeignKey("rides.id", ondelete="SET NULL"), nullable=True)
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    # Public survey: an optional phone number (for rewards) and a one-way
+    # hash of the sender's network and browser (for daily limits).
+    contact_phone: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    client_key: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
 
@@ -863,6 +867,9 @@ class PlaceSuggestion(Base):
     longitude: Mapped[float] = mapped_column(Float)
     accuracy_m: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String(12), default="pending", nullable=False, index=True)
+    source: Mapped[str] = mapped_column(String(12), default="rider", server_default="rider", nullable=False)
+    contact_phone: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    client_key: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     place_id: Mapped[int | None] = mapped_column(ForeignKey("places.id", ondelete="SET NULL"), nullable=True)
     reviewed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"),
                                                             nullable=True)

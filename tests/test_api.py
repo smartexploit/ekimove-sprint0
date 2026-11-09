@@ -7252,3 +7252,84 @@ def test_riders_see_their_recent_dropped_spots(client):
         db.commit()
     spots = client.get("/api/v1/points/recent", headers=passenger).json()["spots"]
     assert [s["label"] for s in spots] == ["Okesa junction", "Blue gate by the church"]
+
+
+# --- Public "Map a place" survey ---
+
+def _survey(client, agent="phone-a", **payload):
+    return client.post("/api/v1/survey/reports", json=payload, headers={"User-Agent": agent})
+
+
+def test_survey_lists_places_needing_pins_first(client):
+    _area, (a, b, c), _manual = _calc_area(client)
+    with session_for(client) as db:
+        db.get(Place, c).pin_source = "auto"
+        db.commit()
+    places = client.get("/api/v1/survey/places").json()["places"]
+    needed = [p["name"] for p in places if p["needed"]]
+    assert "Calc C" in needed and "Calc A" not in needed
+    assert places[0]["needed"] is True
+    assert "latitude" not in places[0]  # coordinates aren't published
+
+
+def test_survey_readings_from_two_people_suggest_a_pin(client, monkeypatch):
+    monkeypatch.setattr(settings, "geoapify_api_key", None)
+    admin = login(client, *ADMIN_LOGIN)
+    _area, (a, b, c), _manual = _calc_area(client)
+    blurry = _survey(client, place_id=c, latitude=7.6301, longitude=5.2201, accuracy_m=200)
+    assert blurry.status_code == 422
+    far = _survey(client, place_id=c, latitude=6.52, longitude=3.37, accuracy_m=5)
+    assert far.status_code == 422 and "Ado-Ekiti" in far.json()["detail"]
+    first = _survey(client, place_id=c, latitude=7.6301, longitude=5.2201, accuracy_m=9,
+                    contact_phone="0803 111 2222")
+    assert first.status_code == 201 and first.json()["your_reports"] == 1
+    again = _survey(client, place_id=c, latitude=7.6301, longitude=5.2201, accuracy_m=9)
+    assert again.status_code == 409  # same person, same place, same day
+    row = next(p for p in client.get("/api/v1/admin/pins?view=all", headers=admin).json()["places"] if p["id"] == c)
+    assert row["survey_readings"] == 1 and row["survey"] is None  # one person isn't enough
+    second = _survey(client, agent="phone-b", place_id=c, latitude=7.63013, longitude=5.22012, accuracy_m=12)
+    assert second.status_code == 201
+    row = next(p for p in client.get("/api/v1/admin/pins?view=attention", headers=admin).json()["places"]
+               if p["id"] == c)
+    assert "survey_suggests" in {f["key"] for f in row["flags"]}
+    assert row["survey"]["helpers"] == 2 and row["survey"]["meters_from_pin"] > 1000
+    used = client.post(f"/api/v1/admin/pins/places/{c}/use-survey", headers=admin)
+    assert used.status_code == 200 and used.json()["prices"]["prices"] > 0
+    with session_for(client) as db:
+        place = db.get(Place, c)
+        assert place.pin_source == "survey" and abs(place.latitude - 7.63011) < 0.0001
+    helpers = client.get("/api/v1/admin/pins/helpers", headers=admin).json()
+    assert helpers["totals"]["reports"] == 2
+    assert helpers["helpers"][0]["phone"] == "08031112222" and helpers["helpers"][0]["confirmed"] == 1
+
+
+def test_survey_new_places_go_to_suggestions(client):
+    admin = login(client, *ADMIN_LOGIN)
+    _calc_area(client)
+    missing = _survey(client, latitude=7.6120, longitude=5.2210, accuracy_m=10)
+    assert missing.status_code == 422
+    sent = _survey(client, name="Ola Filling Station", latitude=7.6120, longitude=5.2210, accuracy_m=10,
+                   contact_phone="08031112222")
+    assert sent.status_code == 201 and "Ola Filling Station" in sent.json()["message"]
+    assert _survey(client, agent="phone-b", name="Ola Fuel", latitude=7.61202, longitude=5.22101,
+                   accuracy_m=10).status_code == 201
+    listing = client.get("/api/v1/admin/pins/suggestions", headers=admin).json()["suggestions"]
+    assert len(listing) == 1 and listing[0]["suggested_by"] == 2 and listing[0]["from_survey"] is True
+
+
+def test_survey_limits_and_bot_trap(client):
+    _area, (a, b, c), _manual = _calc_area(client)
+    bot = _survey(client, place_id=a, latitude=7.6, longitude=5.22, accuracy_m=5, website="http://spam")
+    assert bot.status_code == 201
+    with session_for(client) as db:
+        assert db.scalar(select(func.count(PlacePinEvidence.id))) == 0  # nothing saved
+    import app.pins as pins_module
+    pins_module.SURVEY_DAILY_LIMIT, old = 2, pins_module.SURVEY_DAILY_LIMIT
+    try:
+        assert _survey(client, place_id=a, latitude=7.6, longitude=5.22, accuracy_m=5).status_code == 201
+        assert _survey(client, place_id=b, latitude=7.61, longitude=5.22, accuracy_m=5).status_code == 201
+        assert _survey(client, place_id=c, latitude=7.62, longitude=5.22, accuracy_m=5).status_code == 429
+    finally:
+        pins_module.SURVEY_DAILY_LIMIT = old
+    assert _survey(client, place_id=a, latitude=7.6, longitude=5.22, accuracy_m=5,
+                   contact_phone="12345").status_code == 422

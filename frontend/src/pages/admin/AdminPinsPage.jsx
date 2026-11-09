@@ -1,20 +1,24 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Check, Crosshair, MapPin, MapPinned, Navigation, Plus, Search, X } from 'lucide-react'
+import { Check, Copy, Crosshair, MapPin, MapPinned, Navigation, Plus, Search, Users, X } from 'lucide-react'
 import AdminShell from '../../layouts/AdminShell.jsx'
 import Alert from '../../components/ui/Alert.jsx'
 import LazyMap from '../../components/map/LazyMap.jsx'
 import { apiRequest } from '../../services/authService.js'
 import useGpsReading from '../../hooks/useGpsReading.js'
 
+const pricesNote = (r) => (r.prices.prices ? `${r.prices.prices} route prices updated.`
+  : 'Prices will be worked out once nearby places have pins too.')
+
 const TYPES = {
   landmark: 'Landmark', junction: 'Junction', bus_stop: 'Bus stop', street: 'Street',
   neighbourhood: 'Neighbourhood', other: 'Other',
 }
 const SOURCE = {
-  field: 'Set on site', trips: 'From real trips', rider: 'Suggested by riders', manual: 'Placed by staff',
+  field: 'Set on site', trips: 'From real trips', rider: 'Suggested by riders', survey: 'From survey helpers',
+  manual: 'Placed by staff',
   auto: 'Guessed from the name',
 }
-const TABS = [['attention', 'Needs attention'], ['all', 'All places'], ['checked', 'Checked'], ['suggestions', 'Rider suggestions']]
+const TABS = [['attention', 'Needs attention'], ['all', 'All places'], ['checked', 'Checked'], ['suggestions', 'New place suggestions'], ['helpers', 'Survey helpers']]
 
 function GpsReadout({ gps, maxAccuracy }) {
   if (gps.status === 'idle') return null
@@ -99,6 +103,7 @@ function PlaceCard({ place, maxAccuracy, onDone }) {
   const markers = [
     ...(place.latitude != null ? [{ id: 'pin', latitude: place.latitude, longitude: place.longitude, kind: 'pickup', title: 'Current pin' }] : []),
     ...(s ? [{ id: 'trips', latitude: s.latitude, longitude: s.longitude, kind: 'destination', title: 'Where trips happen' }] : []),
+    ...(place.survey ? [{ id: 'survey', latitude: place.survey.latitude, longitude: place.survey.longitude, kind: 'driver', title: 'Where survey helpers put it' }] : []),
   ]
   const onlyGuessed = place.latitude != null && place.flags.every((f) => f.key === 'guessed')
 
@@ -120,11 +125,18 @@ function PlaceCard({ place, maxAccuracy, onDone }) {
         {place.latitude == null ? 'No pin on the map.' : SOURCE[place.pin_source] || 'Placed by staff'}
         {place.shared_with.length > 0 && <> · same spot as {place.shared_with.join(', ')}</>}
         {place.trip_readings > 0 && <> · {place.trip_readings} trip reading{place.trip_readings === 1 ? '' : 's'}</>}
+        {place.survey_readings > 0 && <> · {place.survey_readings} survey answer{place.survey_readings === 1 ? '' : 's'}</>}
       </p>
       {s && place.flags.some((f) => f.key === 'trips_disagree') && (
         <p className="small">
           <Navigation size={14} aria-hidden="true" /> {s.samples} trips started or ended about{' '}
           <strong>{s.meters_from_pin != null ? `${s.meters_from_pin} m` : 'somewhere'}</strong> from this pin.
+        </p>
+      )}
+      {place.survey && place.flags.some((f) => f.key === 'survey_suggests') && (
+        <p className="small">
+          <Users size={14} aria-hidden="true" /> {place.survey.helpers} survey helpers agree it’s{' '}
+          <strong>{place.survey.meters_from_pin != null ? `${place.survey.meters_from_pin} m from this pin` : 'here'}</strong>.
         </p>
       )}
       <Alert tone="error">{error}</Alert>
@@ -135,7 +147,7 @@ function PlaceCard({ place, maxAccuracy, onDone }) {
       {mode === 'map' && markers.length > 0 && (
         <div className="stack stack-sm">
           <LazyMap markers={markers} height={220} follow label={`Map of ${place.name}`} />
-          {s && <p className="muted small">Green: current pin. Red: where trips really happen.</p>}
+          {(s || place.survey) && <p className="muted small">Green: current pin.{s ? ' Red: where trips really happen.' : ''}{place.survey ? ' Car: where survey helpers put it.' : ''}</p>}
         </div>
       )}
       {mode !== 'here' && (
@@ -146,8 +158,15 @@ function PlaceCard({ place, maxAccuracy, onDone }) {
           {s && place.flags.some((f) => f.key === 'trips_disagree') && (
             <button type="button" className="btn btn-sm" disabled={busy}
               onClick={() => post(`/api/v1/admin/pins/places/${place.id}/use-trips`,
-                (r) => `${place.name}: moved to where trips happen. ${r.prices.prices} route prices updated.`)}>
+                (r) => `${place.name}: moved to where trips happen. ${pricesNote(r)}`)}>
               Use trip location
+            </button>
+          )}
+          {place.survey && place.flags.some((f) => f.key === 'survey_suggests') && (
+            <button type="button" className="btn btn-sm" disabled={busy}
+              onClick={() => post(`/api/v1/admin/pins/places/${place.id}/use-survey`,
+                (r) => `${place.name}: moved to where survey helpers put it. ${pricesNote(r)}`)}>
+              Use survey location
             </button>
           )}
           {onlyGuessed && (
@@ -284,7 +303,7 @@ function SuggestionCard({ item, zones, areas, onDone }) {
       const body = kind === 'approve' ? JSON.stringify({ name: form.name.trim(), zone_id: Number(form.zone_id),
         service_area_id: form.service_area_id ? Number(form.service_area_id) : null, place_type: form.place_type }) : undefined
       await apiRequest(`/api/v1/admin/pins/suggestions/${item.id}/${kind}`, { method: 'POST', body })
-      onDone(kind === 'approve' ? `${form.name.trim()} added to the list. The riders who suggested it have been told.` : 'Suggestion rejected.')
+      onDone(kind === 'approve' ? `${form.name.trim()} added to the list.` : 'Suggestion rejected.')
     } catch (err) {
       setError(err.message || 'That didn’t work.')
     } finally {
@@ -296,7 +315,7 @@ function SuggestionCard({ item, zones, areas, onDone }) {
     <article className="card stack stack-sm">
       <div className="row" style={{ justifyContent: 'space-between' }}>
         <h3 className="card-title">{item.name}</h3>
-        <span className="badge badge-gold">{item.suggested_by} rider{item.suggested_by === 1 ? '' : 's'}</span>
+        <span className="badge badge-gold">{item.suggested_by} {item.suggested_by === 1 ? 'person' : 'people'}{item.from_survey ? ' · survey' : ''}</span>
       </div>
       {item.other_names.length > 0 && <p className="muted small">Also called: {item.other_names.join(', ')}</p>}
       {item.nearest_place && (
@@ -339,6 +358,59 @@ function SuggestionCard({ item, zones, areas, onDone }) {
   )
 }
 
+function SurveyShare() {
+  const link = `${window.location.origin}/map-a-place`
+  const [copied, setCopied] = useState(false)
+  return (
+    <div className="card card-outline stack stack-sm survey-share" style={{ padding: 12 }}>
+      <p className="small"><strong>Get help from the public:</strong> share this link. People standing at a place send its location from their phone, and the answers come here for you to check.</p>
+      <div className="row" style={{ flexWrap: 'nowrap' }}>
+        <code className="survey-link">{link}</code>
+        <button type="button" className="btn btn-sm" onClick={() => {
+          navigator.clipboard?.writeText(link).then(() => setCopied(true), () => {})
+        }}>
+          <Copy size={14} aria-hidden="true" /> {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function HelpersTab() {
+  const [data, setData] = useState(null)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    apiRequest('/api/v1/admin/pins/helpers').then(setData).catch((err) => setError(err.message || 'Could not load helpers.'))
+  }, [])
+  if (error) return <Alert tone="error">{error}</Alert>
+  if (!data) return null
+  return (
+    <div className="stack">
+      <p className="muted small">
+        {data.totals.reports} survey answers for listed places and {data.totals.new_places} new places so far.
+        Helpers who left a phone number are listed below. <strong>Confirmed</strong> counts answers within 60 m of the
+        checked pin, a fair measure for rewards.
+      </p>
+      {data.helpers.length ? (
+        <div className="table-wrap">
+          <table className="table">
+            <thead><tr><th>Phone</th><th>Answers</th><th>Confirmed</th><th>New places</th><th>Added</th><th>Last</th></tr></thead>
+            <tbody>
+              {data.helpers.map((h) => (
+                <tr key={h.phone}>
+                  <td>{h.phone}</td><td>{h.reports}</td><td><strong>{h.confirmed}</strong></td>
+                  <td>{h.new_places}</td><td>{h.approved_places}</td>
+                  <td>{h.last ? new Date(h.last).toLocaleDateString('en-NG', { day: 'numeric', month: 'short' }) : ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : <p className="muted">No helpers with phone numbers yet. Share the survey link to get started.</p>}
+    </div>
+  )
+}
+
 /** Keep every place's pin accurate: fares are worked out from the distance between pins. */
 export default function AdminPinsPage() {
   const [tab, setTab] = useState('attention')
@@ -351,7 +423,7 @@ export default function AdminPinsPage() {
 
   const load = useCallback(async () => {
     try {
-      const view = tab === 'suggestions' ? 'attention' : tab
+      const view = ['suggestions', 'helpers'].includes(tab) ? 'attention' : tab
       const [pins, sugg] = await Promise.all([
         apiRequest(`/api/v1/admin/pins?view=${view}${query.trim() ? `&q=${encodeURIComponent(query.trim())}` : ''}`),
         apiRequest('/api/v1/admin/pins/suggestions'),
@@ -378,7 +450,7 @@ export default function AdminPinsPage() {
   const summary = data?.summary
   const max = data?.max_accuracy_m || 50
   const counts = useMemo(() => ({
-    attention: summary?.attention, all: summary?.total, checked: summary?.checked, suggestions: suggestions.length,
+    attention: summary?.attention, all: summary?.total, checked: summary?.checked, suggestions: suggestions.length, helpers: null,
   }), [summary, suggestions])
 
   return (
@@ -390,7 +462,7 @@ export default function AdminPinsPage() {
             <div><strong>{summary.attention}</strong><span>need attention</span></div>
             <div><strong>{summary.checked}</strong><span>checked</span></div>
             <div><strong>{summary.total}</strong><span>places</span></div>
-            <div><strong>{suggestions.length}</strong><span>rider suggestions</span></div>
+            <div><strong>{suggestions.length}</strong><span>new place suggestions</span></div>
           </div>
         )}
         <Alert tone="success">{message}</Alert>
@@ -404,6 +476,7 @@ export default function AdminPinsPage() {
             </button>
           </div>
         )}
+        <SurveyShare />
         <div className="chip-row" role="tablist" aria-label="Which places">
           {TABS.map(([key, label]) => (
             <button key={key} type="button" role="tab" aria-selected={tab === key}
@@ -412,22 +485,21 @@ export default function AdminPinsPage() {
             </button>
           ))}
         </div>
-        {tab !== 'suggestions' && (
-          <label className="field search-field" htmlFor="pin-search">
-            <span className="sr-only">Search places</span>
+        {!['suggestions', 'helpers'].includes(tab) && (
+          <div className="search-box">
             <Search size={16} aria-hidden="true" />
-            <input id="pin-search" className="input" type="search" placeholder="Search a place or zone"
-              value={query} onChange={(e) => setQuery(e.target.value)} />
-          </label>
+            <input id="pin-search" className="input" type="search" aria-label="Search places"
+              placeholder="Search a place or zone" value={query} onChange={(e) => setQuery(e.target.value)} />
+          </div>
         )}
-        {tab === 'suggestions' ? (
+        {tab === 'helpers' ? <HelpersTab /> : tab === 'suggestions' ? (
           suggestions.length ? (
             <div className="pin-grid">
               {suggestions.map((item) => (
                 <SuggestionCard key={item.id} item={item} zones={data?.zones || []} areas={data?.areas || []} onDone={done} />
               ))}
             </div>
-          ) : <p className="muted">No suggestions waiting. Riders can suggest a spot when they drop a pin.</p>
+          ) : <p className="muted">No suggestions waiting. Riders can suggest a spot when they drop a pin, and survey helpers can send places that aren’t listed.</p>
         ) : data && (
           data.places.length ? (
             <div className="pin-grid">

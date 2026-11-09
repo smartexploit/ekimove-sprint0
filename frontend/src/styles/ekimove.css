@@ -5174,3 +5174,25 @@ a.chip {
 .text-warn { color: var(--laterite-700); }
 .recent-spots { display: flex; flex-wrap: wrap; gap: 8px; }
 .suggest-box { background: var(--green-50); border-radius: var(--radius); padding: 10px 12px; }
+
+/* --- Map a place (public survey) --- */
+.survey { max-width: 560px; }
+.survey-step { display: flex; align-items: center; gap: 10px; }
+.survey-step span { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--green-800, #0e4d3b); color: var(--gold-500, #F2B33D); font-size: 14px; flex: none; }
+.survey-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 360px; overflow: auto; }
+.survey-list button { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 10px; text-align: left; padding: 10px 12px; border-radius: 10px; border: 0; background: var(--mist); font: inherit; cursor: pointer; color: inherit; }
+.survey-list button:hover, .survey-list button:focus-visible { background: var(--green-50); }
+.survey-list button:disabled { opacity: 0.6; cursor: default; }
+.survey-list span { display: flex; flex-direction: column; font-weight: 700; min-width: 0; }
+.survey-list small { font-weight: 500; color: var(--ink-500); }
+.survey-list em { font-style: normal; font-size: 12px; font-weight: 800; padding: 3px 8px; border-radius: 999px; background: var(--gold-100); color: var(--gold-700); flex: none; }
+.survey-list em.is-sent { background: var(--green-50); color: var(--green-700, #1a6049); }
+.survey-new { box-shadow: inset 0 0 0 1.5px var(--line-strong); background: var(--white) !important; }
+.survey-chosen { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.survey-done { align-items: center; text-align: center; }
+.survey-done svg { color: var(--green-600); }
+.survey-trap { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
+.survey-link { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: var(--mist); padding: 6px 10px; border-radius: 8px; font-size: 13px; }
+.search-box { position: relative; max-width: 420px; }
+.search-box svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--ink-500); pointer-events: none; z-index: 1; }
+.search-box .input { padding-left: 36px; width: 100%; }
