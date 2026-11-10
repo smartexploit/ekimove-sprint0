@@ -10,6 +10,33 @@ function niceDate(value) {
   return value ? new Date(`${value}T12:00:00`).toLocaleDateString('en-NG', { day: 'numeric', month: 'long', year: 'numeric' }) : ''
 }
 
+/** The photo is downloaded like the card details (the site's security rules
+ * allow fetching from the API, not loading images from it directly). */
+function PersonPhoto({ code, name }) {
+  const [shown, setShown] = useState({ code: '', url: '', failed: false })
+  useEffect(() => {
+    let active = true
+    let made = ''
+    fetch(apiUrl(`/api/v1/staff-cards/verify/${code}/photo`))
+      .then((r) => (r.ok ? r.blob() : Promise.reject(new Error('no photo'))))
+      .then((blob) => {
+        if (!blob.type.startsWith('image/')) throw new Error('not an image')
+        made = URL.createObjectURL(blob)
+        if (active) setShown({ code, url: made, failed: false })
+      })
+      .catch(() => active && setShown({ code, url: '', failed: true }))
+    return () => {
+      active = false
+      if (made) URL.revokeObjectURL(made)
+    }
+  }, [code])
+  const current = shown.code === code ? shown : { url: '', failed: false }
+  if (current.failed) return null
+  return current.url
+    ? <img src={current.url} alt={`Photo of ${name}`} />
+    : <div className="verify-photo-loading" role="img" aria-label="Loading photo" />
+}
+
 function Result({ code, result }) {
   if (result.status === 'valid' || result.status === 'expired') {
     const ok = result.status === 'valid'
@@ -20,7 +47,7 @@ function Result({ code, result }) {
           {ok ? 'Verified EkiMove staff' : 'This card has expired'}
         </p>
         <div className="verify-person">
-          {result.has_photo && <img src={apiUrl(`/api/v1/staff-cards/verify/${code}/photo`)} alt={`Photo of ${result.full_name}`} />}
+          {result.has_photo && <PersonPhoto code={code} name={result.full_name} />}
           <div className="stack stack-sm">
             <h2 className="card-title">{result.full_name}</h2>
             <p>{result.title}</p>
