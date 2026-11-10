@@ -71,10 +71,28 @@ def status_of(card: StaffCard) -> str:
     return "valid"
 
 
-def _next_number(db: Session) -> str:
-    numbers = [int(n.split("-")[-1]) for n in db.scalars(select(StaffCard.staff_number)).all()
-               if re.fullmatch(rf"{PREFIX}-\d+", n or "")]
-    return f"{PREFIX}-{(max(numbers) + 1) if numbers else 1:03d}"
+STAFF_NUMBER = re.compile(rf"^{PREFIX}-(\d{{2}})-(\d{{3,4}})$")
+
+
+def _next_number(db: Session, year: int | None = None) -> str:
+    """EKM-<year>-<number>, e.g. EKM-26-001: the year of issue, then a
+    running number that starts again at 001 each year."""
+    yy = f"{(year or _today().year) % 100:02d}"
+    numbers = [int(m.group(2)) for n in db.scalars(select(StaffCard.staff_number)).all()
+               if (m := STAFF_NUMBER.match(n or "")) and m.group(1) == yy]
+    return f"{PREFIX}-{yy}-{(max(numbers) + 1) if numbers else 1:03d}"
+
+
+def _staff_number(db: Session, wanted: str | None, year: int) -> str:
+    if not wanted or not wanted.strip():
+        return _next_number(db, year)
+    number = wanted.strip().upper()
+    if not STAFF_NUMBER.match(number):
+        raise HTTPException(status_code=422, detail="Use the staff ID format EKM-26-001.")
+    taken = db.scalar(select(StaffCard.id).where(StaffCard.staff_number == number, StaffCard.revoked_at.is_(None)))
+    if taken is not None:
+        raise HTTPException(status_code=409, detail=f"{number} is already on a valid card. Cancel that card first.")
+    return number
 
 
 def _row(card: StaffCard) -> dict:
@@ -153,12 +171,14 @@ def list_cards(db: Session = Depends(get_db), admin: User = Depends(require_supe
 
 @router.post("", status_code=201)
 async def issue_card(full_name: str = Form(...), title: str = Form(...), issued_on: date | None = Form(None),
-                     expires_on: date | None = Form(None), photo: UploadFile | None = File(None),
+                     expires_on: date | None = Form(None), staff_number: str | None = Form(None),
+                     photo: UploadFile | None = File(None),
                      db: Session = Depends(get_db), admin: User = Depends(require_super_admin)) -> dict:
     name, job = _text(full_name, "full name", 120), _text(title, "job title", 80)
     issued, expires = _dates(issued_on, expires_on)
+    number = _staff_number(db, staff_number, issued.year)
     photo_ref = _store(await _read_photo(photo)) if photo is not None and photo.filename else None
-    card = StaffCard(staff_number=_next_number(db), code=new_code(db), full_name=name, title=job, photo_ref=photo_ref,
+    card = StaffCard(staff_number=number, code=new_code(db), full_name=name, title=job, photo_ref=photo_ref,
                      issued_on=issued, expires_on=expires, created_by_user_id=admin.id)
     db.add(card)
     try:

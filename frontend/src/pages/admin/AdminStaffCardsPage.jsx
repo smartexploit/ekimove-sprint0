@@ -38,6 +38,7 @@ function IssueForm({ nextNumber, onIssued }) {
   const [name, setName] = useState('')
   const [title, setTitle] = useState('')
   const [expires, setExpires] = useState('')
+  const [number, setNumber] = useState('')
   const [photo, setPhoto] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -50,12 +51,14 @@ function IssueForm({ nextNumber, onIssued }) {
     form.append('full_name', name)
     form.append('title', title)
     if (expires) form.append('expires_on', expires)
+    if (number.trim()) form.append('staff_number', number.trim())
     if (photo) form.append('photo', photo)
     try {
       const card = await apiRequest('/api/v1/admin/staff-cards', { method: 'POST', body: form })
       setName('')
       setTitle('')
       setExpires('')
+      setNumber('')
       setPhoto(null)
       event.target.reset()
       onIssued(card)
@@ -85,6 +88,12 @@ function IssueForm({ nextNumber, onIssued }) {
           <input id="card-photo" className="input" type="file" accept="image/jpeg,image/png,image/webp"
             onChange={(e) => setPhoto(e.target.files?.[0] || null)} />
           <span className="field-hint">Shown when someone checks the card. JPEG, PNG or WebP, up to 5 MB.</span>
+        </label>
+        <label className="field" htmlFor="card-number">
+          <span className="field-label">Staff ID (optional)</span>
+          <input id="card-number" className="input" maxLength={12} value={number} placeholder={nextNumber}
+            onChange={(e) => setNumber(e.target.value.toUpperCase())} />
+          <span className="field-hint">Leave empty to use {nextNumber}.</span>
         </label>
         <label className="field" htmlFor="card-expires">
           <span className="field-label">Valid until (optional)</span>

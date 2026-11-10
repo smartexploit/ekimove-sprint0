@@ -502,7 +502,7 @@ class StaffCard(Base):
     __tablename__ = "staff_cards"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    staff_number: Mapped[str] = mapped_column(String(16), index=True)  # e.g. EKM-001; kept when a card is reissued
+    staff_number: Mapped[str] = mapped_column(String(16), index=True)  # e.g. EKM-26-001; kept when a card is reissued
     code: Mapped[str] = mapped_column(String(16), unique=True, index=True)  # printed verification code
     full_name: Mapped[str] = mapped_column(String(120))
     title: Mapped[str] = mapped_column(String(80))

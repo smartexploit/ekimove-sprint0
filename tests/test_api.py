@@ -7538,7 +7538,8 @@ def test_staff_cards_issue_and_verify_publicly(client, monkeypatch):
     admin = login(client, *ADMIN_LOGIN)
     faith = _issue(client, admin)
     esther = _issue(client, admin, "Esther Akinfolahan", "Co-founder, Operations", photo=False)
-    assert faith["staff_number"] == "EKM-001" and esther["staff_number"] == "EKM-002"
+    yy = f"{staff_cards_module._today().year % 100:02d}"
+    assert faith["staff_number"] == f"EKM-{yy}-001" and esther["staff_number"] == f"EKM-{yy}-002"
     assert re.fullmatch(r"[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}", faith["code"])
     assert faith["verify_url"].endswith("/verify/" + faith["code"].replace("-", ""))
     assert faith["status"] == "valid" and faith["has_photo"] and len(store) == 1
@@ -7547,7 +7548,7 @@ def test_staff_cards_issue_and_verify_publicly(client, monkeypatch):
     typed = faith["code"].lower().replace("-", " - ")
     public = client.get(f"/api/v1/staff-cards/verify/{typed}").json()
     assert public == {"status": "valid", "full_name": "Faith Ogunlade", "title": "Founder & CEO",
-                      "staff_number": "EKM-001", "expires_on": faith["expires_on"], "has_photo": True}
+                      "staff_number": f"EKM-{yy}-001", "expires_on": faith["expires_on"], "has_photo": True}
     photo = client.get(f"/api/v1/staff-cards/verify/{faith['code']}/photo")
     assert photo.status_code == 200 and photo.content == JPEG and photo.headers["content-type"] == "image/jpeg"
     assert client.get("/api/v1/staff-cards/verify/ABCD-EFGH").json() == {"status": "not_found"}
@@ -7558,14 +7559,22 @@ def test_staff_cards_issue_and_verify_publicly(client, monkeypatch):
     # QR codes for printing point at the verify page.
     svg = client.get(f"/api/v1/admin/staff-cards/{faith['id']}/qr.svg", headers=admin)
     assert svg.status_code == 200 and svg.headers["content-type"].startswith("image/svg+xml")
-    assert b"<svg" in svg.content and "EKM-001" in svg.headers["content-disposition"]
+    assert b"<svg" in svg.content and f"EKM-{yy}-001" in svg.headers["content-disposition"]
     png = client.get(f"/api/v1/admin/staff-cards/{faith['id']}/qr.png", headers=admin)
     assert png.status_code == 200 and png.content.startswith(b"\x89PNG")
     assert client.get(f"/api/v1/admin/staff-cards/{faith['id']}/qr.gif", headers=admin).status_code == 404
 
     listed = client.get("/api/v1/admin/staff-cards", headers=admin).json()
-    assert [c["staff_number"] for c in listed["cards"]] == ["EKM-001", "EKM-002"]
-    assert listed["next_number"] == "EKM-003" and listed["counts"]["valid"] == 2
+    assert [c["staff_number"] for c in listed["cards"]] == [f"EKM-{yy}-001", f"EKM-{yy}-002"]
+    assert listed["next_number"] == f"EKM-{yy}-003" and listed["counts"]["valid"] == 2
+
+    # A number can be chosen (e.g. to match cards already printed), but not one on a valid card.
+    chosen = _issue(client, admin, "Tolu Bamidele", "Support", photo=False, staff_number="ekm-26-010")
+    assert chosen["staff_number"] == "EKM-26-010"
+    assert client.post("/api/v1/admin/staff-cards", headers=admin, data={
+        "full_name": "Another Person", "title": "Support", "staff_number": "EKM-26-010"}).status_code == 409
+    assert client.post("/api/v1/admin/staff-cards", headers=admin, data={
+        "full_name": "Another Person", "title": "Support", "staff_number": "EKM-1"}).status_code == 422
 
 
 def test_staff_cards_cancel_reissue_and_expire(client, monkeypatch):
@@ -7576,7 +7585,7 @@ def test_staff_cards_cancel_reissue_and_expire(client, monkeypatch):
     new = client.post(f"/api/v1/admin/staff-cards/{card['id']}/reissue", headers=admin, json={})
     assert new.status_code == 201, new.text
     new = new.json()
-    assert new["staff_number"] == "EKM-001" and new["code"] != card["code"] and new["has_photo"]
+    assert new["staff_number"] == card["staff_number"] and new["code"] != card["code"] and new["has_photo"]
     old_check = client.get(f"/api/v1/staff-cards/verify/{card['code']}").json()
     assert old_check["status"] == "revoked" and old_check["has_photo"] is False and old_check["revoked_on"]
     assert client.get(f"/api/v1/staff-cards/verify/{card['code']}/photo").status_code == 404
