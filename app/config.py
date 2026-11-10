@@ -117,8 +117,10 @@ class Settings(BaseSettings):
     # key keeps working for webhooks and driver payouts.
     paystack_virtual_accounts_enabled: bool = True
     # Paystack customers need an email; passengers sign up with a phone
-    # number, so a stable per-account address on this domain is used.
-    paystack_customer_email_domain: str = "passengers.ekimove.app"
+    # number, so a stable per-account address on this domain is used. It is
+    # a subdomain of EkiMove's own domain with no mailbox, so receipts
+    # Paystack might send never reach anyone else.
+    paystack_customer_email_domain: str = "passengers.ekimove.com.ng"
 
     @field_validator("paystack_secret_key", mode="before")
     @classmethod

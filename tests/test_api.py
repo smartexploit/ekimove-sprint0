@@ -2930,7 +2930,7 @@ def test_passenger_gets_one_personal_account_with_consent(client, paystack):
                        "account_name": "EKIMOVE/TEST PASSENGER", "active": True}
     customer_call = paystack.calls[0]
     assert customer_call[2]["phone"] == "+2348000000001"
-    assert customer_call[2]["email"].endswith("@passengers.ekimove.app")
+    assert customer_call[2]["email"].endswith("@passengers.ekimove.com.ng")
     # Asking again returns the same account without calling Paystack.
     calls = len(paystack.calls)
     again = client.post("/api/v1/payments/virtual-account", json={"consent": True}, headers=headers)
