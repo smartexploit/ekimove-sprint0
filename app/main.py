@@ -22,6 +22,7 @@ from app.data_rights import router as data_rights_router
 from app.site_content import router as site_content_router
 from app.device_sessions import remember_device, router as device_sessions_router
 from app.google_maps import router as google_maps_router
+from app.staff_cards import public_router as staff_cards_public_router, router as staff_cards_router
 from app.points import PointIn, Stop, distance_quotes, resolve_stop, router as points_router
 from app.calls import router as calls_router
 from app.launch_checklist import router as launch_checklist_router
@@ -104,6 +105,8 @@ app.include_router(driver_applications_router)
 app.include_router(admin_driver_verification_router)
 app.include_router(payments_router)
 app.include_router(google_maps_router)
+app.include_router(staff_cards_router)
+app.include_router(staff_cards_public_router)
 app.include_router(interswitch_payments_router)
 app.include_router(instant_payments_router)
 app.include_router(cancellations_router)

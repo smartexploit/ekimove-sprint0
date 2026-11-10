@@ -495,6 +495,26 @@ class AuditLog(Base):
     entity_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     details: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+class StaffCard(Base):
+    """A printed EkiMove staff ID card. The QR code on it opens
+    /verify/<code>, so anyone can check the holder is current staff."""
+
+    __tablename__ = "staff_cards"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    staff_number: Mapped[str] = mapped_column(String(16), index=True)  # e.g. EKM-001; kept when a card is reissued
+    code: Mapped[str] = mapped_column(String(16), unique=True, index=True)  # printed verification code
+    full_name: Mapped[str] = mapped_column(String(120))
+    title: Mapped[str] = mapped_column(String(80))
+    photo_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    issued_on: Mapped[date] = mapped_column(Date)
+    expires_on: Mapped[date] = mapped_column(Date)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class ServiceArea(Base):
     __tablename__ = "service_areas"
     __table_args__ = (

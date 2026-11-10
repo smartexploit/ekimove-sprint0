@@ -293,6 +293,13 @@ Presets: Dispatcher, Driver reviewer (reviews and dispatch), Support agent (supp
 ## Places not on the list (dropped pins)
 When **Riders can drop a pin** is ticked in the Fare calculator, the pickup and destination search ends with "Not on the list? Drop a pin on the map". The rider taps the spot (or uses their location for pickup) and describes it ("blue gate opposite Mercy Pharmacy"); a street name is suggested from the map. The price is worked out on the server with the per-km formula from the road distance (Geoapify routing with `GEOAPIFY_API_KEY`, otherwise the straight line × 1.35). Pins must be within 8 km of an active listed place. The booking stores the pin's coordinates, so tracking, the live map and dispatch use it like a listed place. **Send a package** works the same way (for the pickup and the drop-off); the package-size extras are added to the per-km price.
 
+### Staff ID cards and /verify
+Super admins issue printed staff ID cards in **Admin → Staff ID cards** (`app/staff_cards.py`, migration 0025). Each card gets a staff number (`EKM-001`, kept when a card is replaced), a passport photo (private Cloudinary storage, `staff-photos` folder), validity dates (default one year, at most three) and a random 8-character code from an alphabet without 0/O/1/I/L. The QR code (download as SVG for print shops or PNG) opens `FRONTEND_URL/verify/<code>`.
+
+- **Public check** (`/verify`, `/verify/<code>`, no sign-in): shows *Verified EkiMove staff* with name, job title, staff number, photo and expiry; *expired*; *cancelled* (no photo); or *no card has this code*. Nothing else is shown. Checks are limited to 30 per IP per 10 minutes so codes can't be guessed in bulk.
+- **Replace card** issues a new code with the same staff number and photo, and cancels the old card. **Cancel card** (lost, left the company) takes a reason. Every action is in the audit log.
+- Depends on `segno` for QR codes.
+
 ### Google Maps (optional)
 Set these on the Render backend to use Google; without them nothing changes:
 

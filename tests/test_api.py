@@ -7503,3 +7503,127 @@ def test_map_config_switches_to_google_maps(client, monkeypatch):
     google = client.get("/api/v1/map-config").json()
     assert google["provider"] == "google" and google["google_key"] == "g-browser"
     assert google["google_map_id"] == "map123" and google["tile_url"]  # tiles kept as a fallback
+
+
+# ---------- Staff ID cards and public verification ----------
+import app.staff_cards as staff_cards_module
+
+JPEG = b"\xff\xd8\xff\xe0" + b"0" * 200
+
+
+def _fake_photo_store(monkeypatch):
+    store = {}
+
+    def upload(data, folder="driver-photos"):
+        ref = f"cloudinary:ekimove/{folder}/{len(store)}|jpg"
+        store[ref] = data
+        return ref
+
+    monkeypatch.setattr(staff_cards_module, "upload_driver_photo", upload)
+    monkeypatch.setattr(staff_cards_module, "download_driver_photo", lambda ref: (store[ref], "image/jpeg"))
+    monkeypatch.setattr(staff_cards_module, "delete_driver_photo", lambda ref: store.pop(ref, None))
+    return store
+
+
+def _issue(client, admin, name="Faith Ogunlade", title="Founder & CEO", photo=True, **form):
+    files = {"photo": ("me.jpg", JPEG, "image/jpeg")} if photo else None
+    r = client.post("/api/v1/admin/staff-cards", headers=admin, data={"full_name": name, "title": title, **form},
+                    files=files)
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def test_staff_cards_issue_and_verify_publicly(client, monkeypatch):
+    store = _fake_photo_store(monkeypatch)
+    admin = login(client, *ADMIN_LOGIN)
+    faith = _issue(client, admin)
+    esther = _issue(client, admin, "Esther Akinfolahan", "Co-founder, Operations", photo=False)
+    assert faith["staff_number"] == "EKM-001" and esther["staff_number"] == "EKM-002"
+    assert re.fullmatch(r"[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}", faith["code"])
+    assert faith["verify_url"].endswith("/verify/" + faith["code"].replace("-", ""))
+    assert faith["status"] == "valid" and faith["has_photo"] and len(store) == 1
+
+    # Anyone can check, typing the code with a dash, spaces or lower case.
+    typed = faith["code"].lower().replace("-", " - ")
+    public = client.get(f"/api/v1/staff-cards/verify/{typed}").json()
+    assert public == {"status": "valid", "full_name": "Faith Ogunlade", "title": "Founder & CEO",
+                      "staff_number": "EKM-001", "expires_on": faith["expires_on"], "has_photo": True}
+    photo = client.get(f"/api/v1/staff-cards/verify/{faith['code']}/photo")
+    assert photo.status_code == 200 and photo.content == JPEG and photo.headers["content-type"] == "image/jpeg"
+    assert client.get("/api/v1/staff-cards/verify/ABCD-EFGH").json() == {"status": "not_found"}
+    assert client.get("/api/v1/staff-cards/verify/short").json() == {"status": "not_found"}
+    # Nothing private leaks: no code, no internal ids, no photo reference.
+    assert "code" not in public and "id" not in public and "photo_ref" not in public
+
+    # QR codes for printing point at the verify page.
+    svg = client.get(f"/api/v1/admin/staff-cards/{faith['id']}/qr.svg", headers=admin)
+    assert svg.status_code == 200 and svg.headers["content-type"].startswith("image/svg+xml")
+    assert b"<svg" in svg.content and "EKM-001" in svg.headers["content-disposition"]
+    png = client.get(f"/api/v1/admin/staff-cards/{faith['id']}/qr.png", headers=admin)
+    assert png.status_code == 200 and png.content.startswith(b"\x89PNG")
+    assert client.get(f"/api/v1/admin/staff-cards/{faith['id']}/qr.gif", headers=admin).status_code == 404
+
+    listed = client.get("/api/v1/admin/staff-cards", headers=admin).json()
+    assert [c["staff_number"] for c in listed["cards"]] == ["EKM-001", "EKM-002"]
+    assert listed["next_number"] == "EKM-003" and listed["counts"]["valid"] == 2
+
+
+def test_staff_cards_cancel_reissue_and_expire(client, monkeypatch):
+    _fake_photo_store(monkeypatch)
+    admin = login(client, *ADMIN_LOGIN)
+    card = _issue(client, admin)
+    # A lost card is replaced: same staff number and photo, new code; the old one stops verifying.
+    new = client.post(f"/api/v1/admin/staff-cards/{card['id']}/reissue", headers=admin, json={})
+    assert new.status_code == 201, new.text
+    new = new.json()
+    assert new["staff_number"] == "EKM-001" and new["code"] != card["code"] and new["has_photo"]
+    old_check = client.get(f"/api/v1/staff-cards/verify/{card['code']}").json()
+    assert old_check["status"] == "revoked" and old_check["has_photo"] is False and old_check["revoked_on"]
+    assert client.get(f"/api/v1/staff-cards/verify/{card['code']}/photo").status_code == 404
+    assert client.get(f"/api/v1/staff-cards/verify/{new['code']}").json()["status"] == "valid"
+
+    # Someone leaves: cancel the card.
+    gone = client.post(f"/api/v1/admin/staff-cards/{new['id']}/revoke", headers=admin, json={"reason": "Left EkiMove"})
+    assert gone.json()["status"] == "revoked" and gone.json()["revoked_reason"] == "Left EkiMove"
+    assert client.patch(f"/api/v1/admin/staff-cards/{new['id']}", headers=admin,
+                        json={"title": "CEO"}).status_code == 409
+
+    # An out-of-date card says so.
+    old = _issue(client, admin, "Tolu Bamidele", "Support", photo=False, issued_on="2024-01-01",
+                 expires_on="2024-12-31")
+    assert client.get(f"/api/v1/staff-cards/verify/{old['code']}").json()["status"] == "expired"
+    renewed = client.patch(f"/api/v1/admin/staff-cards/{old['id']}", headers=admin,
+                           json={"expires_on": "2026-12-31"})
+    assert renewed.status_code == 200 and renewed.json()["status"] in {"valid", "expired"}
+
+    with session_for(client) as db:
+        actions = db.scalars(select(AuditLog.action).where(AuditLog.entity_type == "staff_card")).all()
+    assert {"staff_card.issued", "staff_card.reissued", "staff_card.revoked", "staff_card.updated"} <= set(actions)
+
+
+def test_staff_cards_rules_and_access(client, monkeypatch):
+    _fake_photo_store(monkeypatch)
+    admin = login(client, *ADMIN_LOGIN)
+    passenger = login(client, *PASSENGER_LOGIN)
+    assert client.get("/api/v1/admin/staff-cards", headers=passenger).status_code == 403
+    assert client.get("/api/v1/admin/staff-cards").status_code == 401
+    _member, staff = add_staff_member(client, admin, ["support"])
+    assert client.get("/api/v1/admin/staff-cards", headers=staff).status_code == 403
+
+    bad = lambda **f: client.post("/api/v1/admin/staff-cards", headers=admin, data={  # noqa: E731
+        "full_name": "Faith Ogunlade", "title": "Founder", **f.pop("data", {})}, **f)
+    assert bad(data={"full_name": "F"}).status_code == 422
+    assert bad(data={"issued_on": "2026-01-01", "expires_on": "2025-01-01"}).status_code == 422
+    assert bad(data={"issued_on": "2026-01-01", "expires_on": "2031-01-01"}).status_code == 422
+    assert bad(files={"photo": ("x.gif", b"GIF89a", "image/gif")}).status_code == 415
+    assert bad(files={"photo": ("x.jpg", b"not a jpeg", "image/jpeg")}).status_code == 415
+
+    def broken(*a, **k):
+        raise staff_cards_module.PhotoStorageError("down")
+    monkeypatch.setattr(staff_cards_module, "upload_driver_photo", broken)
+    assert bad(files={"photo": ("x.jpg", JPEG, "image/jpeg")}).status_code == 503
+
+    # Checks are rate limited so codes can't be guessed in bulk.
+    for _ in range(30):
+        client.get("/api/v1/staff-cards/verify/ABCDEFGH")
+    assert client.get("/api/v1/staff-cards/verify/ABCDEFGH").status_code == 429

@@ -27,6 +27,7 @@ const ReceiptPage = lazy(() => import('./pages/account/ReceiptPage.jsx'))
 const UnlockPage = lazy(() => import('./pages/auth/UnlockPage.jsx'))
 const FaresPage = lazy(() => import('./pages/public/FaresPage.jsx'))
 const MapAPlacePage = lazy(() => import('./pages/public/MapAPlacePage.jsx'))
+const VerifyStaffPage = lazy(() => import('./pages/public/VerifyStaffPage.jsx'))
 const FaqPage = lazy(() => import('./pages/public/FaqPage.jsx'))
 const AreaPage = lazy(() => import('./pages/public/AreaPage.jsx'))
 const AdminFaresPage = lazy(() => import('./pages/admin/AdminFaresPage.jsx'))
@@ -38,6 +39,7 @@ const TrackSharePage = lazy(() => import('./pages/public/TrackSharePage.jsx'))
 const AdminDispatchPage = lazy(() => import('./pages/admin/AdminDispatchPage.jsx'))
 const AdminDriverVerificationPage = lazy(() => import('./pages/admin/AdminDriverVerificationPage.jsx'))
 const AdminTeamPage = lazy(() => import('./pages/admin/AdminTeamPage.jsx'))
+const AdminStaffCardsPage = lazy(() => import('./pages/admin/AdminStaffCardsPage.jsx'))
 const AdminPinsPage = lazy(() => import('./pages/admin/AdminPinsPage.jsx'))
 const AdminPaymentsPage = lazy(() => import('./pages/admin/AdminPaymentsPage.jsx'))
 const AdminOverviewPage = lazy(() => import('./pages/admin/AdminOverviewPage.jsx'))
@@ -73,6 +75,8 @@ export default function App() {
         <Route path="/unlock" element={<UnlockPage />} />
         <Route path="/fares" element={<FaresPage />} />
         <Route path="/map-a-place" element={<MapAPlacePage />} />
+        <Route path="/verify" element={<VerifyStaffPage />} />
+        <Route path="/verify/:code" element={<VerifyStaffPage />} />
         <Route path="/faq" element={<FaqPage />} />
         <Route path="/areas/:slug" element={<AreaPage />} />
         <Route path="/policies" element={<PoliciesPage />} />
@@ -90,6 +94,7 @@ export default function App() {
 
         <Route element={<ProtectedRoute requiredRole={['super_admin', 'staff']} />}>
           <Route path="/admin/team" element={<AdminTeamPage />} />
+          <Route path="/admin/staff-cards" element={<AdminStaffCardsPage />} />
           <Route path="/admin/pins" element={<AdminPinsPage />} />
           <Route path="/admin/dispatch" element={<AdminDispatchPage />} />
           <Route path="/admin/overview" element={<AdminOverviewPage />} />

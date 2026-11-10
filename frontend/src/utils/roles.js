@@ -18,6 +18,7 @@ export const ADMIN_PAGES = {
   '/admin/fares': 'super',
   '/admin/website': ['website'],
   '/admin/team': 'super',
+  '/admin/staff-cards': 'super',
   '/admin/pins': ['pins'],
 }
 

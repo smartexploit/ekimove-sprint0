@@ -14,6 +14,7 @@ redis>=8.1.0,<9
 python-multipart>=0.0.20,<1.0
 cloudinary>=1.44,<2.0
 requests>=2.32.4,<3.0
+segno>=1.6,<2.0
 pywebpush>=2.0,<3.0
 sentry-sdk[fastapi]>=2.73.0,<3.0
 

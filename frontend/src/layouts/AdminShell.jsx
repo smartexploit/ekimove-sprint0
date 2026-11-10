@@ -11,6 +11,7 @@ import {
   Map as MapIcon,
   Truck,
   MapPinned,
+  IdCard,
   UserCog,
   Users,
   MapPin,
@@ -43,6 +44,7 @@ const NAV = [
   ['/admin/pins', 'Pin check', MapPinned],
   ['/admin/website', 'SEO & website', Globe],
   ['/admin/team', 'Team & access', UserCog],
+  ['/admin/staff-cards', 'Staff ID cards', IdCard],
 ]
 
 /** Operations console layout: dark sidebar (a scrolling top bar on phones). */
