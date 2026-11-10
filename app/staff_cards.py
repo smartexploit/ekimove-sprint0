@@ -313,8 +313,8 @@ def _photo_response(card: StaffCard) -> Response:
 # --------------------------------------------------------------------------
 
 
-def _lookup(db: Session, request: Request, code: str) -> StaffCard | None:
-    enforce_rate_limit("staff-verify", client_ip(request), 30, 600,
+def _lookup(db: Session, request: Request, code: str, bucket: str = "staff-verify") -> StaffCard | None:
+    enforce_rate_limit(bucket, client_ip(request), 30, 600,
                        "Too many checks. Please wait a few minutes and try again.")
     cleaned = clean_code(code)
     if len(cleaned) != CODE_LENGTH:
@@ -337,7 +337,8 @@ def verify(code: str, request: Request, db: Session = Depends(get_db)) -> dict:
 
 @public_router.get("/verify/{code}/photo")
 def verify_photo(code: str, request: Request, db: Session = Depends(get_db)) -> Response:
-    card = _lookup(db, request, code)
+    # Its own allowance, so the photo still loads after a run of checks.
+    card = _lookup(db, request, code, bucket="staff-verify-photo")
     if card is None or status_of(card) == "revoked":
         raise HTTPException(status_code=404, detail="Photo not available.")
     return _photo_response(card)

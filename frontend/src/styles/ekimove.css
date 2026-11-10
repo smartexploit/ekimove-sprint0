@@ -5223,3 +5223,4 @@ a.chip {
 .verify-person { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
 .verify-person img { width: 110px; height: 136px; object-fit: cover; border-radius: 12px; border: 1px solid #E4DED1; }
 .verify-photo-loading { width: 110px; height: 136px; border-radius: 12px; background: linear-gradient(90deg, #ECE8DE, #F6F3EC, #ECE8DE); }
+.verify-photo-missing { width: 110px; height: 136px; border-radius: 12px; border: 1px dashed #C9C1AE; background: #F6F3EC; display: grid; place-items: center; padding: 8px; text-align: center; font-size: 12px; line-height: 1.35; color: #6B5F45; }

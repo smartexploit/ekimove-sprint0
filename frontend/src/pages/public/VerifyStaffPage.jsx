@@ -31,7 +31,13 @@ function PersonPhoto({ code, name }) {
     }
   }, [code])
   const current = shown.code === code ? shown : { url: '', failed: false }
-  if (current.failed) return null
+  if (current.failed) {
+    return (
+      <div className="verify-photo-missing" role="img" aria-label="Photo unavailable">
+        Photo couldn’t load. Refresh, or call EkiMove to confirm.
+      </div>
+    )
+  }
   return current.url
     ? <img src={current.url} alt={`Photo of ${name}`} />
     : <div className="verify-photo-loading" role="img" aria-label="Loading photo" />

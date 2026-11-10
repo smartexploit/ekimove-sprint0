@@ -7632,7 +7632,9 @@ def test_staff_cards_rules_and_access(client, monkeypatch):
     monkeypatch.setattr(staff_cards_module, "upload_driver_photo", broken)
     assert bad(files={"photo": ("x.jpg", JPEG, "image/jpeg")}).status_code == 503
 
-    # Checks are rate limited so codes can't be guessed in bulk.
+    # Checks are rate limited so codes can't be guessed in bulk...
     for _ in range(30):
         client.get("/api/v1/staff-cards/verify/ABCDEFGH")
     assert client.get("/api/v1/staff-cards/verify/ABCDEFGH").status_code == 429
+    # ...but photos have their own allowance, so a run of checks doesn't hide them.
+    assert client.get("/api/v1/staff-cards/verify/ABCDEFGH/photo").status_code == 404
