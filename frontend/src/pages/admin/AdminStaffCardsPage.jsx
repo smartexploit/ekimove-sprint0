@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { BadgeCheck, Download, IdCard, RefreshCw, ShieldOff } from 'lucide-react'
+import { BadgeCheck, Camera, Download, IdCard, RefreshCw, ShieldOff } from 'lucide-react'
 import AdminShell from '../../layouts/AdminShell.jsx'
 import Alert from '../../components/ui/Alert.jsx'
 import { apiRequest, downloadFile, fetchImageUrl } from '../../services/authService.js'
@@ -110,11 +110,31 @@ function IssueForm({ nextNumber, onIssued }) {
 }
 
 function CardRow({ card, onChanged }) {
-  const photo = useImage(card.has_photo ? `/api/v1/admin/staff-cards/${card.id}/photo` : '')
+  const [photoVersion, setPhotoVersion] = useState(0)
+  const photo = useImage(card.has_photo ? `/api/v1/admin/staff-cards/${card.id}/photo?v=${photoVersion}` : '')
   const qr = useImage(card.status === 'revoked' ? '' : `/api/v1/admin/staff-cards/${card.id}/qr.svg`)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [label, tone] = STATUS[card.status]
+
+  async function changePhoto(event) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    setBusy('photo')
+    setError('')
+    const form = new FormData()
+    form.append('photo', file)
+    try {
+      await apiRequest(`/api/v1/admin/staff-cards/${card.id}/photo`, { method: 'POST', body: form })
+      setPhotoVersion((v) => v + 1)
+      onChanged()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy('')
+    }
+  }
 
   async function act(kind) {
     let body = {}
@@ -157,6 +177,11 @@ function CardRow({ card, onChanged }) {
             <button type="button" className="btn btn-sm" onClick={() => downloadFile(`/api/v1/admin/staff-cards/${card.id}/qr.png`, 'qr.png').catch((e) => setError(e.message))}>
               <Download size={16} aria-hidden="true" /> QR (PNG)
             </button>
+            <label className={`btn btn-sm ${busy ? 'is-disabled' : ''}`} htmlFor={`card-photo-${card.id}`}>
+              <Camera size={16} aria-hidden="true" /> {busy === 'photo' ? 'Uploading…' : 'Change photo'}
+            </label>
+            <input id={`card-photo-${card.id}`} type="file" accept="image/jpeg,image/png,image/webp" className="sr-only"
+              disabled={Boolean(busy)} onChange={changePhoto} />
             <button type="button" className="btn btn-sm" disabled={Boolean(busy)} onClick={() => act('reissue')}>
               <RefreshCw size={16} aria-hidden="true" /> {busy === 'reissue' ? 'Replacing…' : 'Replace card'}
             </button>
