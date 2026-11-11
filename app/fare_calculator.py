@@ -128,6 +128,18 @@ def _has_pin(place: Place) -> bool:
     return place.latitude is not None and place.longitude is not None
 
 
+def _hidden_places(db: Session, area_id: int) -> list[dict]:
+    """Places in the area the calculator leaves out, and why."""
+    out = []
+    for place, zone in db.execute(select(Place, Zone).outerjoin(Zone, Zone.id == Place.zone_id)
+                                  .where(Place.service_area_id == area_id).order_by(Place.name)).all():
+        if place.status != "active":
+            out.append({"id": place.id, "name": place.name, "reason": "switched off"})
+        elif zone is None or not zone.is_active:
+            out.append({"id": place.id, "name": place.name, "reason": "its zone is switched off"})
+    return out
+
+
 def _area_places(db: Session, area_id: int) -> tuple[ServiceArea, list[Place]]:
     area = db.get(ServiceArea, area_id)
     if area is None:
@@ -305,6 +317,7 @@ def preview(db: Session, area_id: int) -> dict:
         "formula": rules,
         "places": len(places),
         "missing_pins": [{"id": p.id, "name": p.name} for p in places if not _has_pin(p)],
+        "hidden_places": _hidden_places(db, area_id),
         "auto_pins": [{"id": p.id, "name": p.name, "label": p.pin_label} for p in places
                       if _has_pin(p) and p.pin_source == "auto"],
         "road_distances": measured, "estimated_distances": len(routes) - measured,

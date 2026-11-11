@@ -7731,3 +7731,17 @@ def test_anchor_fares_price_dropped_pins_and_calculator_routes(client, monkeypat
     assert okada["priced_from"] == "anchor"
     # Road distance ≈ (1.11 km + 0.3 km) × 1.35 ≈ 1.9 km vs the anchor's 1.5 km: about 0.4 km more.
     assert Decimal("900.00") <= Decimal(okada["quoted_fare"]) <= Decimal("1000.00")
+
+
+def test_fare_calculator_lists_places_it_leaves_out(client):
+    admin = login(client, *ADMIN_LOGIN)
+    area_id, (a, b, c), _manual = _calc_area(client)
+    with session_for(client) as db:
+        db.add(Place(service_area_id=area_id, zone_id=db.get(Place, a).zone_id, name="Calc Off", status="inactive"))
+        db.commit()
+    data = client.get(f"/api/v1/admin/fare-calculator?service_area_id={area_id}", headers=admin).json()
+    # Places without a pin are named so they can be pinned...
+    assert any(p["name"] == "Calc No Pin" for p in data["missing_pins"])
+    # ...and places left out because they're switched off say so.
+    assert any(p["name"] == "Calc Off" and p["reason"] == "switched off" for p in data["hidden_places"])
+    assert not any(p["name"] == "Calc Off" for p in data["missing_pins"])

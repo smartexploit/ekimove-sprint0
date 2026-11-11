@@ -148,7 +148,7 @@ function savedSamples(blank) {
   }
 }
 
-function SuggestCard({ places, formula, onUse, onAnchors }) {
+function SuggestCard({ places, formula, onUse, onAnchors, missing = 0 }) {
   const vehicles = formula.vehicles.filter((v) => v.enabled)
   const blank = { origin: '', destination: '', vehicle: vehicles[0]?.vehicle_type || 'motorcycle', amount: '' }
   const [rows, setRows] = useState(() => savedSamples(blank))
@@ -190,6 +190,12 @@ function SuggestCard({ places, formula, onUse, onAnchors }) {
   return (
     <section className="card stack" aria-labelledby="fc-suggest">
       <h2 id="fc-suggest" className="section-title"><Wand2 size={18} aria-hidden="true" /> Match today’s prices</h2>
+      {missing > 0 && (
+        <p className="small fc-anchor-note">
+          Only places with a map pin are listed. {missing} place{missing === 1 ? ' has' : 's have'} no pin yet, so
+          {missing === 1 ? ' it isn’t' : ' they aren’t'} here: see “Map pins and distances” above to pin them.
+        </p>
+      )}
       <p className="muted small">
         Enter a few routes and what an okada or car usually charges on them today. EkiMove works out the starting fare
         and per-km price that fit best. Use short and long trips for the best match.
@@ -477,6 +483,13 @@ export default function AdminFaresPage() {
               <Alert tone="warning">
                 {data.missing_pins.length} place{data.missing_pins.length === 1 ? ' has' : 's have'} no pin, so{' '}
                 {data.missing_pins.length === 1 ? 'it' : 'they'} can’t be priced yet: {data.missing_pins.map((p) => p.name).join(', ')}.
+                {' '}Set pins in <Link to="/admin/pins">Pin check</Link> (“I’m here: set pin” on site is the most accurate).
+              </Alert>
+            )}
+            {data.hidden_places?.length > 0 && (
+              <Alert tone="info">
+                Not included here: {data.hidden_places.map((p) => `${p.name} (${p.reason})`).join(', ')}.
+                Switch them on in <Link to="/admin/locations">Places & fares</Link> to price them.
               </Alert>
             )}
             {data.missing_pins.length > 0 && (
@@ -524,7 +537,8 @@ export default function AdminFaresPage() {
               load(areaId)
             }} />}
 
-          {places.length >= 2 && <SuggestCard places={places} formula={data.formula} onUse={useSuggestion} onAnchors={useAsAnchors} />}
+          {places.length >= 2 && <SuggestCard places={places} formula={data.formula} onUse={useSuggestion} onAnchors={useAsAnchors}
+            missing={data.missing_pins.length} />}
 
           <section className="card stack" aria-labelledby="fc-preview">
             <div className="fc-head">
