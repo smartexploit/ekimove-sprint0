@@ -5229,3 +5229,4 @@ a.chip {
 .fc-basis { display: block; font-size: 12px; line-height: 1.35; color: #1F6B4A; }
 .fc-basis.is-nearby { color: #8A5A00; }
 .fc-anchor-note { background: #EEF6F1; border-radius: 10px; padding: 8px 12px; color: #14503D; }
+.staff-card-edit { border-top: 1px solid var(--line, #E4DED1); padding-top: 12px; }

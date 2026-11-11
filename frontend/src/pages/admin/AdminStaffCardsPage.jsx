@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { BadgeCheck, Camera, Download, IdCard, RefreshCw, ShieldOff } from 'lucide-react'
+import { BadgeCheck, Camera, Download, IdCard, Pencil, RefreshCw, ShieldOff } from 'lucide-react'
 import AdminShell from '../../layouts/AdminShell.jsx'
 import Alert from '../../components/ui/Alert.jsx'
 import { apiRequest, downloadFile, fetchImageUrl } from '../../services/authService.js'
@@ -109,7 +109,62 @@ function IssueForm({ nextNumber, onIssued }) {
   )
 }
 
+function EditDetails({ card, onSaved, onCancel }) {
+  const [name, setName] = useState(card.full_name)
+  const [title, setTitle] = useState(card.title)
+  const [expires, setExpires] = useState(card.expires_on)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  async function save(event) {
+    event.preventDefault()
+    setBusy(true)
+    setError('')
+    const body = {}
+    if (name.trim() !== card.full_name) body.full_name = name.trim()
+    if (title.trim() !== card.title) body.title = title.trim()
+    if (expires && expires !== card.expires_on) body.expires_on = expires
+    try {
+      if (Object.keys(body).length) {
+        await apiRequest(`/api/v1/admin/staff-cards/${card.id}`, { method: 'PATCH', body: JSON.stringify(body) })
+      }
+      onSaved()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <form className="stack stack-sm staff-card-edit" onSubmit={save} aria-label={`Edit ${card.full_name}'s card`}>
+      <label className="field" htmlFor={`edit-name-${card.id}`}>
+        <span className="field-label">Full name</span>
+        <input id={`edit-name-${card.id}`} className="input" required maxLength={120} value={name}
+          onChange={(e) => setName(nameTyping(e.target.value))} />
+      </label>
+      <label className="field" htmlFor={`edit-title-${card.id}`}>
+        <span className="field-label">Job title</span>
+        <input id={`edit-title-${card.id}`} className="input" required maxLength={80} value={title}
+          onChange={(e) => setTitle(e.target.value)} />
+      </label>
+      <label className="field" htmlFor={`edit-expires-${card.id}`}>
+        <span className="field-label">Valid until</span>
+        <input id={`edit-expires-${card.id}`} className="input" type="date" value={expires}
+          onChange={(e) => setExpires(e.target.value)} />
+      </label>
+      <p className="small muted">The code and QR stay the same, so a reprinted card still works. The check page shows the new details straight away.</p>
+      <Alert tone="error">{error}</Alert>
+      <div className="row" style={{ gap: 8 }}>
+        <button type="submit" className="btn btn-primary btn-sm" disabled={busy}>{busy ? 'Saving…' : 'Save details'}</button>
+        <button type="button" className="btn btn-sm btn-quiet" onClick={onCancel} disabled={busy}>Cancel</button>
+      </div>
+    </form>
+  )
+}
+
 function CardRow({ card, onChanged }) {
+  const [editing, setEditing] = useState(false)
   const [photoVersion, setPhotoVersion] = useState(0)
   const photo = useImage(card.has_photo ? `/api/v1/admin/staff-cards/${card.id}/photo?v=${photoVersion}` : '')
   const qr = useImage(card.status === 'revoked' ? '' : `/api/v1/admin/staff-cards/${card.id}/qr.svg`)
@@ -169,8 +224,14 @@ function CardRow({ card, onChanged }) {
         <p className="small">Code <strong className="staff-code">{card.code}</strong> · valid until {niceDate(card.expires_on)}</p>
         {card.status === 'revoked' && card.revoked_reason && <p className="small muted">Cancelled: {card.revoked_reason}</p>}
         <Alert tone="error">{error}</Alert>
-        {card.status !== 'revoked' && (
+        {editing && (
+          <EditDetails card={card} onCancel={() => setEditing(false)} onSaved={() => { setEditing(false); onChanged() }} />
+        )}
+        {card.status !== 'revoked' && !editing && (
           <div className="row" style={{ gap: 8 }}>
+            <button type="button" className="btn btn-sm" disabled={Boolean(busy)} onClick={() => setEditing(true)}>
+              <Pencil size={16} aria-hidden="true" /> Edit details
+            </button>
             <button type="button" className="btn btn-sm" onClick={() => downloadFile(`/api/v1/admin/staff-cards/${card.id}/qr.svg`, 'qr.svg').catch((e) => setError(e.message))}>
               <Download size={16} aria-hidden="true" /> QR (SVG)
             </button>
