@@ -137,10 +137,28 @@ function FormulaCard({ formula, draft, setDraft, onSaved }) {
   )
 }
 
-function SuggestCard({ places, formula, onUse }) {
+const SAMPLES_KEY = 'ekimove.fareSamples'
+
+function savedSamples(blank) {
+  try {
+    const rows = JSON.parse(localStorage.getItem(SAMPLES_KEY) || 'null')
+    return Array.isArray(rows) && rows.length ? rows : [blank, blank, blank]
+  } catch {
+    return [blank, blank, blank]
+  }
+}
+
+function SuggestCard({ places, formula, onUse, onAnchors }) {
   const vehicles = formula.vehicles.filter((v) => v.enabled)
   const blank = { origin: '', destination: '', vehicle: vehicles[0]?.vehicle_type || 'motorcycle', amount: '' }
-  const [rows, setRows] = useState([blank, blank, blank])
+  const [rows, setRows] = useState(() => savedSamples(blank))
+  useEffect(() => {
+    try {
+      localStorage.setItem(SAMPLES_KEY, JSON.stringify(rows))
+    } catch {
+      /* the list just isn't remembered */
+    }
+  }, [rows])
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -208,7 +226,23 @@ function SuggestCard({ places, formula, onUse }) {
           </button>
         )}
         <button type="button" className="btn btn-sm" onClick={suggest} disabled={busy}>{busy ? 'Working it out…' : 'Suggest a formula'}</button>
+        <button type="button" className="btn btn-primary btn-sm" disabled={busy}
+          onClick={() => {
+            const filled = rows.filter((r) => r.origin && r.destination && r.amount && r.origin !== r.destination)
+            if (!filled.length) {
+              setError('Fill in at least one route with today’s price.')
+              return
+            }
+            setError('')
+            onAnchors(filled)
+          }}>
+          Save as real prices (anchors)
+        </button>
       </div>
+      <p className="muted small">
+        “Suggest a formula” only works out a per-km price. “Save as real prices” makes these the actual fares for these
+        routes, and the routes near them are priced from them.
+      </p>
       {result?.suggestions.map((tip) => (
         <div key={tip.vehicle_type} className="fc-tip">
           <p><strong>{label(tip.vehicle_type)}:</strong> starting fare {naira(tip.base)} + {naira(tip.per_km)} per km
@@ -394,6 +428,19 @@ export default function AdminFaresPage() {
     document.getElementById('fc-formula')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
+  function useAsAnchors(rows) {
+    setEdits((x) => {
+      const next = { ...x }
+      rows.forEach((r) => { next[`${r.origin}|${r.destination}|${r.vehicle}`] = String(r.amount) })
+      return next
+    })
+    setOnlyChanges(true)
+    setQuery('')
+    setNotice(`${rows.length} real price${rows.length === 1 ? '' : 's'} added to the list below. Check them, then press `
+      + '“Apply” to save them; nearby routes are then priced from them.')
+    document.getElementById('fc-preview')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
   const pending = Object.values(edits).filter((v) => v !== '').length + Object.values(replace).filter(Boolean).length
   const toApply = data ? data.summary.new + data.summary.change + pending : 0
 
@@ -477,7 +524,7 @@ export default function AdminFaresPage() {
               load(areaId)
             }} />}
 
-          {places.length >= 2 && <SuggestCard places={places} formula={data.formula} onUse={useSuggestion} />}
+          {places.length >= 2 && <SuggestCard places={places} formula={data.formula} onUse={useSuggestion} onAnchors={useAsAnchors} />}
 
           <section className="card stack" aria-labelledby="fc-preview">
             <div className="fc-head">
