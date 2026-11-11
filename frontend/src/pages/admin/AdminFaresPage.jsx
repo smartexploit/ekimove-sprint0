@@ -42,6 +42,9 @@ function FormulaCard({ formula, draft, setDraft, onSaved }) {
       const body = {
         road_factor: Number(draft.road_factor),
         allow_custom_points: Boolean(draft.allow_custom_points),
+        use_anchors: draft.use_anchors !== false,
+        anchor_near_km: Number(draft.anchor_near_km ?? 1),
+        anchor_reach_km: Number(draft.anchor_reach_km ?? 3),
         vehicles: draft.vehicles.map((v) => ({
           ...v, base: Number(v.base || 0), per_km: Number(v.per_km || 0), minimum: Number(v.minimum || 0),
           round_to: Math.max(1, Number(v.round_to || 1)), extra_passenger: Number(v.extra_passenger || 0),
@@ -74,6 +77,35 @@ function FormulaCard({ formula, draft, setDraft, onSaved }) {
           from the road distance (pins must be within 8 km of a listed place).
         </span>
       </label>
+      <fieldset className="fc-anchors">
+        <legend>
+          <label className="check-row">
+            <input type="checkbox" checked={draft.use_anchors !== false}
+              onChange={(event) => setDraft((d) => ({ ...d, use_anchors: event.target.checked }))} />
+            <strong>Price from anchor routes</strong>
+          </label>
+        </legend>
+        <p className="muted small">
+          Prices you set by hand on known routes (junction to landmark) price the trips around them:
+          the known price, plus or minus the extra distance × price per km. Hand-set prices never change.
+        </p>
+        <div className="fc-grid">
+          <label className="field">
+            <span className="field-label">“Close to an anchor” within (km)</span>
+            <input className="input" inputMode="decimal" value={String(draft.anchor_near_km ?? 1)}
+              disabled={draft.use_anchors === false}
+              onChange={(e) => setDraft((d) => ({ ...d, anchor_near_km: e.target.value.replace(/[^\d.]/g, '').slice(0, 4) }))} />
+            <span className="field-hint">Both ends this close: priced straight from that route.</span>
+          </label>
+          <label className="field">
+            <span className="field-label">Influence fades out by (km)</span>
+            <input className="input" inputMode="decimal" value={String(draft.anchor_reach_km ?? 3)}
+              disabled={draft.use_anchors === false}
+              onChange={(e) => setDraft((d) => ({ ...d, anchor_reach_km: e.target.value.replace(/[^\d.]/g, '').slice(0, 4) }))} />
+            <span className="field-hint">Further out: the plain formula.</span>
+          </label>
+        </div>
+      </fieldset>
       <div className="fc-vehicles">
         {draft.vehicles.map((v, i) => (
           <fieldset key={v.vehicle_type} className={`fc-vehicle ${v.enabled ? '' : 'is-off'}`}>
@@ -459,6 +491,13 @@ export default function AdminFaresPage() {
               {data.summary.new} new · {data.summary.change} changing · {data.summary.same} unchanged ·{' '}
               {data.summary.manual} set by hand (kept unless you tick “Replace”). Type in a price to set it by hand.
             </p>
+            {data.formula.use_anchors !== false && (
+              <p className="small fc-anchor-note">
+                {data.anchors
+                  ? `${data.summary.manual} hand-set prices are anchors: routes near them are priced from them (shown in green). Set real prices on your main junction-to-landmark routes for the best results.`
+                  : 'Tip: type the real price on your main routes (junction to landmark). Those become anchors, and the routes around them are priced from them.'}
+              </p>
+            )}
             <div className="fc-filters">
               <input className="input" type="search" placeholder="Find a route" value={query} maxLength={60}
                 aria-label="Find a route" onChange={(e) => {
@@ -497,8 +536,11 @@ export default function AdminFaresPage() {
                           </span>
                           <span className="fc-tag">
                             {text}{p.action === 'change' && ` from ${naira(p.current)}`}
-                            {p.action === 'manual' && ` · formula ${naira(p.calculated)}`}
+                            {p.action === 'manual' && ` · without it ${naira(p.calculated)}`}
                           </span>
+                          {p.basis && p.basis_kind !== 'formula' && p.action !== 'manual' && (
+                            <span className={`fc-basis is-${p.basis_kind}`}>{p.basis}</span>
+                          )}
                           {p.action === 'manual' && (
                             <label className="check-row small">
                               <input type="checkbox" checked={Boolean(replace[key])}

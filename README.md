@@ -260,6 +260,14 @@ Fares come from the road distance between pins (Geoapify road routes when `GEOAP
 
 Whenever a pin is set or a place is added, its road distances to every other pinned place in the area are re-measured and its automatic route prices are updated straight away (hand-set prices are never changed), so a new place is bookable at once. Riders who drop a pin see their **recent spots** for one-tap reuse, and can **suggest a public spot** for the list (homes are not accepted); suggestions for the same spot are grouped, staff approve or reject them, and the riders are notified when it's added. Every change is in the audit log.
 
+### Anchor fares (hand-set routes price the trips around them)
+Real prices typed by hand in the Fare calculator (or set in Places & fares) are **anchors** (`app/anchor_fares.py`). Any route or dropped-pin trip that isn't set by hand is priced from them:
+- **Both ends within "close" distance** (default 1 km) of an anchor's two ends: `anchor price + (trip road distance − anchor road distance) × price per km`, so going past a landmark costs a little more and stopping short a little less. The closest anchor wins.
+- **Within "fades out by"** (default 3 km): the formula price × how much more/less riders pay than the formula on those nearby anchors, weighted by closeness and fading to nothing at the edge (capped between 0.5× and 2×).
+- **Otherwise**: the plain formula. Always at least the minimum, rounded to the step.
+
+A route set in one direction also anchors the other way, unless that way is set too. Typed prices are saved before the rest is priced, so they count straight away. The preview shows each price's basis ("From EKSU Gate → Fajuyi Park (₦700), 0.6 km further" / "Formula +20%, like nearby …"); nothing changes until **Apply**. Switch it off or change the distances in the Fare calculator's "Price from anchor routes" box (`use_anchors`, `anchor_near_km`, `anchor_reach_km` in the saved formula). Dropped-pin quotes return `priced_from`: `anchor`, `nearby` or `formula`.
+
 ### "Map a place" public survey
 `/map-a-place` (no sign-in) lets anyone standing at a place send its GPS location: they pick it from the list (places still needing a pin come first, and no coordinates are shown) or name a new public place, and may leave a phone number for rewards. Answers never change a pin by themselves:
 - Readings for listed places appear on that place's card in Pin check. When **two different people** agree within 60 m, the place is flagged *Survey helpers sent its location* and staff can **Use survey location** (`pin_source="survey"`). Field-set pins are never flagged.

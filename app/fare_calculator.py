@@ -14,15 +14,16 @@ import json
 import logging
 import math
 from datetime import datetime, timedelta, timezone
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 
 import requests
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import google_maps
+from app.anchor_fares import anchor_price, basis_text, finish, formula_raw, load_anchors
 from app.auth import require_super_admin
 from app.config import settings
 from app.database import get_db
@@ -66,7 +67,20 @@ class Formula(BaseModel):
     # Riders may drop a pin for a place that isn't on the list; it is priced
     # with this formula from the road distance.
     allow_custom_points: bool = False
+    # Anchor fares: hand-set prices on known routes price the trips around
+    # them (app/anchor_fares.py). A trip whose ends are within anchor_near_km
+    # of an anchor's ends is priced from it; the effect fades out by
+    # anchor_reach_km.
+    use_anchors: bool = True
+    anchor_near_km: float = Field(default=1.0, ge=0.2, le=3.0)
+    anchor_reach_km: float = Field(default=3.0, ge=0.5, le=10.0)
     vehicles: list[VehicleFormula] = Field(min_length=1, max_length=8)
+
+    @model_validator(mode="after")
+    def reach_beyond_near(self):
+        if self.anchor_reach_km <= self.anchor_near_km:
+            raise ValueError("The fade-out distance must be more than the \"near\" distance.")
+        return self
 
     @field_validator("vehicles")
     @classmethod
@@ -89,10 +103,15 @@ def formula(db: Session) -> dict:
 
 def price(vehicle: dict, meters: int) -> Decimal:
     """Starting fare + per-km price, at least the minimum, rounded to the step."""
-    raw = Decimal(vehicle["base"]) + Decimal(vehicle["per_km"]) * Decimal(meters) / Decimal(1000)
-    raw = max(raw, Decimal(vehicle["minimum"]))
-    step = Decimal(vehicle["round_to"])
-    return ((raw / step).quantize(Decimal(1), rounding=ROUND_HALF_UP) * step).quantize(Decimal("0.01"))
+    return finish(vehicle, formula_raw(vehicle, meters))
+
+
+def route_price(vehicle: dict, rules: dict, anchors: dict, a: Place, b: Place, meters: int,
+                skip_self: bool = False) -> tuple[Decimal, dict]:
+    """Price for a place-to-place route: from nearby hand-set routes where
+    there are any, else the formula."""
+    return anchor_price(vehicle, rules, anchors.get(vehicle["vehicle_type"], []), (a.latitude, a.longitude),
+                        (b.latitude, b.longitude), meters, skip=(a.id, b.id) if skip_self else None)
 
 
 def straight_line_meters(a: Place, b: Place) -> float:
@@ -248,6 +267,7 @@ def preview(db: Session, area_id: int) -> dict:
         for fare in db.scalars(select(PlaceFare).where(PlaceFare.origin_place_id.in_(ids),
                                                        PlaceFare.destination_place_id.in_(ids))):
             fares[(fare.origin_place_id, fare.destination_place_id, fare.vehicle_type)] = fare
+    anchors = load_anchors(db, rules["road_factor"])
     routes = []
     summary = {"new": 0, "change": 0, "same": 0, "manual": 0}
     for a in pinned:
@@ -257,8 +277,9 @@ def preview(db: Session, area_id: int) -> dict:
             meters, source = _distance(stored, a, b, rules["road_factor"])
             prices = {}
             for v in vehicles:
-                calculated = price(v, meters)
                 fare = fares.get((a.id, b.id, v["vehicle_type"]))
+                is_manual = fare is not None and fare.pricing_source == "manual"
+                calculated, basis = route_price(v, rules, anchors, a, b, meters, skip_self=is_manual)
                 if fare is None:
                     action = "new"
                 elif fare.pricing_source == "manual":
@@ -274,6 +295,7 @@ def preview(db: Session, area_id: int) -> dict:
                     "current": str((Decimal(fare.base_amount) * Decimal(fare.vehicle_multiplier))
                                    .quantize(Decimal("0.01"))) if fare else None,
                     "current_active": fare.is_active if fare else None,
+                    "basis": basis_text(basis), "basis_kind": basis["kind"],
                 }
             routes.append({"origin": {"id": a.id, "name": a.name}, "destination": {"id": b.id, "name": b.name},
                            "km": round(meters / 1000, 2), "distance_source": source, "prices": prices})
@@ -288,6 +310,7 @@ def preview(db: Session, area_id: int) -> dict:
         "road_distances": measured, "estimated_distances": len(routes) - measured,
         "map_service": bool(distance_provider()),
         "summary": summary, "routes": routes,
+        "anchors": sum(len(v) for v in anchors.values()),
     }
 
 
@@ -350,24 +373,51 @@ class ApplyIn(BaseModel):
 @router.post("/apply")
 def apply_fares(payload: ApplyIn, db: Session = Depends(get_db),
                 admin: User = Depends(require_super_admin)) -> dict:
-    data = preview(db, payload.service_area_id)
     area_active = db.get(ServiceArea, payload.service_area_id).status == "active"
-    rules = {v["vehicle_type"]: v for v in data["formula"]["vehicles"] if v["enabled"]}
+    rules = {v["vehicle_type"]: v for v in formula(db)["vehicles"] if v["enabled"]}
     edits = {(e.origin_place_id, e.destination_place_id, e.vehicle_type): e.amount for e in payload.edits}
     replace = {(r.origin_place_id, r.destination_place_id, r.vehicle_type) for r in payload.replace_manual}
-    ids = {r["origin"]["id"] for r in data["routes"]}
-    existing = {}
-    if ids:
-        for fare in db.scalars(select(PlaceFare).where(PlaceFare.origin_place_id.in_(ids),
-                                                       PlaceFare.destination_place_id.in_(ids))):
-            existing[(fare.origin_place_id, fare.destination_place_id, fare.vehicle_type)] = fare
     done = {"created": 0, "updated": 0, "kept": 0, "unchanged": 0}
+
+    def existing_fares(ids: set[int]) -> dict:
+        found = {}
+        if ids:
+            for fare in db.scalars(select(PlaceFare).where(PlaceFare.origin_place_id.in_(ids),
+                                                           PlaceFare.destination_place_id.in_(ids))):
+                found[(fare.origin_place_id, fare.destination_place_id, fare.vehicle_type)] = fare
+        return found
+
+    def write(key: tuple, fare: PlaceFare | None, amount: Decimal, source: str) -> None:
+        if fare is None:
+            fare = PlaceFare(origin_place_id=key[0], destination_place_id=key[1], vehicle_type=key[2])
+            db.add(fare)
+            done["created"] += 1
+        else:
+            done["updated"] += 1
+        fare.base_amount = amount
+        fare.vehicle_multiplier = Decimal("1.000")
+        fare.extra_passenger_amount = Decimal(rules[key[2]]["extra_passenger"])
+        # Fares go live with the area; in a draft area they wait, switched off.
+        fare.is_active = area_active
+        fare.pricing_source = source
+
+    # Prices typed by hand are saved first, so they already count as anchors
+    # when the other routes are priced below.
+    _area, area_places = _area_places(db, payload.service_area_id)
+    area_ids = {p.id for p in area_places}
+    existing = existing_fares(area_ids)
+    for key, amount in edits.items():
+        if key[0] in area_ids and key[1] in area_ids and key[2] in rules:
+            write(key, existing.get(key), Decimal(amount), "manual")
+    db.flush()
+    data = preview(db, payload.service_area_id)
+    existing = existing_fares({r["origin"]["id"] for r in data["routes"]})
     for route in data["routes"]:
         for vehicle_type, info in route["prices"].items():
             key = (route["origin"]["id"], route["destination"]["id"], vehicle_type)
             fare = existing.get(key)
             if key in edits:
-                amount, source = Decimal(edits[key]), "manual"
+                continue
             elif fare is not None and fare.pricing_source == "manual" and key not in replace:
                 done["kept"] += 1
                 continue
@@ -375,19 +425,7 @@ def apply_fares(payload: ApplyIn, db: Session = Depends(get_db),
                 done["unchanged"] += 1
                 continue
             else:
-                amount, source = Decimal(info["calculated"]), "auto"
-            if fare is None:
-                fare = PlaceFare(origin_place_id=key[0], destination_place_id=key[1], vehicle_type=vehicle_type)
-                db.add(fare)
-                done["created"] += 1
-            else:
-                done["updated"] += 1
-            fare.base_amount = amount
-            fare.vehicle_multiplier = Decimal("1.000")
-            fare.extra_passenger_amount = Decimal(rules[vehicle_type]["extra_passenger"])
-            # Fares go live with the area; in a draft area they wait, switched off.
-            fare.is_active = area_active
-            fare.pricing_source = source
+                write(key, fare, Decimal(info["calculated"]), "auto")
     db.add(AuditLog(actor_user_id=admin.id, action="fares.calculator_applied", entity_type="service_area",
                     entity_id=str(payload.service_area_id),
                     details=f"Fare calculator applied: {done['created']} new, {done['updated']} updated, "

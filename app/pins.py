@@ -33,7 +33,8 @@ from app.client_ip import client_ip
 from app.config import settings
 from app.contacts import ContactError, clean_phone
 from app.database import get_db
-from app.fare_calculator import _pins, _road_matrix, formula, price, store_distance
+from app.anchor_fares import load_anchors
+from app.fare_calculator import _road_matrix, formula, route_price, store_distance
 from app.geocode import ADO_EKITI_CENTER, MAX_DISTANCE_KM
 from app.models import (
     AuditLog, Driver, Place, PlaceDistance, PlaceFare, PlacePinEvidence, PlaceSuggestion, Ride,
@@ -189,6 +190,7 @@ def reprice_place(db: Session, place: Place) -> dict:
         area = db.get(ServiceArea, place.service_area_id)
         area_active = area is not None and area.status == "active"
         vehicles = [v for v in rules["vehicles"] if v["enabled"]]
+        anchors = load_anchors(db, rules["road_factor"])
 
         def save(a: Place, b: Place, cell: dict | None) -> None:
             row = stored.get((a.id, b.id))
@@ -204,7 +206,7 @@ def reprice_place(db: Session, place: Place) -> dict:
                 fare = fares.get(key)
                 if fare is not None and fare.pricing_source == "manual":
                     continue
-                amount = price(v, meters)
+                amount, _basis = route_price(v, rules, anchors, a, b, meters)
                 if fare is None:
                     fare = PlaceFare(origin_place_id=a.id, destination_place_id=b.id, vehicle_type=v["vehicle_type"])
                     db.add(fare)

@@ -7638,3 +7638,96 @@ def test_staff_cards_rules_and_access(client, monkeypatch):
     assert client.get("/api/v1/staff-cards/verify/ABCDEFGH").status_code == 429
     # ...but photos have their own allowance, so a run of checks doesn't hide them.
     assert client.get("/api/v1/staff-cards/verify/ABCDEFGH/photo").status_code == 404
+
+
+# ---------- Anchor fares: hand-set routes price the trips around them ----------
+import app.anchor_fares as anchors_module
+
+OKADA = {"vehicle_type": "motorcycle", "base": 300, "per_km": 100, "minimum": 400, "round_to": 50,
+         "extra_passenger": 0}
+RULES = {"use_anchors": True, "anchor_near_km": 1.0, "anchor_reach_km": 3.0}
+EKSU, FAJUYI = (7.7000, 5.3000), (7.6800, 5.3000)   # ~2.2 km apart, north to south
+
+
+def _anchor(amount=700, meters=3000, origin=EKSU, destination=FAJUYI):
+    return anchors_module.Anchor(origin_id=1, destination_id=2, origin=origin, destination=destination,
+                                 meters=meters, amount=Decimal(amount), label="EKSU Gate → Fajuyi Park")
+
+
+def _shift(point, meters_north):
+    return (point[0] + meters_north / 111_000, point[1])
+
+
+def test_anchor_price_follows_the_known_route():
+    anchor = _anchor()
+    # Going 600 m past Fajuyi: ₦700 + 0.6 km × ₦100 = ₦760 → ₦750 (nearest ₦50).
+    price, basis = anchors_module.anchor_price(OKADA, RULES, [anchor], EKSU, _shift(FAJUYI, -600), 3600)
+    assert price == Decimal("750.00") and basis["kind"] == "anchor" and basis["extra_km"] == 0.6
+    assert "EKSU Gate → Fajuyi Park" in anchors_module.basis_text(basis) and "0.6 km further" in \
+        anchors_module.basis_text(basis)
+    # Stopping 400 m short: ₦700 − ₦40 = ₦660 → ₦650.
+    price, basis = anchors_module.anchor_price(OKADA, RULES, [anchor], EKSU, _shift(FAJUYI, 400), 2600)
+    assert price == Decimal("650.00") and basis["extra_km"] == -0.4
+    assert "0.4 km shorter" in anchors_module.basis_text(basis)
+    # A much shorter trip never goes below the minimum.
+    price, _ = anchors_module.anchor_price(OKADA, RULES, [anchor], EKSU, _shift(FAJUYI, 900), 200)
+    assert price == Decimal("400.00")
+
+
+def test_anchor_price_fades_to_the_formula():
+    anchor = _anchor(amount=1000, meters=3000)   # riders pay more than the formula's ₦600 here
+    formula_only = anchors_module.finish(OKADA, anchors_module.formula_raw(OKADA, 3000))
+    assert formula_only == Decimal("600.00")
+    # 2 km from both ends: between "near" (1 km) and "reach" (3 km), so the
+    # formula is raised part of the way towards the anchor's +67%.
+    near_start, near_end = _shift(EKSU, 2000), _shift(FAJUYI, -2000)
+    price, basis = anchors_module.anchor_price(OKADA, RULES, [anchor], near_start, near_end, 3000)
+    assert basis["kind"] == "nearby" and 1.2 < basis["factor"] < 1.5 and Decimal("650") <= price <= Decimal("900")
+    assert "like nearby EKSU Gate → Fajuyi Park" in anchors_module.basis_text(basis)
+    # Far away, or with anchors switched off: the plain formula.
+    far = anchors_module.anchor_price(OKADA, RULES, [anchor], _shift(EKSU, 5000), _shift(FAJUYI, -5000), 3000)
+    assert far == (formula_only, {"kind": "formula"})
+    off = anchors_module.anchor_price(OKADA, {**RULES, "use_anchors": False}, [anchor], EKSU, FAJUYI, 3000)
+    assert off == (formula_only, {"kind": "formula"})
+    # A wild anchor can't swing prices more than 2x.
+    wild = _anchor(amount=50_000)
+    price, basis = anchors_module.anchor_price(OKADA, RULES, [wild], near_start, near_end, 3000)
+    assert basis["factor"] <= 2.0
+
+
+def test_anchor_fares_price_dropped_pins_and_calculator_routes(client, monkeypatch):
+    monkeypatch.setattr(settings, "geoapify_api_key", None)
+    admin = login(client, *ADMIN_LOGIN)
+    area_id, (a, b, c), manual_id = _calc_area(client)
+    data = client.get(f"/api/v1/admin/fare-calculator?service_area_id={area_id}", headers=admin).json()
+    formula = data["formula"]
+    assert formula["use_anchors"] is True and formula["anchor_near_km"] == 1.0 and formula["anchor_reach_km"] == 3.0
+    bad = {**formula, "anchor_near_km": 2.0, "anchor_reach_km": 1.5}
+    assert client.put("/api/v1/admin/fare-calculator/formula", json=bad, headers=admin).status_code == 422
+    formula.update(allow_custom_points=True)
+    assert client.put("/api/v1/admin/fare-calculator/formula", json=formula, headers=admin).status_code == 200
+
+    # Set a real okada price A → B by hand; it becomes an anchor at once.
+    applied = client.post("/api/v1/admin/fare-calculator/apply", headers=admin, json={
+        "service_area_id": area_id,
+        "edits": [{"origin_place_id": a, "destination_place_id": b, "vehicle_type": "motorcycle", "amount": 900}],
+    }).json()
+    routes = {(r["origin"]["id"], r["destination"]["id"]): r for r in applied["routes"]}
+    ab, ba = routes[(a, b)]["prices"]["motorcycle"], routes[(b, a)]["prices"]["motorcycle"]
+    assert ab["action"] == "manual" and ab["current"] == "900.00"
+    # The hand-set route shows what it would cost without its own price.
+    assert ab["basis_kind"] != "anchor" or "Calc B → Calc A" not in ab["basis"]
+    # The reverse trip, not set by hand, is priced from it.
+    assert ba["basis_kind"] == "anchor" and "Calc A → Calc B" in ba["basis"] and ba["calculated"] == "900.00"
+    assert applied["anchors"] >= 2
+
+    # A dropped pin 300 m past B, from A, is priced from the A → B anchor.
+    with session_for(client) as db:
+        pb = db.get(Place, b)
+        past_b = {"latitude": pb.latitude + 300 / 111_000, "longitude": pb.longitude, "label": "Blue gate past Calc B"}
+    quote = client.post("/api/v1/point-fare-options", json={"origin": {"place_id": a}, "destination": {"point": past_b}})
+    assert quote.status_code == 200, quote.text
+    okada = next(o for o in quote.json()["options"] if o["vehicle_type"] == "motorcycle")
+    assert okada["priced_from"] == "anchor"
+    # Road distance ≈ (1.11 km + 0.3 km) × 1.35 ≈ 1.9 km vs the anchor's 1.5 km: about 0.4 km more.
+    assert Decimal("900.00") <= Decimal(okada["quoted_fare"]) <= Decimal("1000.00")

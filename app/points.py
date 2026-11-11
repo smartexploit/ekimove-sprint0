@@ -26,7 +26,8 @@ from app.auth import get_current_user
 from app.client_ip import client_ip
 from app.config import settings
 from app.database import get_db
-from app.fare_calculator import formula, price
+from app.anchor_fares import anchor_price, load_anchors
+from app.fare_calculator import formula
 from app.geocode import NOMINATIM_URL, USER_AGENT
 from app.models import Place, RideRequest, ServiceArea, User, Zone
 from app.rate_limit import enforce as enforce_rate_limit
@@ -150,11 +151,16 @@ def distance_quotes(db: Session, origin: dict, destination: dict, passenger_coun
         raise HTTPException(status_code=422, detail="Pickup and destination are the same spot.")
     meters, _source = road_meters(origin, destination, rules["road_factor"])
     booking = booking_rules(db)
+    anchors = load_anchors(db, rules["road_factor"])
     options = []
     for vehicle in rules["vehicles"]:
         if not vehicle["enabled"] or passenger_count > max_passengers(booking, vehicle["vehicle_type"]):
             continue
-        amount = price(vehicle, meters)
+        # Priced from the nearest hand-set route (junction to landmark) where
+        # there is one, else the per-km formula.
+        amount, basis = anchor_price(vehicle, rules, anchors.get(vehicle["vehicle_type"], []),
+                                     (origin["latitude"], origin["longitude"]),
+                                     (destination["latitude"], destination["longitude"]), meters)
         extra = Decimal(vehicle["extra_passenger"])
         if is_motorcycle(vehicle["vehicle_type"]):
             if passenger_count >= 2:
@@ -163,7 +169,7 @@ def distance_quotes(db: Session, origin: dict, destination: dict, passenger_coun
             amount += extra * (passenger_count - 1)
         options.append({"vehicle_type": vehicle["vehicle_type"], "quoted_fare": str(amount.quantize(Decimal("0.01"))),
                         "currency": "NGN", "passenger_count": passenger_count, "pricing": "distance",
-                        "distance_km": round(meters / 1000, 1)})
+                        "priced_from": basis["kind"], "distance_km": round(meters / 1000, 1)})
     return options, meters
 
 
