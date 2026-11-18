@@ -14,11 +14,34 @@ from app.client_ip import client_ip
 from app.contacts import ContactError, clean_email, clean_name, clean_phone, email_taken, password_problem, phone_taken
 from app.rate_limit import enforce as enforce_rate_limit
 from app.database import get_db
+from app.app_settings import HAULAGE_TYPES
 from app.models import Driver, User, Vehicle
 from app import onboarding
 from app.photo_storage import PhotoStorageError, upload_driver_photo, delete_driver_photo
 
 router = APIRouter(tags=["driver applications"])
+
+# What a driver can sign up with: a motorcycle, a car, or a moving vehicle
+# (a big car, van or Dyna truck for moving jobs). Each has a passenger limit.
+MOVING_VEHICLE_TYPES = set(HAULAGE_TYPES)
+DRIVER_VEHICLE_TYPES = {"motorcycle", "car"} | MOVING_VEHICLE_TYPES
+SEAT_LIMITS = {"motorcycle": 2, "car": 4, "big_car": 6, "van": 8, "dyna": 2}
+PLATE_PATTERN = r"[A-Z0-9][A-Z0-9 -]{3,13}[A-Z0-9]"
+
+
+def clean_plate(plate_number: str) -> str:
+    return " ".join(str(plate_number or "").strip().upper().split())
+
+
+def vehicle_problem(vehicle_type: str, capacity: int) -> str | None:
+    """Why this vehicle can't be registered, or None."""
+    if vehicle_type not in DRIVER_VEHICLE_TYPES:
+        return "Choose your vehicle: a motorcycle, a car, or a moving vehicle (big car, van or Dyna truck)."
+    limit = SEAT_LIMITS[vehicle_type]
+    if capacity > limit:
+        name = HAULAGE_TYPES.get(vehicle_type, vehicle_type.replace("_", " ")).split(" (")[0].lower()
+        return f"A {name} can carry {limit} passenger{'s' if limit != 1 else ''} at most"
+    return None
 
 MAX_PHOTO_BYTES = 5 * 1024 * 1024
 ALLOWED_IMAGES = {
@@ -68,11 +91,11 @@ async def submit_driver_application(
     except ContactError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
     vehicle_type = vehicle_type.strip().lower()
-    plate_number = " ".join(plate_number.strip().upper().split())
+    plate_number = clean_plate(plate_number)
 
     if not phone:
         raise HTTPException(status_code=422, detail="Enter a valid name and phone number")
-    if not re.fullmatch(r"[A-Z0-9][A-Z0-9 -]{3,13}[A-Z0-9]", plate_number):
+    if not re.fullmatch(PLATE_PATTERN, plate_number):
         raise HTTPException(status_code=422, detail="Enter the plate number as it appears on the vehicle, "
                                                     "like ABC-123DE (letters, numbers and hyphens only).")
     weak = password_problem(password, name=full_name, phone=phone, email=email)
@@ -81,14 +104,9 @@ async def submit_driver_application(
     enforce_rate_limit("driver-apply", client_ip(request), settings.driver_apply_ip_limit_per_hour, 3600,
                        "Too many applications from this connection. Please try again in an hour.")
 
-    if vehicle_type not in {"motorcycle", "car", "tricycle", "minibus", "big_car", "van", "dyna"}:
-        raise HTTPException(status_code=422, detail="Unsupported vehicle type")
-
-    if vehicle_type == "motorcycle" and capacity > 2:
-        raise HTTPException(status_code=422, detail="A motorcycle can carry 2 passengers at most")
-
-    if vehicle_type == "car" and capacity > 4:
-        raise HTTPException(status_code=422, detail="A car can carry 4 passengers at most")
+    problem = vehicle_problem(vehicle_type, capacity)
+    if problem:
+        raise HTTPException(status_code=422, detail=problem)
 
     details = onboarding.clean_details(
         gender=gender, date_of_birth=date_of_birth, home_address=home_address, town=town,

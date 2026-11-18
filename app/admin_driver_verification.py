@@ -1,16 +1,17 @@
 
+import re
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth import require_staff
 from app.database import get_db
-from app.driver_applications import PRIVATE_UPLOAD_DIR
-from app.models import Driver, User, Vehicle
+from app.driver_applications import PLATE_PATTERN, PRIVATE_UPLOAD_DIR, clean_plate, vehicle_problem
+from app.models import AuditLog, Driver, User, Vehicle
 from app import onboarding
 from app.photo_storage import PHOTO_PREFIX, download_driver_photo
 
@@ -31,7 +32,8 @@ def pending_driver_applications(
     _admin=Depends(require_staff("drivers")),
     db: Session = Depends(get_db),
 ):
-    statement = select(Driver)
+    # Removed drivers no longer appear here; their history stays on record.
+    statement = select(Driver).join(User, User.id == Driver.user_id).where(User.removed_at.is_(None))
 
     if status != "all":
         statement = statement.where(
@@ -179,3 +181,75 @@ def decide_driver_vehicle(
         "is_approved": vehicle.is_approved,
         "message": "Vehicle decision saved",
     }
+
+
+class VehicleUpdate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    vehicle_type: str | None = Field(default=None, min_length=2, max_length=32)
+    plate_number: str | None = Field(default=None, min_length=2, max_length=32)
+    capacity: int | None = Field(default=None, ge=1, le=8)
+
+
+@router.patch("/driver-vehicles/{vehicle_id}")
+def update_driver_vehicle(
+    vehicle_id: int,
+    payload: VehicleUpdate,
+    admin: User = Depends(require_staff("drivers")),
+    db: Session = Depends(get_db),
+):
+    """Correct a vehicle's type, plate or seats (e.g. a car saved as a motorcycle)."""
+    vehicle = db.get(Vehicle, vehicle_id)
+    if vehicle is None or vehicle.plate_number.startswith("REMOVED-"):
+        raise HTTPException(status_code=404, detail="Vehicle not found")
+    before = f"{vehicle.vehicle_type}, {vehicle.plate_number}, {vehicle.capacity} seats"
+    vehicle_type = (payload.vehicle_type or vehicle.vehicle_type).lower()
+    capacity = payload.capacity if payload.capacity is not None else vehicle.capacity
+    problem = vehicle_problem(vehicle_type, capacity)
+    if problem:
+        raise HTTPException(status_code=422, detail=problem)
+    if payload.plate_number is not None:
+        plate = clean_plate(payload.plate_number)
+        if not re.fullmatch(PLATE_PATTERN, plate):
+            raise HTTPException(status_code=422, detail="Enter the plate number as it appears on the vehicle, "
+                                                        "like EKT 123 AB.")
+        clash = db.scalar(select(Vehicle).where(Vehicle.plate_number == plate, Vehicle.id != vehicle.id))
+        if clash is not None:
+            raise HTTPException(status_code=409, detail="Another vehicle already has this plate number.")
+        vehicle.plate_number = plate
+    vehicle.vehicle_type = vehicle_type
+    vehicle.capacity = capacity
+    after = f"{vehicle.vehicle_type}, {vehicle.plate_number}, {vehicle.capacity} seats"
+    if after != before:
+        db.add(AuditLog(actor_user_id=admin.id, action="vehicle.updated", entity_type="vehicle",
+                        entity_id=str(vehicle.id), details=f"{before} -> {after}"))
+    db.commit()
+    return {"id": vehicle.id, "vehicle_type": vehicle.vehicle_type, "plate_number": vehicle.plate_number,
+            "capacity": vehicle.capacity, "is_approved": vehicle.is_approved, "message": "Vehicle details saved"}
+
+
+class RemoveDriverRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    reason: str = Field(min_length=3, max_length=500)
+
+
+@router.post("/drivers/{driver_id}/remove")
+def remove_driver(
+    driver_id: int,
+    payload: RemoveDriverRequest,
+    admin: User = Depends(require_staff("drivers")),
+    db: Session = Depends(get_db),
+):
+    """Remove a driver, approved or not. Their account is closed and their
+    personal details cleared; past trips and payments stay on record."""
+    from app.accounts import _target, remove_account  # avoid an import cycle
+
+    driver = db.get(Driver, driver_id)
+    if driver is None:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    user = _target(db, driver.user_id, admin)
+    if user.role != "driver":
+        raise HTTPException(status_code=409, detail="This person also has a staff or passenger role. "
+                                                    "Remove them from People instead.")
+    remove_account(db, user, admin, payload.reason)
+    db.commit()
+    return {"driver_id": driver.id, "message": "Driver removed"}

@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { CalendarClock, CheckCircle2 } from 'lucide-react'
+import { CalendarClock, Car, CheckCircle2, Motorbike, Truck } from 'lucide-react'
 import AuthLayout from '../../layouts/AuthLayout.jsx'
 import Alert from '../../components/ui/Alert.jsx'
 import PasswordInput from '../../components/ui/PasswordInput.jsx'
 import { apiUrl } from '../../services/authService.js'
 import DriverDetailsFields from '../../components/driver/DriverDetailsFields.jsx'
 import { REVIEW_HOURS, detailsProblem } from '../../utils/driverOnboarding.js'
+import { MOVING_VEHICLES, SEAT_LIMITS } from '../../utils/vehicles.js'
 import {
   NAME_MAX, PASSWORD_MAX, PASSWORD_MIN, emailProblem, nameProblem, nameTyping, nigerianMobile, passwordProblem,
   phoneProblem, phoneTyping,
@@ -19,11 +20,22 @@ const filterWith = (rule) => (event) => {
 }
 const plateTyping = (value) => value.toUpperCase().replace(/[^A-Z0-9 -]/g, '').slice(0, 15)
 
+const VEHICLE_KINDS = [
+  ['motorcycle', 'Motorcycle', 'Okada trips and small deliveries', Motorbike],
+  ['car', 'Car', 'Rides for up to 4 passengers', Car],
+  ['moving', 'Moving vehicle', 'Big car, van or Dyna truck for moving jobs', Truck],
+]
+const DEFAULT_SEATS = { motorcycle: 1, car: 4, big_car: 2, van: 2, dyna: 1 }
+
 export default function DriverApplicationPage() {
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [loading, setLoading] = useState(false)
-  const [vehicleType, setVehicleType] = useState('motorcycle')
+  // No vehicle is preselected: every driver must choose what they drive.
+  const [vehicleKind, setVehicleKind] = useState('')
+  const [movingType, setMovingType] = useState('')
+  const [seats, setSeats] = useState('')
+  const vehicleType = vehicleKind === 'moving' ? movingType : vehicleKind
   const [dueLabel, setDueLabel] = useState('')
 
   async function submit(event) {
@@ -36,6 +48,8 @@ export default function DriverApplicationPage() {
     const email = String(form.get('email') || '').trim().toLowerCase()
     const plate = String(form.get('plate_number') || '').trim().replace(/\s+/g, ' ')
     const problem =
+      (vehicleKind ? '' : 'Choose your vehicle: a motorcycle, a car or a moving vehicle.') ||
+      (vehicleType ? '' : 'Choose which moving vehicle you drive: a big car, a van or a Dyna truck.') ||
       nameProblem(form.get('full_name'), 'full legal name') ||
       phoneProblem(form.get('phone')) ||
       (email ? emailProblem(email) : '') ||
@@ -46,6 +60,8 @@ export default function DriverApplicationPage() {
       setError(problem)
       return
     }
+    form.delete('vehicle_kind')
+    form.set('vehicle_type', vehicleType)
     form.set('full_name', String(form.get('full_name')).trim().replace(/\s+/g, ' '))
     form.set('phone', nigerianMobile(form.get('phone')))
     form.set('email', email)
@@ -75,6 +91,9 @@ export default function DriverApplicationPage() {
       setMessage(data.message || 'Application submitted for review.')
       setDueLabel(data.review_due_label || '')
       formElement.reset()
+      setVehicleKind('')
+      setMovingType('')
+      setSeats('')
       window.scrollTo?.({ top: 0 })
     } catch (err) {
       setError(err.message || 'Unable to reach EkiMove. Please try again.')
@@ -181,20 +200,42 @@ export default function DriverApplicationPage() {
 
         <fieldset className="stack" style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
           <legend className="section-title" style={{ marginBottom: 14 }}>Your vehicle</legend>
+          <fieldset className="choice-list" aria-describedby="vehicle-kind-hint">
+            <legend className="choice-legend">What do you drive?</legend>
+            {VEHICLE_KINDS.map(([kind, title, sub, Icon]) => (
+              <label className="choice" key={kind}>
+                <input type="radio" name="vehicle_kind" value={kind} checked={vehicleKind === kind} required
+                  onChange={() => {
+                    setVehicleKind(kind)
+                    setMovingType('')
+                    setSeats(kind === 'moving' ? '' : String(DEFAULT_SEATS[kind]))
+                  }} />
+                <span className={`choice-icon ${kind === 'motorcycle' ? '' : 'choice-icon-warm'}`}><Icon size={24} aria-hidden="true" /></span>
+                <span className="choice-body">
+                  <span className="choice-title">{title}</span>
+                  <span className="choice-sub">{sub}</span>
+                </span>
+              </label>
+            ))}
+          </fieldset>
+          <p className="field-hint" id="vehicle-kind-hint">
+            Choose the vehicle you’ll use for EkiMove. We check it at inspection, so it must match.
+          </p>
+
           <div className="form-grid">
-            <label className="field" htmlFor="vehicle-type">
-              <span className="field-label">Vehicle type</span>
-              <select id="vehicle-type" className="select" name="vehicle_type" value={vehicleType}
-                onChange={(event) => setVehicleType(event.target.value)} required>
-                <option value="motorcycle">Motorcycle</option>
-                <option value="tricycle">Tricycle</option>
-                <option value="car">Car</option>
-                <option value="minibus">Minibus</option>
-                <option value="big_car">Big car (SUV / Sienna) for loads</option>
-                <option value="van">Van or bus for loads</option>
-                <option value="dyna">Dyna truck for loads</option>
-              </select>
-            </label>
+            {vehicleKind === 'moving' && (
+              <label className="field" htmlFor="moving-type">
+                <span className="field-label">Moving vehicle</span>
+                <select id="moving-type" className="select" value={movingType} required
+                  onChange={(event) => {
+                    setMovingType(event.target.value)
+                    setSeats(String(DEFAULT_SEATS[event.target.value] || 1))
+                  }}>
+                  <option value="" disabled>Choose one</option>
+                  {MOVING_VEHICLES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select>
+              </label>
+            )}
 
             <label className="field" htmlFor="vehicle-plate">
               <span className="field-label">Plate number</span>
@@ -204,9 +245,13 @@ export default function DriverApplicationPage() {
 
             <label className="field" htmlFor="vehicle-capacity">
               <span className="field-label">Passenger seats</span>
-              <input id="vehicle-capacity" className="input" name="capacity" type="number" min="1" max="8" defaultValue="1" aria-describedby="vehicle-capacity-hint" required />
+              <input id="vehicle-capacity" className="input" name="capacity" type="number" min="1"
+                max={SEAT_LIMITS[vehicleType] || 8} value={seats} onChange={(event) => setSeats(event.target.value)}
+                aria-describedby="vehicle-capacity-hint" required />
               <span className="field-hint" id="vehicle-capacity-hint">
-                Passengers you can carry, not counting you. Motorcycle: 1 or 2. Car: up to 4.
+                {vehicleKind === 'moving'
+                  ? 'Seats for customers riding along with their load, not counting you.'
+                  : 'Passengers you can carry, not counting you. Motorcycle: 1 or 2. Car: up to 4.'}
               </span>
             </label>
           </div>

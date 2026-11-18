@@ -7745,3 +7745,79 @@ def test_fare_calculator_lists_places_it_leaves_out(client):
     # ...and places left out because they're switched off say so.
     assert any(p["name"] == "Calc Off" and p["reason"] == "switched off" for p in data["hidden_places"])
     assert not any(p["name"] == "Calc Off" for p in data["missing_pins"])
+
+
+# --- Driver vehicles: motorcycle, car or moving vehicle; fixing and removing ---
+
+def _pending_driver(client, admin, name):
+    rows = client.get("/api/v1/admin/driver-applications/pending?status=all", headers=admin).json()
+    return next(r for r in rows if r["full_name"] == name)
+
+
+@pytest.mark.parametrize("vehicle_type,capacity,ok", [
+    ("motorcycle", "1", True), ("car", "4", True), ("big_car", "6", True), ("van", "8", True),
+    ("dyna", "2", True), ("car", "5", False), ("dyna", "3", False), ("tricycle", "1", False),
+    ("minibus", "4", False), ("", "1", False),
+])
+def test_drivers_register_a_motorcycle_car_or_moving_vehicle(client, monkeypatch, vehicle_type, capacity, ok):
+    licence = {} if vehicle_type == "motorcycle" else {"licence_number": "ABC12345678"}
+    response = apply_as_driver(client, monkeypatch, vehicle_type=vehicle_type or None, capacity=capacity, **licence)
+    assert (response.status_code == 201) == ok, response.text
+    if ok:
+        admin = login(client, *ADMIN_LOGIN)
+        assert _pending_driver(client, admin, "Femi Ogunleye")["vehicles"][0]["vehicle_type"] == vehicle_type
+
+
+def test_admin_fixes_a_car_saved_as_a_motorcycle(client, monkeypatch):
+    assert apply_as_driver(client, monkeypatch, licence_number=None).status_code == 201
+    admin = login(client, *ADMIN_LOGIN)
+    vehicle = _pending_driver(client, admin, "Femi Ogunleye")["vehicles"][0]
+    assert vehicle["vehicle_type"] == "motorcycle"
+    url = f"/api/v1/admin/driver-vehicles/{vehicle['id']}"
+    assert client.patch(url, headers=admin, json={"vehicle_type": "car", "capacity": 5}).status_code == 422
+    assert client.patch(url, headers=admin, json={"vehicle_type": "tricycle"}).status_code == 422
+    saved = client.patch(url, headers=admin, json={"vehicle_type": "car", "capacity": 4, "plate_number": " ekt 771 ab "})
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["vehicle_type"] == "car" and saved.json()["plate_number"] == "EKT 771 AB"
+    fixed = _pending_driver(client, admin, "Femi Ogunleye")
+    assert fixed["vehicles"][0]["vehicle_type"] == "car"
+    assert "licence number" in " ".join(fixed["details_missing"]).lower()
+    # A plate already on another vehicle is refused.
+    other = apply_as_driver(client, monkeypatch, phone="08000000772", email="b@example.com", plate_number="EKT-772-AB")
+    assert other.status_code == 201
+    assert client.patch(url, headers=admin, json={"plate_number": "EKT-772-AB"}).status_code == 409
+    with session_for(client) as db:
+        assert db.scalar(select(AuditLog).where(AuditLog.action == "vehicle.updated")) is not None
+
+
+def test_admin_removes_a_driver_approved_or_not(client, monkeypatch):
+    assert apply_as_driver(client, monkeypatch).status_code == 201
+    admin = login(client, *ADMIN_LOGIN)
+    driver = _pending_driver(client, admin, "Femi Ogunleye")
+    url = f"/api/v1/admin/drivers/{driver['driver_id']}/remove"
+    assert client.post(url, headers=admin, json={"reason": ""}).status_code == 422
+    removed = client.post(url, headers=admin, json={"reason": "Asked to leave"})
+    assert removed.status_code == 200, removed.text
+    rows = client.get("/api/v1/admin/driver-applications/pending?status=all", headers=admin).json()
+    assert all(r["driver_id"] != driver["driver_id"] for r in rows)
+    assert client.post(url, headers=admin, json={"reason": "again"}).status_code == 409
+    # The phone and plate are free to register again.
+    again = apply_as_driver(client, monkeypatch)
+    assert again.status_code == 201, again.text
+
+    # An approved driver can be removed too, by staff with driver access.
+    approved = _pending_driver(client, admin, "Femi Ogunleye")
+    client.post(f"/api/v1/admin/driver-applications/{approved['driver_id']}/decision", headers=admin,
+                json={"decision": "approve"})
+    client.post(f"/api/v1/admin/driver-vehicles/{approved['vehicles'][0]['id']}/decision", headers=admin,
+                json={"decision": "approve"})
+    _member, staff = add_staff_member(client, admin, ["drivers"])
+    _member2, support = add_staff_member(client, admin, ["support"], email="sade@ekimove.com.ng")
+    url = f"/api/v1/admin/drivers/{approved['driver_id']}/remove"
+    assert client.post(url, headers=support, json={"reason": "No access"}).status_code == 403
+    assert client.post(url, headers=staff, json={"reason": "Failed inspection"}).status_code == 200
+    with session_for(client) as db:
+        gone = db.get(Driver, approved["driver_id"])
+        assert gone.verification_status == "suspended"
+        vehicle = db.scalar(select(Vehicle).where(Vehicle.driver_id == gone.id))
+        assert vehicle.is_approved is False and vehicle.plate_number.startswith("REMOVED-")

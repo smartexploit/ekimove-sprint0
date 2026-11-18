@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { CalendarPlus, Camera, RefreshCw, ShieldCheck } from 'lucide-react'
+import { CalendarPlus, Camera, Pencil, RefreshCw, ShieldCheck, UserX } from 'lucide-react'
 import AdminShell from '../../layouts/AdminShell.jsx'
 import Alert from '../../components/ui/Alert.jsx'
 import StatusBadge from '../../components/ui/StatusBadge.jsx'
@@ -8,7 +8,7 @@ import DriverInviteForm from '../../components/admin/DriverInviteForm.jsx'
 import { INVITE_KINDS } from '../../utils/driverOnboarding.js'
 import { apiRequest, getAccessToken } from '../../services/authService.js'
 import { initials } from '../../utils/format.js'
-import { vehicleLabel } from '../../utils/vehicles.js'
+import { MOVING_VEHICLES, SEAT_LIMITS, vehicleGroup, vehicleLabel } from '../../utils/vehicles.js'
 
 const INVITE_STATUS = {
   invited: 'Invited, no answer yet',
@@ -50,6 +50,124 @@ function DetailsList({ application }) {
   )
 }
 
+const GROUP_LABELS = { motorcycle: 'Motorcycle', car: 'Car', moving: 'Moving vehicle', other: 'Other (old type)' }
+const VEHICLE_FILTERS = [
+  ['all', 'All vehicles'],
+  ['motorcycle', 'Motorcycles'],
+  ['car', 'Cars'],
+  ['moving', 'Moving vehicles'],
+]
+const TYPE_OPTIONS = [
+  ['motorcycle', 'Motorcycle'],
+  ['car', 'Car'],
+  ...MOVING_VEHICLES.map(([value, label]) => [value, `Moving: ${label}`]),
+]
+
+/** Correct a vehicle's type, plate or seats (e.g. a car saved as a motorcycle). */
+function VehicleEditor({ vehicle, onSaved, onCancel }) {
+  const known = TYPE_OPTIONS.some(([value]) => value === vehicle.vehicle_type)
+  const [type, setType] = useState(known ? vehicle.vehicle_type : '')
+  const [plate, setPlate] = useState(vehicle.plate_number)
+  const [seats, setSeats] = useState(String(vehicle.capacity))
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  async function save(event) {
+    event.preventDefault()
+    setSaving(true)
+    setError('')
+    try {
+      await apiRequest(`/api/v1/admin/driver-vehicles/${vehicle.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ vehicle_type: type, plate_number: plate, capacity: Number(seats) }),
+      })
+      onSaved(`${vehicleLabel(type)} ${plate.toUpperCase()} saved.`)
+    } catch (err) {
+      setError(err.message || 'Could not save the vehicle.')
+      setSaving(false)
+    }
+  }
+
+  return (
+    <form className="stack stack-sm" onSubmit={save}>
+      <div className="form-grid">
+        <label className="field">
+          <span className="field-label">Vehicle type</span>
+          <select className="select" value={type} required
+            onChange={(event) => {
+              setType(event.target.value)
+              setSeats((s) => String(Math.min(Number(s) || 1, SEAT_LIMITS[event.target.value] || 8)))
+            }}>
+            <option value="" disabled>Choose one</option>
+            {TYPE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
+        </label>
+        <label className="field">
+          <span className="field-label">Plate number</span>
+          <input className="input" value={plate} maxLength={15} required
+            onChange={(event) => setPlate(event.target.value.toUpperCase())} />
+        </label>
+        <label className="field">
+          <span className="field-label">Passenger seats</span>
+          <input className="input" type="number" min="1" max={SEAT_LIMITS[type] || 8} value={seats} required
+            onChange={(event) => setSeats(event.target.value)} />
+        </label>
+      </div>
+      <Alert tone="error">{error}</Alert>
+      <div className="row">
+        <button type="submit" className="btn btn-primary btn-sm" disabled={saving || !type}>
+          {saving ? 'Saving…' : 'Save vehicle'}
+        </button>
+        <button type="button" className="btn btn-sm btn-quiet" onClick={onCancel} disabled={saving}>Cancel</button>
+      </div>
+    </form>
+  )
+}
+
+/** Remove a driver for good, with a reason kept in the audit log. */
+function RemoveDriver({ application, onRemoved, onCancel }) {
+  const [reason, setReason] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  async function remove(event) {
+    event.preventDefault()
+    setSaving(true)
+    setError('')
+    try {
+      await apiRequest(`/api/v1/admin/drivers/${application.driver_id}/remove`, {
+        method: 'POST', body: JSON.stringify({ reason: reason.trim() }),
+      })
+      onRemoved(`${application.full_name} has been removed. Their past trips and payments stay on record.`)
+    } catch (err) {
+      setError(err.message || 'Could not remove the driver.')
+      setSaving(false)
+    }
+  }
+
+  return (
+    <form className="remove-driver stack stack-sm" onSubmit={remove}>
+      <p style={{ fontWeight: 700 }}>Remove {application.full_name}?</p>
+      <p className="small muted">
+        They’re signed out, can’t sign in or go online again, and their personal details are cleared.
+        Their phone number and plate become free to register again. This can’t be undone.
+      </p>
+      <label className="field">
+        <span className="field-label">Reason (kept in the audit log)</span>
+        <input className="input" value={reason} minLength={3} maxLength={500} required autoFocus
+          onChange={(event) => setReason(event.target.value)} placeholder="e.g. Failed vehicle inspection" />
+      </label>
+      <Alert tone="error">{error}</Alert>
+      <div className="row">
+        <button type="submit" className="btn btn-danger btn-sm" disabled={saving || reason.trim().length < 3}>
+          {saving ? 'Removing…' : 'Remove driver'}
+        </button>
+        <button type="button" className="btn btn-sm btn-quiet" onClick={onCancel} disabled={saving}>Keep driver</button>
+      </div>
+    </form>
+  )
+}
+
 const FILTERS = [
   ['pending', 'Pending'],
   ['approved', 'Approved'],
@@ -69,6 +187,9 @@ export default function AdminDriverVerificationPage() {
   const [inviting, setInviting] = useState(null) // array of driver ids
   const [selected, setSelected] = useState([])
   const [reasons, setReasons] = useState({})
+  const [vehicleFilter, setVehicleFilter] = useState('all')
+  const [editingVehicle, setEditingVehicle] = useState(null)
+  const [removing, setRemoving] = useState(null)
 
   const loadApplications = useCallback(async () => {
     setLoading(true)
@@ -234,6 +355,18 @@ export default function AdminDriverVerificationPage() {
     loadApplications()
   }
 
+  function changed(text) {
+    setEditingVehicle(null)
+    setRemoving(null)
+    setError('')
+    setMessage(text)
+    loadApplications()
+  }
+
+  const shown = vehicleFilter === 'all'
+    ? applications
+    : applications.filter((a) => (a.vehicles || []).some((v) => vehicleGroup(v.vehicle_type) === vehicleFilter))
+
   const toggle = (id) => setSelected((list) => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id]))
   const bulkInvite = inviting && inviting.length > 1
 
@@ -260,6 +393,18 @@ export default function AdminDriverVerificationPage() {
               onClick={() => setSelectedStatus(status)}
             >
               {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="filter-pills" role="group" aria-label="Filter by vehicle">
+          {VEHICLE_FILTERS.map(([group, label]) => (
+            <button key={group} type="button" className="pill" aria-pressed={vehicleFilter === group}
+              onClick={() => setVehicleFilter(group)}>
+              {label}
+              {!loading && group !== 'all' && (
+                <> ({applications.filter((a) => (a.vehicles || []).some((v) => vehicleGroup(v.vehicle_type) === group)).length})</>
+              )}
             </button>
           ))}
         </div>
@@ -293,6 +438,10 @@ export default function AdminDriverVerificationPage() {
           </div>
         )}
 
+        {!loading && !error && applications.length > 0 && shown.length === 0 && (
+          <p className="muted">No {selectedStatus === 'all' ? '' : `${selectedStatus} `}drivers with this kind of vehicle.</p>
+        )}
+
         {!loading && !error && applications.length === 0 && (
           <div className="card empty">
             <span className="empty-icon"><ShieldCheck size={28} aria-hidden="true" /></span>
@@ -305,7 +454,7 @@ export default function AdminDriverVerificationPage() {
 
         {!loading && applications.length > 0 && (
           <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(min(340px, 100%), 1fr))' }}>
-            {applications.map((application) => (
+            {shown.map((application) => (
               <article className="card stack" key={application.driver_id} aria-labelledby={`driver-${application.driver_id}`}>
                 <div className="row" style={{ flexWrap: 'nowrap', alignItems: 'flex-start' }}>
                   <span className="avatar avatar-lg" aria-hidden="true">{initials(application.full_name)}</span>
@@ -448,9 +597,15 @@ export default function AdminDriverVerificationPage() {
                             <VehicleIcon type={vehicle.vehicle_type} size={22} />
                           </span>
                           <div style={{ flexGrow: 1, minWidth: 0 }}>
-                            <p style={{ fontWeight: 800 }}>{vehicleLabel(vehicle.vehicle_type)}</p>
+                            <p style={{ fontWeight: 800 }}>
+                              {vehicleGroup(vehicle.vehicle_type) === 'moving'
+                                ? `Moving vehicle · ${vehicleLabel(vehicle.vehicle_type)}`
+                                : vehicleGroup(vehicle.vehicle_type) === 'other'
+                                  ? `${vehicleLabel(vehicle.vehicle_type)} (old type: correct it)`
+                                  : GROUP_LABELS[vehicleGroup(vehicle.vehicle_type)]}
+                            </p>
                             <p className="muted small">
-                              <span className="plate">{vehicle.plate_number}</span> · {vehicle.capacity} seats
+                              <span className="plate">{vehicle.plate_number}</span> · {vehicle.capacity} {vehicle.capacity === 1 ? 'seat' : 'seats'}
                             </p>
                           </div>
                           <StatusBadge status={vehicle.is_approved ? 'approved' : 'pending'} kind="verification" />
@@ -472,13 +627,33 @@ export default function AdminDriverVerificationPage() {
                           >
                             Revoke approval
                           </button>
+                          {editingVehicle !== vehicle.id && (
+                            <button type="button" className="btn btn-sm" disabled={Boolean(busy)}
+                              onClick={() => setEditingVehicle(vehicle.id)}>
+                              <Pencil size={16} aria-hidden="true" /> Correct details
+                            </button>
+                          )}
                         </div>
+                        {editingVehicle === vehicle.id && (
+                          <VehicleEditor vehicle={vehicle} onSaved={changed} onCancel={() => setEditingVehicle(null)} />
+                        )}
                       </div>
                     ))
                   ) : (
                     <p className="muted small">No vehicle details submitted.</p>
                   )}
                 </div>
+
+                {removing === application.driver_id ? (
+                  <RemoveDriver application={application} onRemoved={changed} onCancel={() => setRemoving(null)} />
+                ) : (
+                  <div className="remove-driver-row">
+                    <button type="button" className="btn btn-danger-outline btn-sm" disabled={Boolean(busy)}
+                      onClick={() => setRemoving(application.driver_id)}>
+                      <UserX size={16} aria-hidden="true" /> Remove driver
+                    </button>
+                  </div>
+                )}
               </article>
             ))}
           </div>

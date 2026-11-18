@@ -403,13 +403,23 @@ def admin_reactivate(user_id: int, payload: AccountAction, db: Session = Depends
 def admin_remove(user_id: int, payload: AccountAction, db: Session = Depends(get_db),
                  admin: User = Depends(require_super_admin)) -> dict:
     user = _target(db, user_id, admin)
+    remove_account(db, user, admin, payload.reason)
+    db.commit()
+    return _person_row(db, user)
+
+
+def remove_account(db: Session, user: User, admin: User, reason: str) -> None:
+    """Close an account for good, keeping its trip and payment history.
+    The caller commits. A driver also comes off the road: their profile is
+    marked suspended, their vehicles lose approval and their plate numbers
+    are freed so the vehicle can be registered again."""
     if _active_trip(db, user):
         raise HTTPException(status_code=409, detail="This person has a trip in progress. "
                                                     "Wait for it to finish or cancel it first.")
     original = user.phone or user.email or ""
     user.is_active = False
     user.removed_at = datetime.now(timezone.utc)
-    user.suspension_reason = payload.reason
+    user.suspension_reason = reason
     user.full_name = "Removed account"
     user.email = None
     user.password_hash = None
@@ -426,10 +436,14 @@ def admin_remove(user_id: int, payload: AccountAction, db: Session = Depends(get
     db.execute(delete(PushSubscription).where(PushSubscription.user_id == user.id))
     db.execute(update(PromoCode).where(PromoCode.owner_user_id == user.id).values(is_active=False))
     _take_driver_offline(db, user)
+    driver = db.scalar(select(Driver).where(Driver.user_id == user.id))
+    if driver is not None:
+        driver.verification_status = "suspended"
+        for vehicle in db.scalars(select(Vehicle).where(Vehicle.driver_id == driver.id)):
+            vehicle.is_approved = False
+            vehicle.plate_number = f"REMOVED-{vehicle.id}"
     db.add(AuditLog(actor_user_id=admin.id, action="account.removed", entity_type="user",
-                    entity_id=str(user.id), details=f"{payload.reason} (contact ending {original[-4:]})"))
-    db.commit()
-    return _person_row(db, user)
+                    entity_id=str(user.id), details=f"{reason} (contact ending {original[-4:]})"))
 
 
 # Letters and digits that are hard to confuse when read out over the phone.
