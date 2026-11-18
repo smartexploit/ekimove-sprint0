@@ -108,22 +108,40 @@ def _send_termii(to: str, body: str) -> None:
         raise MessagingError(str(data.get("message") or f"HTTP {response.status_code}"))
 
 
+def _sms_backup() -> str | None:
+    """The other SMS service, when its key is set too: used if the main one fails."""
+    main = sms_provider()
+    if main == "bulksmsnigeria" and settings.termii_api_key:
+        return "termii"
+    if main == "termii" and settings.bulksms_api_token:
+        return "bulksmsnigeria"
+    return None
+
+
 def send_sms(phone: str, body: str) -> None:
     provider = sms_provider()
     if provider is None:
         raise MessagingError("Text messages are not set up.")
     to = international_number(phone)
-    try:
-        if provider == "bulksmsnigeria":
-            _send_bulksmsnigeria(to, body)
-        else:
-            _send_termii(to, body)
-    except requests.RequestException as exc:
-        logger.warning("SMS provider unreachable: %s", exc)
-        raise MessagingError("The text message service couldn't be reached.") from None
-    except MessagingError as exc:
-        logger.warning("SMS provider refused a message: %s", exc)
-        raise
+    last_error: MessagingError | None = None
+    for name in (provider, _sms_backup()):
+        if name is None:
+            continue
+        try:
+            if name == "bulksmsnigeria":
+                _send_bulksmsnigeria(to, body)
+            else:
+                _send_termii(to, body)
+            if name != provider:
+                logger.warning("SMS sent through the backup service (%s) after %s failed", name, provider)
+            return
+        except requests.RequestException as exc:
+            logger.warning("SMS service %s unreachable: %s", name, exc)
+            last_error = MessagingError("The text message service couldn't be reached.")
+        except MessagingError as exc:
+            logger.warning("SMS service %s refused a message: %s", name, exc)
+            last_error = exc
+    raise last_error or MessagingError("The text message couldn't be sent.")
 
 
 def _send_brevo(to: str, subject: str, text: str, html: str | None = None) -> None:

@@ -7820,3 +7820,79 @@ def test_admin_removes_a_driver_approved_or_not(client, monkeypatch):
         assert gone.verification_status == "suspended"
         vehicle = db.scalar(select(Vehicle).where(Vehicle.driver_id == gone.id))
         assert vehicle.is_approved is False and vehicle.plate_number.startswith("REMOVED-")
+
+
+# --- Slow texts: earlier codes still work; a backup SMS service ---
+
+def _age_codes(client, seconds):
+    from datetime import timedelta
+    with session_for(client) as db:
+        for record in db.scalars(select(VerificationCode)).all():
+            record.created_at = record.created_at - timedelta(seconds=seconds)
+            record.expires_at = record.expires_at - timedelta(seconds=seconds)
+        db.commit()
+
+
+def test_a_late_text_code_still_works_after_asking_again(client, outbox):
+    client.post("/api/v1/auth/password-reset/request", json={"identifier": "08000000001"})
+    first = last_code(outbox)
+    _age_codes(client, 90)
+    client.post("/api/v1/auth/password-reset/request", json={"identifier": "08000000001"})
+    second = last_code(outbox)
+    assert len(outbox) == 2
+    # The first text arrives late and is typed in: it works.
+    done = client.post("/api/v1/auth/password-reset/confirm", json={
+        "identifier": "08000000001", "code": first, "new_password": "Brand-New-Password-9!"})
+    assert done.status_code == 200, done.text
+    # Using one ends the others.
+    again = client.post("/api/v1/auth/password-reset/confirm", json={
+        "identifier": "08000000001", "code": second, "new_password": "Other-New-Password-9!"})
+    assert again.status_code == 400
+
+
+def test_expired_codes_stop_working(client, outbox):
+    client.post("/api/v1/auth/password-reset/request", json={"identifier": "08000000001"})
+    code = last_code(outbox)
+    _age_codes(client, 11 * 60)
+    response = client.post("/api/v1/auth/password-reset/confirm", json={
+        "identifier": "08000000001", "code": code, "new_password": "Brand-New-Password-9!"})
+    assert response.status_code == 400 and "expired" in response.json()["detail"]
+
+
+class _Reply:
+    def __init__(self, status, data):
+        self.status_code, self._data = status, data
+
+    def json(self):
+        return self._data
+
+
+def test_sms_uses_the_backup_service_when_the_main_one_fails(monkeypatch):
+    import requests as requests_module
+    from app import messaging
+
+    calls = []
+
+    def fake_post(url, **kwargs):
+        calls.append(url)
+        if "bulksmsnigeria" in url:
+            return _Reply(500, {"error": {"message": "Route down"}})
+        return _Reply(200, {"message_id": "abc", "message": "Successfully Sent"})
+
+    monkeypatch.setattr(messaging.requests, "post", fake_post)
+    monkeypatch.setattr(settings, "sms_provider", "bulksmsnigeria")
+    monkeypatch.setattr(settings, "bulksms_api_token", "bulk-token")
+    monkeypatch.setattr(settings, "termii_api_key", None)
+    with pytest.raises(messaging.MessagingError):
+        messaging.send_sms("08000000001", "Your EkiMove code is 123456.")
+    assert len(calls) == 1
+    monkeypatch.setattr(settings, "termii_api_key", "termii-key")
+    messaging.send_sms("08000000001", "Your EkiMove code is 123456.")
+    assert "termii" in calls[-1] and len(calls) == 3
+
+    def unreachable(url, **kwargs):
+        raise requests_module.ConnectionError("down")
+
+    monkeypatch.setattr(messaging.requests, "post", unreachable)
+    with pytest.raises(messaging.MessagingError):
+        messaging.send_sms("08000000001", "Your EkiMove code is 123456.")

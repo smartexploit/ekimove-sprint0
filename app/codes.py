@@ -49,6 +49,9 @@ router = APIRouter(prefix="/api/v1", tags=["verification codes"])
 CODE_MINUTES = 10
 MAX_ATTEMPTS = 5
 RESEND_SECONDS = 60
+# How many recent codes stay valid at once (a slow text can still be used
+# after the person asked for another).
+LIVE_CODES = 3
 MAX_PER_HOUR = 5
 # Each phone number or address gets at most this many codes a day, so a
 # 6-digit code can't be ground down by asking again and again.
@@ -144,12 +147,9 @@ def issue_code(db: Session, *, user: User | None, purpose: str, channel: str, de
             raise HTTPException(status_code=503, detail="Text message codes are busy right now. Please try again "
                                                         "later, or message EkiMove support.")
 
-    # Older unused codes for the same thing stop working.
-    for old in db.scalars(select(VerificationCode).where(
-        VerificationCode.destination == destination, VerificationCode.purpose == purpose,
-        VerificationCode.used_at.is_(None),
-    )).all():
-        old.used_at = now
+    # Earlier codes keep working until they expire: texts are sometimes slow,
+    # and a code that arrives after the person asked again must still work.
+    # check_code accepts any of the last LIVE_CODES live codes.
 
     code = f"{secrets.randbelow(1_000_000):06d}"
     db.add(VerificationCode(
@@ -173,28 +173,36 @@ def issue_code(db: Session, *, user: User | None, purpose: str, channel: str, de
 
 
 def check_code(db: Session, *, user: User, purpose: str, code: str, destination: str | None = None) -> VerificationCode:
-    """Accept the latest live code for this account and purpose, or raise 400."""
+    """Accept any of the latest live codes for this account and purpose, or
+    raise 400. Wrong tries count against the newest code; a match (or too
+    many wrong tries) ends all of them."""
     query = select(VerificationCode).where(
         VerificationCode.user_id == user.id, VerificationCode.purpose == purpose, VerificationCode.used_at.is_(None),
     )
     if destination is not None:
         query = query.where(VerificationCode.destination == destination)
-    record = db.scalars(query.order_by(VerificationCode.id.desc())).first()
     now = _now()
-    if record is None or _aware(record.expires_at) < now:
-        raise HTTPException(status_code=400, detail="This code has expired or was replaced. Ask for a new one.")
-    record.attempts += 1
+    recent = db.scalars(query.order_by(VerificationCode.id.desc()).limit(LIVE_CODES)).all()
+    live = [record for record in recent if _aware(record.expires_at) >= now]
+    if not live:
+        raise HTTPException(status_code=400, detail="This code has expired. Ask for a new one.")
+    newest = live[0]
+    newest.attempts += 1
     supplied = "".join(ch for ch in str(code or "") if ch in "0123456789")
-    if not hmac.compare_digest(record.code_hash, _hash(supplied, record.destination, purpose)):
-        if record.attempts >= MAX_ATTEMPTS:
-            record.used_at = now
+    match = next((record for record in live
+                  if hmac.compare_digest(record.code_hash, _hash(supplied, record.destination, purpose))), None)
+    if match is None:
+        if newest.attempts >= MAX_ATTEMPTS:
+            for record in live:
+                record.used_at = now
             db.commit()
             raise HTTPException(status_code=400, detail="Too many wrong tries. Ask for a new code.")
         db.commit()
-        left = MAX_ATTEMPTS - record.attempts
+        left = MAX_ATTEMPTS - newest.attempts
         raise HTTPException(status_code=400, detail=f"That code isn't right. {left} {'try' if left == 1 else 'tries'} left.")
-    record.used_at = now
-    return record
+    for record in live:
+        record.used_at = now
+    return match
 
 
 def _mark_verified(user: User, record: VerificationCode) -> None:
@@ -273,7 +281,7 @@ def confirm_password_reset(payload: ResetConfirm, request: Request, db: Session 
     _limit_code_checks(request)
     user = find_user(db, payload.identifier)
     if user is None or not user.is_active or user.removed_at is not None:
-        raise HTTPException(status_code=400, detail="This code has expired or was replaced. Ask for a new one.")
+        raise HTTPException(status_code=400, detail="This code has expired. Ask for a new one.")
     weak = password_problem(payload.new_password, name=user.full_name, phone=user.phone, email=user.email)
     if weak:
         raise HTTPException(status_code=422, detail=weak)
