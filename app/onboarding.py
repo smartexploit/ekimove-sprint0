@@ -33,8 +33,11 @@ router = APIRouter(prefix="/api/v1", tags=["driver onboarding"])
 REVIEW_HOURS = 72
 LAGOS = timezone(timedelta(hours=1))  # Nigeria has no daylight saving.
 MIN_AGE, MAX_AGE = 18, 70
-# Vehicles that need a driver's licence number on the application.
-LICENCE_VEHICLES = {"car", "minibus", "big_car", "van", "dyna"}
+# Vehicles that need a driver's licence number on the application. Empty for
+# now: the licence number is optional for everyone (asked for, not required).
+# To require it again, list the types, e.g. {"car", "big_car", "van", "dyna"},
+# and do the same in frontend/src/utils/driverOnboarding.js.
+LICENCE_VEHICLES: set[str] = set()
 GENDERS = {"male": "Male", "female": "Female"}
 PLEDGES = {
     "documents": "I hold a valid licence and will carry my licence and vehicle papers on every trip.",

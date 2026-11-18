@@ -1,7 +1,9 @@
 // Kept in step with app/onboarding.py (the server checks everything again).
 export const REVIEW_HOURS = 72
 export const MIN_DRIVER_AGE = 18
-export const LICENCE_VEHICLES = ['car', 'minibus', 'big_car', 'van', 'dyna']
+// Empty for now: the licence number is optional for every driver.
+// To require it again, list the types (and in app/onboarding.py too).
+export const LICENCE_VEHICLES = []
 
 export const SAFETY_PLEDGES = [
   ['documents', 'I hold a valid licence and will carry my licence and vehicle papers on every trip.'],

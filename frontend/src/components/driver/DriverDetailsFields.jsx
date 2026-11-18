@@ -60,7 +60,7 @@ export default function DriverDetailsFields({ vehicleType, initial = {}, idPrefi
             <span className="field-hint" id={id('licence-hint')}>
               {licenceRequired
                 ? 'Required for cars, buses and trucks. Bring the licence to your inspection.'
-                : 'Add it if you have one; we may ask to see it.'}
+                : 'Add it if you have one. Bring your licence to your inspection.'}
             </span>
           </label>
         </div>

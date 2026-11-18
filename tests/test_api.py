@@ -6564,7 +6564,6 @@ def test_phone_only_passenger_gets_the_inbox_welcome_and_no_text(client, outbox)
     ({"town": ""}, "town"),
     ({"emergency_contact_phone": "08000000771"}, "different phone"),
     ({"safety_pledges": ["documents", "sober"]}, "safety promise"),
-    ({"vehicle_type": "car", "capacity": "4", "licence_number": None}, "licence number"),
 ])
 def test_driver_application_requires_the_new_details(client, monkeypatch, changes, message):
     response = apply_as_driver(client, monkeypatch, **changes)
@@ -6714,7 +6713,7 @@ def test_older_drivers_can_fill_in_missing_details_once(client):
 def test_requirements_list_the_safety_promises(client):
     data = client.get("/api/v1/driver-applications/requirements").json()
     assert [p["key"] for p in data["pledges"]] == DRIVER_DETAILS["safety_pledges"]
-    assert data["review_hours"] == 72 and "car" in data["licence_vehicles"]
+    assert data["review_hours"] == 72 and data["licence_vehicles"] == []  # optional for now
 
 
 # --- Staff accounts with limited console access ---
@@ -7760,8 +7759,8 @@ def _pending_driver(client, admin, name):
     ("minibus", "4", False), ("", "1", False),
 ])
 def test_drivers_register_a_motorcycle_car_or_moving_vehicle(client, monkeypatch, vehicle_type, capacity, ok):
-    licence = {} if vehicle_type == "motorcycle" else {"licence_number": "ABC12345678"}
-    response = apply_as_driver(client, monkeypatch, vehicle_type=vehicle_type or None, capacity=capacity, **licence)
+    response = apply_as_driver(client, monkeypatch, vehicle_type=vehicle_type or None, capacity=capacity,
+                               licence_number=None)  # optional for every vehicle for now
     assert (response.status_code == 201) == ok, response.text
     if ok:
         admin = login(client, *ADMIN_LOGIN)
@@ -7781,7 +7780,7 @@ def test_admin_fixes_a_car_saved_as_a_motorcycle(client, monkeypatch):
     assert saved.json()["vehicle_type"] == "car" and saved.json()["plate_number"] == "EKT 771 AB"
     fixed = _pending_driver(client, admin, "Femi Ogunleye")
     assert fixed["vehicles"][0]["vehicle_type"] == "car"
-    assert "licence number" in " ".join(fixed["details_missing"]).lower()
+    assert fixed["details_missing"] == []  # the licence number is optional for now
     # A plate already on another vehicle is refused.
     other = apply_as_driver(client, monkeypatch, phone="08000000772", email="b@example.com", plate_number="EKT-772-AB")
     assert other.status_code == 201
