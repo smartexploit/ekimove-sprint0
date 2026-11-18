@@ -1,0 +1,36 @@
+# Pays drivers every evening: asks the EkiMove API to run the payout job.
+# Free with GitHub Actions. Needs the repository secret PAYOUT_CRON_TOKEN,
+# with the same value as PAYOUT_CRON_TOKEN on the Render API service.
+# GitHub may start scheduled runs a little late when it is busy.
+name: Daily driver payouts
+
+on:
+  schedule:
+    - cron: "0 17 * * *" # 17:00 UTC = 6 pm in Lagos
+  workflow_dispatch: # "Run workflow" button, for testing
+
+permissions: {}
+
+concurrency:
+  group: daily-payouts
+  cancel-in-progress: false
+
+jobs:
+  payouts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Run payouts
+        env:
+          PAYOUT_CRON_TOKEN: ${{ secrets.PAYOUT_CRON_TOKEN }}
+        run: |
+          if [ -z "$PAYOUT_CRON_TOKEN" ]; then
+            echo "::warning::PAYOUT_CRON_TOKEN isn't set in this repository's secrets, so no payouts were run."
+            exit 0
+          fi
+          API=https://api.ekimove.com.ng
+          # Wake the API first (Render can take a minute to start it). Only
+          # this check is retried; the payout request itself is sent once.
+          curl -fsS --retry 5 --retry-delay 15 --retry-all-errors --max-time 60 "$API/health" > /dev/null
+          curl -fsS --max-time 300 -X POST -H "X-Cron-Token: $PAYOUT_CRON_TOKEN" "$API/api/v1/internal/payouts/run"
+          echo

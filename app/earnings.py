@@ -186,11 +186,19 @@ def run_payouts(db: Session, actor_id: int | None) -> dict:
     total = Decimal("0.00")
 
     for driver_id, raw_balance in balances:
-        balance = money(raw_balance)
+        if money(raw_balance) < minimum:
+            continue
+        # Lock this driver and read the balance again, so two payout runs at
+        # once (the daily job and "Pay drivers now") can't pay it twice: the
+        # second waits here, then sees the balance already paid out.
+        db.execute(select(Driver.id).where(Driver.id == driver_id).with_for_update())
+        balance = money(db.scalar(select(func.sum(EarningEntry.amount)).where(EarningEntry.driver_id == driver_id)))
         if balance < minimum or balance <= 0:
+            db.rollback()
             continue
         account = db.scalar(select(DriverPayoutAccount).where(DriverPayoutAccount.driver_id == driver_id))
         if account is None:
+            db.rollback()  # release the lock
             summary["skipped_no_account"] += 1
             continue
 
