@@ -2823,6 +2823,7 @@ class FakePaystack:
         self.fail_dedicated = False
         self.transfers = []
         self.transfer_status = "pending"
+        self.bad_recipients = set()
 
     def __call__(self, method, url, json=None, headers=None, timeout=None):
         self.calls.append((method, url, json))
@@ -2845,6 +2846,8 @@ class FakePaystack:
         if path == "/transferrecipient":
             return _FakeResponse(200, {"status": True, "data": {"recipient_code": "RCP_test1"}})
         if path == "/transfer":
+            if json.get("recipient") in self.bad_recipients:
+                return _FakeResponse(400, {"status": False, "message": "Recipient specified is invalid"})
             self.transfers.append(json)
             return _FakeResponse(200, {"status": True, "data": {"status": self.transfer_status, "transfer_code": "TRF_test1"}})
         if path.startswith("/transaction/verify/"):
@@ -7896,3 +7899,29 @@ def test_sms_uses_the_backup_service_when_the_main_one_fails(monkeypatch):
     monkeypatch.setattr(messaging.requests, "post", unreachable)
     with pytest.raises(messaging.MessagingError):
         messaging.send_sms("08000000001", "Your EkiMove code is 123456.")
+
+
+def test_a_stale_paystack_recipient_is_made_again(client, paystack, monkeypatch):
+    """A saved recipient Paystack no longer accepts is replaced and the
+    transfer retried once, instead of failing every night."""
+    monkeypatch.setattr(settings, "paystack_transfers_enabled", True)
+    monkeypatch.setattr(settings, "payout_minimum", 500)
+    paystack.transfer_status = "success"
+    driver_headers, admin_headers, _, _ = complete_paid_ride(client)
+    client.put("/api/v1/driver/payout-account", headers=driver_headers,
+               json={"bank_code": "058", "account_number": "0123456789"})
+    with session_for(client) as db:
+        from app.models import DriverPayoutAccount
+
+        account = db.scalar(select(DriverPayoutAccount))
+        account.recipient_code = "RCP_old"
+        db.commit()
+    paystack.bad_recipients = {"RCP_old"}
+    summary = client.post("/api/v1/admin/payouts/run", headers=admin_headers).json()
+    assert summary["paid"] == 1, summary
+    assert [t["recipient"] for t in paystack.transfers] == ["RCP_test1"]
+    with session_for(client) as db:
+        from app.models import DriverPayoutAccount
+
+        assert db.scalar(select(DriverPayoutAccount)).recipient_code == "RCP_test1"
+

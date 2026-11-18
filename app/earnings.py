@@ -172,6 +172,23 @@ def _ensure_recipient(db: Session, account: DriverPayoutAccount) -> str:
     return code
 
 
+def _send_transfer(db: Session, account: DriverPayoutAccount, payout: DriverPayout, amount: Decimal) -> dict:
+    """Send one Paystack transfer. A saved recipient Paystack no longer
+    accepts (e.g. made before the account changed, or under an old key) is
+    dropped and made again once; the refused request sent no money."""
+    payload = {"source": "balance", "amount": int(amount * 100), "reference": payout.reference,
+               "reason": "EkiMove driver earnings"}
+    saved = account.recipient_code
+    try:
+        return _paystack("POST", "/transfer", {**payload, "recipient": _ensure_recipient(db, account)})
+    except PaystackError as exc:
+        if not saved or "recipient" not in str(exc).lower():
+            raise
+        logger.warning("Paystack refused saved recipient for payout account %s; making a new one", account.id)
+        account.recipient_code = None
+        return _paystack("POST", "/transfer", {**payload, "recipient": _ensure_recipient(db, account)})
+
+
 def run_payouts(db: Session, actor_id: int | None) -> dict:
     """Create a payout for every driver whose balance is due."""
     minimum = money(settings.payout_minimum)
@@ -220,11 +237,7 @@ def run_payouts(db: Session, actor_id: int | None) -> dict:
 
         if payout.method == "paystack":
             try:
-                recipient = _ensure_recipient(db, account)
-                data = _paystack("POST", "/transfer", {
-                    "source": "balance", "amount": int(balance * 100), "recipient": recipient,
-                    "reference": payout.reference, "reason": "EkiMove driver earnings",
-                })
+                data = _send_transfer(db, account, payout, balance)
                 payout.transfer_code = data.get("transfer_code")
                 if data.get("status") == "success":
                     _mark_paid(db, payout, payout.reference, actor_id)
