@@ -92,15 +92,19 @@ function PayoutCard({ payout, busy, onPaid, onFailed }) {
 export default function AdminEarningsPage() {
   const [summary, setSummary] = useState(null)
   const [payouts, setPayouts] = useState([])
+  const [failedPayouts, setFailedPayouts] = useState([])
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
 
   const load = useCallback(async () => {
     try {
-      const [report, open] = await Promise.all([getEarningsSummary(), listPayouts('open')])
+      const [report, open, failedList] = await Promise.all([
+        getEarningsSummary(), listPayouts('open'), listPayouts('failed'),
+      ])
       setSummary(report)
       setPayouts(Array.isArray(open) ? open : [])
+      setFailedPayouts(Array.isArray(failedList) ? failedList.slice(0, 10) : [])
     } catch (err) {
       setError(err.message || 'Could not load earnings.')
     }
@@ -222,6 +226,32 @@ export default function AdminEarningsPage() {
                 </div>
               )}
             </section>
+
+            {failedPayouts.length > 0 && (
+              <section className="stack stack-sm" aria-labelledby="failed-payouts-title">
+                <h2 id="failed-payouts-title" className="section-title">Recent failed payouts</h2>
+                <p className="muted small">
+                  The money went back to each driver’s balance and is tried again on the next run. Fix the reason
+                  below first (for example, top up the Paystack balance).
+                </p>
+                <ul className="list-card" style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+                  {failedPayouts.map((payout) => (
+                    <li className="list-item" key={payout.id}>
+                      <div className="list-item-main">
+                        <p className="list-item-title">{payout.driver_name} · {naira(payout.amount)}</p>
+                        <p className="list-item-meta">
+                          {payout.completed_at || payout.created_at ? formatDateTime(payout.completed_at || payout.created_at) : ''}
+                          {' · '}{payout.method === 'paystack' ? 'Paystack' : 'By hand'}
+                        </p>
+                        <p className="small" style={{ color: 'var(--laterite-700)', marginTop: 4 }}>
+                          {payout.failure_reason || 'No reason given.'}
+                        </p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
 
             <section className="stack stack-sm" aria-labelledby="balances-title">
               <h2 id="balances-title" className="section-title">Driver balances</h2>
