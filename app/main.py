@@ -45,6 +45,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
+import logging
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.auth import (
@@ -98,6 +101,17 @@ app = FastAPI(
     redoc_url="/redoc" if _docs_on else None,
     openapi_url="/openapi.json" if _docs_on else None,
 )
+
+logger = logging.getLogger(__name__)
+
+
+@app.exception_handler(PoolTimeoutError)
+async def database_busy(request: Request, exc: PoolTimeoutError) -> JSONResponse:
+    """Every database connection is in use: answer quickly so the app can
+    retry, instead of letting requests pile up until they all time out."""
+    logger.warning("Database connections exhausted on %s %s", request.method, request.url.path)
+    return JSONResponse(status_code=503, headers={"Retry-After": "2"},
+                        content={"detail": "EkiMove is very busy right now. Please try again in a moment."})
 
 
 

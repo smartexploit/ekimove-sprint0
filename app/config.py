@@ -7,6 +7,12 @@ class Settings(BaseSettings):
     app_name: str = "EkiMove API"
     app_env: str = "development"
     database_url: str = "sqlite:///./ekimove_dev.db"
+    # Database connections held by EACH app process (see WEB_CONCURRENCY).
+    # Keep processes x (pool + overflow) below the database's connection limit.
+    db_pool_size: int = 10
+    db_max_overflow: int = 10
+    # Seconds a request waits for a free connection before failing fast.
+    db_pool_timeout: float = 8.0
     jwt_secret_key: str | None = None
     access_token_expire_minutes: int = 15
     login_rate_limit_attempts: int = 5

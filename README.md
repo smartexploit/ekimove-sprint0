@@ -353,3 +353,18 @@ The public pages are `/`, `/fares`, `/faq`, `/areas/<name>` (for example `/areas
 4. Ride lifecycle, safety workflows and incident handling.
 5. Trusted bank-transfer reconciliation; no screenshot-only confirmation and no cash pathway.
 6. Frontend, notifications, privacy controls and production hardening.
+
+
+## Capacity and scaling
+
+Phones poll during a trip (tracking every 8 s, chat 5 s, calls 4 s; drivers' offers 3 s and location 10 s), so **each active trip makes about 1.5 requests per second**, and each request costs roughly 8–15 ms of server CPU.
+
+Load test (Nov 2026, local 2-core machine, one app process, Postgres): 50 active trips → median 13 ms; 100 → median 40 ms, p95 0.2 s; 200 → overloaded. Registered users cost almost nothing; what matters is trips happening at the same moment.
+
+Scaling knobs (Render environment variables on the API service):
+
+- `WEB_CONCURRENCY`: app processes per instance (start command passes it to `--workers`). Use about one per CPU of the Render plan.
+- `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` (default 10 / 10): database connections **per process**. Keep `instances × WEB_CONCURRENCY × (pool + overflow)` below the database plan's connection limit.
+- `DB_POOL_TIMEOUT` (default 8 s): when every connection is busy the API answers `503 Retry-After: 2` instead of letting requests pile up.
+- More instances: set `REDIS_URL` first so rate limits are shared between processes and instances.
+- Beyond a few hundred simultaneous trips: replace polling with server push (WebSockets/SSE) and merge the per-trip polls.

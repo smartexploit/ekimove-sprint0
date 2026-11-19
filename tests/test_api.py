@@ -7925,3 +7925,15 @@ def test_a_stale_paystack_recipient_is_made_again(client, paystack, monkeypatch)
 
         assert db.scalar(select(DriverPayoutAccount)).recipient_code == "RCP_test1"
 
+
+
+def test_database_busy_answers_503_quickly(client):
+    """When every database connection is taken, say so at once (503 + Retry-After)."""
+    import asyncio
+    from sqlalchemy.exc import TimeoutError as PoolTimeoutError
+    from starlette.requests import Request
+
+    scope = {"type": "http", "method": "GET", "path": "/api/v1/rides/1/tracking", "headers": [],
+             "query_string": b"", "server": ("test", 80), "scheme": "http"}
+    response = asyncio.run(main_module.database_busy(Request(scope), PoolTimeoutError("pool full")))
+    assert response.status_code == 503 and response.headers["retry-after"] == "2"
