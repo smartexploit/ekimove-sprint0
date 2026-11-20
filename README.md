@@ -377,3 +377,5 @@ Admin → Fare calculator → **Fares follow the fuel price**. Prices (formula, 
 Each vehicle has **running costs** (fuel share %, km per litre, wear per km, empty km to pickup; defaults okada 45% / 40 km/L / ₦15 / 1.5 km, car 60% / 9 km/L / ₦40 / 2 km). The **Driver profit check** table uses them to show what a driver keeps on 3, 6 and 10 km trips after commission, fuel and wear: red is a loss.
 
 Places that aren't on the list: tick **Riders can drop a pin** in the same card; such trips are priced from road distance (Google or Geoapify, else straight line × road factor) with anchors and the fuel link.
+
+**Service area boundary** (Admin → Service area, super admins): tap the map to draw the edge of each service area; drag corners to adjust. A dropped pin is accepted only inside an active area's boundary (`app/service_boundary.py`, ray casting) and is given the zone of that area's nearest place. Areas without a boundary keep the old rule: within 8 km (`points.COVER_KM`) of one of their places. Shapes must have 3–300 corners, edges that don't cross and a sensible size; listed places left outside are flagged.

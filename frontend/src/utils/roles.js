@@ -16,6 +16,7 @@ export const ADMIN_PAGES = {
   '/admin/drivers': ['drivers'],
   '/admin/locations': 'super',
   '/admin/fares': 'super',
+  '/admin/service-area': 'super',
   '/admin/website': ['website'],
   '/admin/team': 'super',
   '/admin/staff-cards': 'super',

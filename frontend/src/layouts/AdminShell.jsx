@@ -18,7 +18,7 @@ import {
   Rocket,
   Route,
   ShieldCheck,
-  Wallet,
+  Wallet, Hexagon,
 } from 'lucide-react'
 import Logo from '../components/brand/Logo.jsx'
 import useSupportUnread from '../hooks/useSupportUnread.js'
@@ -41,6 +41,7 @@ const NAV = [
   ['/admin/drivers', 'Driver verification', ShieldCheck],
   ['/admin/locations', 'Places & fares', MapPin],
   ['/admin/fares', 'Fare calculator', Calculator],
+  ['/admin/service-area', 'Service area', Hexagon],
   ['/admin/pins', 'Pin check', MapPinned],
   ['/admin/website', 'SEO & website', Globe],
   ['/admin/team', 'Team & access', UserCog],

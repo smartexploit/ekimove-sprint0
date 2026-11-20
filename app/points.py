@@ -27,7 +27,7 @@ from app.client_ip import client_ip
 from app.config import settings
 from app.database import get_db
 from app.anchor_fares import anchor_price, load_anchors
-from app import fuel_pricing
+from app import fuel_pricing, service_boundary
 from app.fare_calculator import formula
 from app.geocode import NOMINATIM_URL, USER_AGENT
 from app.models import Place, RideRequest, ServiceArea, User, Zone
@@ -113,11 +113,23 @@ def resolve_stop(db: Session, stop: Stop, which: str) -> dict:
                 "zone_id": place.zone_id}
     point = stop.point
     served = _served_places(db)
-    nearest = min(served, key=lambda pz: _km(point.latitude, point.longitude, pz[0].latitude, pz[0].longitude),
-                  default=None)
-    if nearest is None or _km(point.latitude, point.longitude, nearest[0].latitude,
-                              nearest[0].longitude) > COVER_KM:
-        raise HTTPException(status_code=422, detail=f"That {which} pin is outside the area EkiMove serves for now.")
+    outside = HTTPException(status_code=422, detail=f"That {which} pin is outside the area EkiMove serves for now.")
+    area, drawn = service_boundary.area_for_point(db, point.latitude, point.longitude)
+    if area is not None:
+        # Inside a drawn service area: the trip belongs to its nearest place's zone.
+        served = [pz for pz in served if pz[0].service_area_id == area.id]
+        nearest = min(served, key=lambda pz: _km(point.latitude, point.longitude, pz[0].latitude, pz[0].longitude),
+                      default=None)
+        if nearest is None:
+            raise outside
+    else:
+        # Areas without a drawn boundary: within COVER_KM of one of their places.
+        served = [pz for pz in served if pz[0].service_area_id not in drawn]
+        nearest = min(served, key=lambda pz: _km(point.latitude, point.longitude, pz[0].latitude, pz[0].longitude),
+                      default=None)
+        if nearest is None or _km(point.latitude, point.longitude, nearest[0].latitude,
+                                  nearest[0].longitude) > COVER_KM:
+            raise outside
     return {"name": point.label, "latitude": point.latitude, "longitude": point.longitude, "place": None,
             "zone_id": nearest[1].id}
 

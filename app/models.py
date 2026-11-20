@@ -528,6 +528,10 @@ class ServiceArea(Base):
     name: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
     slug: Mapped[str] = mapped_column(String(100), unique=True, index=True, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The edge of the area EkiMove serves, drawn by an admin: JSON list of
+    # [latitude, longitude] corners. None: dropped pins are accepted within
+    # points.COVER_KM of the area's places instead.
+    boundary: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(
         String(16), default="draft", nullable=False, index=True
     )

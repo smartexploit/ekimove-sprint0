@@ -8007,3 +8007,66 @@ def test_fuel_settings_are_checked(client):
     rules["fuel"]["current_price"] = 1500
     rules["vehicles"][0]["fuel_share"] = 140
     assert client.put("/api/v1/admin/fare-calculator/formula", json=rules, headers=admin).status_code == 422
+
+
+# ---------- Drawn service area boundaries ----------
+from app import service_boundary  # noqa: E402
+
+# Around the test places (7.60-7.62, 5.20-5.22); the pin used below sits at (7.625, 5.22).
+SQUARE = [[7.59, 5.19], [7.59, 5.24], [7.63, 5.24], [7.63, 5.19]]
+
+
+def test_point_in_boundary():
+    poly = [tuple(c) for c in SQUARE]
+    assert service_boundary.contains(poly, 7.61, 5.21)
+    assert service_boundary.contains(poly, 7.59, 5.20)  # on the edge
+    assert not service_boundary.contains(poly, 7.64, 5.21)
+    concave = [(0, 0), (0, 4), (4, 4), (4, 0), (2, 2)]
+    assert not service_boundary.contains(concave, 2, 1) and service_boundary.contains(concave, 2, 3)
+
+
+def test_drawn_boundary_decides_where_pins_are_allowed(client, monkeypatch):
+    monkeypatch.setattr(settings, "geoapify_api_key", None)
+    admin = login(client, *ADMIN_LOGIN)
+    area_id, (a, _b, _c), _manual = _calc_area(client)
+    _calc_area.area_id = area_id
+    _enable_pins(client, admin)
+    inside = {"latitude": 7.6250, "longitude": 5.2200, "label": "Blue gate"}
+    near_but_out = {"latitude": 7.6350, "longitude": 5.2200, "label": "Over the hill"}  # ~1.7 km past the edge
+    quote = lambda pin: client.post("/api/v1/point-fare-options", json={
+        "origin": {"place_id": a}, "destination": {"point": pin}})
+    # No boundary yet: the 8 km rule accepts both.
+    assert quote(inside).status_code == 200 and quote(near_but_out).status_code == 200
+    rows = client.get("/api/v1/admin/service-areas", headers=admin).json()
+    row = next(r for r in rows if r["id"] == area_id)
+    assert row["corners"] is None and row["fallback_km"] == 8.0 and len(row["places"]) >= 3
+
+    saved = client.put(f"/api/v1/admin/service-areas/{area_id}/boundary", headers=admin, json={"corners": SQUARE})
+    assert saved.status_code == 200, saved.text
+    assert len(saved.json()["corners"]) == 4 and saved.json()["area_km2"] > 10 and saved.json()["places_outside"] == []
+    assert quote(inside).status_code == 200
+    refused = quote(near_but_out)
+    assert refused.status_code == 422 and "outside the area" in refused.json()["detail"]
+
+    # Removing it brings back the 8 km rule.
+    cleared = client.put(f"/api/v1/admin/service-areas/{area_id}/boundary", headers=admin, json={"corners": None})
+    assert cleared.status_code == 200 and cleared.json()["corners"] is None
+    assert quote(near_but_out).status_code == 200
+    with session_for(client) as db:
+        assert db.scalar(select(AuditLog).where(AuditLog.action == "service_area.boundary")) is not None
+
+
+def test_boundary_must_be_a_real_shape(client):
+    admin = login(client, *ADMIN_LOGIN)
+    area_id, _places, _manual = _calc_area(client)
+    put = lambda corners: client.put(f"/api/v1/admin/service-areas/{area_id}/boundary", headers=admin,
+                                     json={"corners": corners})
+    assert put([[7.6, 5.2], [7.61, 5.21]]).status_code == 422                       # two corners
+    bow = put([[7.59, 5.19], [7.63, 5.24], [7.59, 5.24], [7.63, 5.19]])              # edges cross
+    assert bow.status_code == 422 and "cross" in bow.json()["detail"]
+    assert put([[7.6, 5.2], [7.6, 5.2001], [7.6001, 5.2001]]).status_code == 422     # too small
+    assert put([[95, 5.2], [7.6, 5.3], [7.7, 5.2]]).status_code == 422               # off the map
+    # Closing the shape by repeating the first corner is fine.
+    assert put(SQUARE + [SQUARE[0]]).json()["corners"] == SQUARE
+    passenger = login(client, *PASSENGER_LOGIN)
+    assert client.get("/api/v1/admin/service-areas", headers=passenger).status_code == 403

@@ -41,6 +41,7 @@ const AdminDriverVerificationPage = lazy(() => import('./pages/admin/AdminDriver
 const AdminTeamPage = lazy(() => import('./pages/admin/AdminTeamPage.jsx'))
 const AdminStaffCardsPage = lazy(() => import('./pages/admin/AdminStaffCardsPage.jsx'))
 const AdminPinsPage = lazy(() => import('./pages/admin/AdminPinsPage.jsx'))
+const AdminServiceAreaPage = lazy(() => import('./pages/admin/AdminServiceAreaPage.jsx'))
 const AdminPaymentsPage = lazy(() => import('./pages/admin/AdminPaymentsPage.jsx'))
 const AdminOverviewPage = lazy(() => import('./pages/admin/AdminOverviewPage.jsx'))
 const AdminPeoplePage = lazy(() => import('./pages/admin/AdminPeoplePage.jsx'))
@@ -96,6 +97,7 @@ export default function App() {
           <Route path="/admin/team" element={<AdminTeamPage />} />
           <Route path="/admin/staff-cards" element={<AdminStaffCardsPage />} />
           <Route path="/admin/pins" element={<AdminPinsPage />} />
+          <Route path="/admin/service-area" element={<AdminServiceAreaPage />} />
           <Route path="/admin/dispatch" element={<AdminDispatchPage />} />
           <Route path="/admin/overview" element={<AdminOverviewPage />} />
           <Route path="/admin/map" element={<AdminMapPage />} />
