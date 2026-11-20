@@ -8070,3 +8070,46 @@ def test_boundary_must_be_a_real_shape(client):
     assert put(SQUARE + [SQUARE[0]]).json()["corners"] == SQUARE
     passenger = login(client, *PASSENGER_LOGIN)
     assert client.get("/api/v1/admin/service-areas", headers=passenger).status_code == 403
+
+
+def test_automatic_service_area_follows_the_places(client, monkeypatch):
+    monkeypatch.setattr(settings, "geoapify_api_key", None)
+    admin = login(client, *ADMIN_LOGIN)
+    area_id, (a, _b, _c), _manual = _calc_area(client)
+    _calc_area.area_id = area_id
+    _enable_pins(client, admin)
+    quote = lambda lat: client.post("/api/v1/point-fare-options", json={
+        "origin": {"place_id": a}, "destination": {"point": {"latitude": lat, "longitude": 5.22, "label": "Spot"}}})
+    put = lambda body: client.put(f"/api/v1/admin/service-areas/{area_id}/boundary", headers=admin, json=body)
+    # Places run 7.60-7.62 N. With 1 km around them, 7.625 is in and 7.635 (1.7 km out) isn't.
+    saved = put({"auto_km": 1})
+    assert saved.status_code == 200, saved.text
+    row = saved.json()
+    assert row["mode"] == "auto" and row["auto_km"] == 1.0 and row["places_outside"] == []
+    assert len(row["corners"]) >= 8 and set(row["previews"]) == {"1.0", "2.0", "3.0", "5.0"}
+    assert quote(7.625).status_code == 200 and quote(7.635).status_code == 422
+    assert put({"auto_km": 2}).status_code == 200 and quote(7.635).status_code == 200
+    # A new place further out is covered automatically, without saving again.
+    assert put({"auto_km": 1}).status_code == 200 and quote(7.655).status_code == 422
+    with session_for(client) as db:
+        db.add(Place(service_area_id=area_id, zone_id=1, name="Calc North", status="active",
+                     latitude=7.65, longitude=5.22))
+        db.commit()
+    assert quote(7.655).status_code == 200
+    # Limits on the margin.
+    assert put({"auto_km": 0.1}).status_code == 422 and put({"auto_km": 50}).status_code == 422
+
+
+def test_automatic_area_needs_pinned_places(client):
+    admin = login(client, *ADMIN_LOGIN)
+    with session_for(client) as db:
+        area = ServiceArea(name="Empty Town", slug="empty-town", status="active")
+        db.add(area)
+        db.flush()
+        db.add(Place(service_area_id=area.id, zone_id=1, name="Somewhere", status="active"))
+        db.commit()
+        area_id = area.id
+    refused = client.put(f"/api/v1/admin/service-areas/{area_id}/boundary", headers=admin, json={"auto_km": 2})
+    assert refused.status_code == 422 and "Pin your places first" in refused.json()["detail"]
+    rows = client.get("/api/v1/admin/service-areas", headers=admin).json()
+    assert next(r for r in rows if r["id"] == area_id)["unpinned_places"] == 1

@@ -1,8 +1,12 @@
-"""Service area boundaries: the edge of where EkiMove serves, drawn on a map.
+"""Service area boundaries: the edge of where EkiMove serves.
 
+Two ways to set it:
+- automatic: everything within N km of the area's pinned places (a rounded
+  shape around them, worked out fresh each time, so new places are included);
+- drawn: corners an admin taps on a map.
 A dropped pin is accepted when it is inside an active area's boundary. Areas
-without a boundary keep the older rule (within points.COVER_KM of one of the
-area's places), so nothing breaks while boundaries are being drawn.
+with neither keep the older rule (within points.COVER_KM of one of the area's
+places), so nothing breaks before a boundary is set.
 """
 
 from __future__ import annotations
@@ -12,7 +16,7 @@ import math
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.auth import require_super_admin
@@ -23,16 +27,80 @@ router = APIRouter(prefix="/api/v1/admin/service-areas", tags=["service areas"])
 
 MAX_CORNERS = 300
 MIN_AREA_KM2 = 0.05
+AUTO_KM_CHOICES = (1.0, 2.0, 3.0, 5.0)
+CIRCLE_POINTS = 24
 
 
-def corners(area: ServiceArea) -> list[tuple[float, float]] | None:
+def _setting(area: ServiceArea):
     if not area.boundary:
         return None
     try:
-        points = [(float(lat), float(lon)) for lat, lon in json.loads(area.boundary)]
-    except (ValueError, TypeError):
+        return json.loads(area.boundary)
+    except ValueError:
         return None
-    return points if len(points) >= 3 else None
+
+
+def mode(area: ServiceArea) -> tuple[str | None, float | None]:
+    value = _setting(area)
+    if isinstance(value, dict) and value.get("auto_km"):
+        return "auto", float(value["auto_km"])
+    if isinstance(value, list):
+        return "drawn", None
+    return None, None
+
+
+def _pinned(db: Session, area_id: int) -> list[Place]:
+    return [p for p in db.scalars(select(Place).where(Place.service_area_id == area_id, Place.status == "active"))
+            if p.latitude is not None and p.longitude is not None]
+
+
+def auto_shape(places: list[Place], km: float) -> list[tuple[float, float]] | None:
+    """A rounded shape covering every place plus ``km`` around it: the convex
+    hull of a circle around each place."""
+    if not places:
+        return None
+    pts = []
+    for p in places:
+        dlat = km / 110.57
+        dlon = km / (111.32 * math.cos(math.radians(p.latitude)))
+        for k in range(CIRCLE_POINTS):
+            a = 2 * math.pi * k / CIRCLE_POINTS
+            pts.append((p.latitude + dlat * math.sin(a), p.longitude + dlon * math.cos(a)))
+    hull = _hull(pts)
+    return [(round(lat, 6), round(lon, 6)) for lat, lon in hull] if len(hull) >= 3 else None
+
+
+def _hull(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    pts = sorted(set(points), key=lambda p: (p[1], p[0]))
+    if len(pts) <= 2:
+        return pts
+
+    def cross(o, a, b):
+        return (a[1] - o[1]) * (b[0] - o[0]) - (a[0] - o[0]) * (b[1] - o[1])
+
+    lower, upper = [], []
+    for p in pts:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
+            lower.pop()
+        lower.append(p)
+    for p in reversed(pts):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
+            upper.pop()
+        upper.append(p)
+    return lower[:-1] + upper[:-1]
+
+
+def corners(area: ServiceArea, db: Session | None = None) -> list[tuple[float, float]] | None:
+    value = _setting(area)
+    if isinstance(value, dict) and value.get("auto_km") and db is not None:
+        return auto_shape(_pinned(db, area.id), float(value["auto_km"]))
+    if isinstance(value, list):
+        try:
+            points = [(float(lat), float(lon)) for lat, lon in value]
+        except (ValueError, TypeError):
+            return None
+        return points if len(points) >= 3 else None
+    return None
 
 
 def contains(polygon: list[tuple[float, float]], lat: float, lon: float) -> bool:
@@ -107,7 +175,7 @@ def area_for_point(db: Session, lat: float, lon: float) -> tuple[ServiceArea | N
     drawn: set[int] = set()
     found = None
     for area in db.scalars(select(ServiceArea).where(ServiceArea.status == "active").order_by(ServiceArea.id)):
-        polygon = corners(area)
+        polygon = corners(area, db)
         if polygon is None:
             continue
         drawn.add(area.id)
@@ -121,15 +189,22 @@ def area_for_point(db: Session, lat: float, lon: float) -> tuple[ServiceArea | N
 class BoundaryIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     corners: list[tuple[float, float]] | None = Field(default=None, max_length=MAX_CORNERS + 1)
+    # Automatic: everything within this many km of the area's places.
+    auto_km: float | None = Field(default=None, ge=0.5, le=10)
 
 
 def _row(db: Session, area: ServiceArea) -> dict:
-    polygon = corners(area)
-    places = db.scalars(select(Place).where(Place.service_area_id == area.id, Place.status == "active")).all()
-    pinned = [p for p in places if p.latitude is not None and p.longitude is not None]
+    polygon = corners(area, db)
+    pinned = _pinned(db, area.id)
     outside = [p.name for p in pinned if polygon and not contains(polygon, p.latitude, p.longitude)]
+    kind, auto_km = mode(area)
+    unpinned = db.scalar(select(func.count(Place.id)).where(
+        Place.service_area_id == area.id, Place.status == "active", Place.latitude.is_(None)))
     return {
         "id": area.id, "name": area.name, "status": area.status,
+        "mode": kind, "auto_km": auto_km, "auto_choices": list(AUTO_KM_CHOICES),
+        "previews": {str(km): [list(c) for c in (auto_shape(pinned, km) or [])] for km in AUTO_KM_CHOICES},
+        "unpinned_places": unpinned,
         "corners": [list(c) for c in polygon] if polygon else None,
         "area_km2": round(_area_km2(polygon), 1) if polygon else None,
         "places": [{"id": p.id, "name": p.name, "latitude": p.latitude, "longitude": p.longitude} for p in pinned],
@@ -153,7 +228,13 @@ def save_boundary(area_id: int, payload: BoundaryIn, db: Session = Depends(get_d
     area = db.get(ServiceArea, area_id)
     if area is None:
         raise HTTPException(status_code=404, detail="Service area not found")
-    if payload.corners is None:
+    if payload.auto_km is not None:
+        if not _pinned(db, area.id):
+            raise HTTPException(status_code=422, detail="None of this area's places has a map pin yet. Pin your "
+                                                        "places first (Pin check), then try again.")
+        area.boundary = json.dumps({"auto_km": payload.auto_km})
+        details = f"automatic, {payload.auto_km:g} km around the places"
+    elif payload.corners is None:
         area.boundary = None
         details = "boundary removed"
     else:
