@@ -26,6 +26,7 @@ from app.staff_cards import public_router as staff_cards_public_router, router a
 from app.points import PointIn, Stop, distance_quotes, resolve_stop, router as points_router
 from app.calls import router as calls_router
 from app.launch_checklist import router as launch_checklist_router
+from app import fuel_pricing
 from app.fare_calculator import router as fare_calculator_router
 from app import deliveries as deliveries_module
 from app.deliveries import check_delivery_code, recipient_text, router as deliveries_router
@@ -987,12 +988,13 @@ def list_active_place_fare_options(
     ).all()
 
     rules = booking_rules(db)
+    fuel_rules = fuel_pricing.current_rules(db)
     options = []
     for fare in fares:
         if passenger_count > max_passengers(rules, fare.vehicle_type):
             continue
 
-        amount = quote_amount(rules, fare, fare.vehicle_type, passenger_count)
+        amount = quote_amount(rules, fare, fare.vehicle_type, passenger_count, fuel_rules)
 
         options.append(
             {
@@ -1365,7 +1367,8 @@ def create_ride_request(
     if custom is not None:
         calculated = custom["amount"]
     else:
-        calculated = quote_amount(rules, fare, payload.vehicle_type, payload.passenger_count)
+        calculated = quote_amount(rules, fare, payload.vehicle_type, payload.passenger_count,
+                                  fuel_pricing.current_rules(db))
     scheduled_for = check_pickup_time(db, payload.scheduled_for)
 
     if custom is not None:

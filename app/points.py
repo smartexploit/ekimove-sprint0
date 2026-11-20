@@ -27,6 +27,7 @@ from app.client_ip import client_ip
 from app.config import settings
 from app.database import get_db
 from app.anchor_fares import anchor_price, load_anchors
+from app import fuel_pricing
 from app.fare_calculator import formula
 from app.geocode import NOMINATIM_URL, USER_AGENT
 from app.models import Place, RideRequest, ServiceArea, User, Zone
@@ -161,6 +162,7 @@ def distance_quotes(db: Session, origin: dict, destination: dict, passenger_coun
         amount, basis = anchor_price(vehicle, rules, anchors.get(vehicle["vehicle_type"], []),
                                      (origin["latitude"], origin["longitude"]),
                                      (destination["latitude"], destination["longitude"]), meters)
+        amount = fuel_pricing.adjust(rules, vehicle["vehicle_type"], amount)
         extra = Decimal(vehicle["extra_passenger"])
         if is_motorcycle(vehicle["vehicle_type"]):
             if passenger_count >= 2:

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Calculator, MapPinned, Plus, Ruler, Trash2, Wand2 } from 'lucide-react'
+import { Calculator, Fuel, MapPinned, Plus, Ruler, Trash2, Wand2 } from 'lucide-react'
 import AdminShell from '../../layouts/AdminShell.jsx'
 import Alert from '../../components/ui/Alert.jsx'
 import Select from '../../components/ui/Select.jsx'
@@ -27,7 +27,81 @@ function NumberField({ label, value, onChange, prefix = '₦' }) {
   )
 }
 
-function FormulaCard({ formula, draft, setDraft, onSaved }) {
+function DecimalField({ label, value, onChange, hint, suffix }) {
+  return (
+    <label className="field fc-num">
+      <span className="field-label">{label}</span>
+      <span className="fc-num-wrap">
+        <input className="input" inputMode="decimal" value={value}
+          onChange={(event) => onChange(event.target.value.replace(/[^\d.]/g, '').slice(0, 6))} />
+        {suffix && <span aria-hidden="true">{suffix}</span>}
+      </span>
+      {hint && <span className="field-hint">{hint}</span>}
+    </label>
+  )
+}
+
+const num = (value, fallback = 0) => (Number.isFinite(Number(value)) && value !== '' ? Number(value) : fallback)
+const stepRound = (amount, step) => Math.round(amount / Math.max(1, step)) * Math.max(1, step)
+
+/** The fare passengers pay for a trip of `km`, at today's fuel price. */
+function tripFare(v, fuel, km) {
+  const step = num(v.round_to, 50)
+  const atReference = Math.max(num(v.minimum), stepRound(num(v.base) + num(v.per_km) * km, step))
+  if (!fuel?.enabled) return atReference
+  const ref = num(fuel.reference_price, 0)
+  const now = num(fuel.current_price, 0)
+  if (ref <= 0 || now <= 0) return atReference
+  const factor = Math.max(0.2, 1 + (num(v.fuel_share) / 100) * (now / ref - 1))
+  return stepRound(atReference * factor, step)
+}
+
+/** What the driver keeps after commission, fuel and wear (including the empty km to the pickup). */
+function ProfitCheck({ draft, commission }) {
+  const fuelPrice = num(draft.fuel?.current_price, 1400)
+  const vehicles = draft.vehicles.filter((v) => v.enabled)
+  const kms = [3, 6, 10]
+  return (
+    <section className="stack stack-sm" aria-labelledby="fc-profit">
+      <h3 id="fc-profit" className="fc-subtitle">Driver profit check</h3>
+      <p className="muted small">
+        At ₦{fuelPrice.toLocaleString('en-NG')} per litre, after EkiMove’s {commission}% and the cost of fuel and
+        wear, including the empty drive to the pickup. Red means the driver loses money on that trip.
+      </p>
+      <div className="table-wrap">
+        <table className="table fc-profit">
+          <thead>
+            <tr><th scope="col">Trip</th>{vehicles.map((v) => <th scope="col" key={v.vehicle_type}>{v.label}</th>)}</tr>
+          </thead>
+          <tbody>
+            {kms.map((km) => (
+              <tr key={km}>
+                <th scope="row">{km} km</th>
+                {vehicles.map((v) => {
+                  const fare = tripFare(v, draft.fuel, km)
+                  const perKm = fuelPrice / Math.max(0.1, num(v.km_per_litre, 9)) + num(v.wear_per_km)
+                  const cost = (km + num(v.pickup_km)) * perKm
+                  const keep = fare * (1 - commission / 100)
+                  const profit = Math.round(keep - cost)
+                  return (
+                    <td key={v.vehicle_type}>
+                      <span className="fc-fare">{naira(fare)}</span>
+                      <span className={`fc-profit-amt ${profit < 0 ? 'is-loss' : profit < 300 ? 'is-thin' : 'is-ok'}`}>
+                        {profit < 0 ? `Loses ${naira(-profit)}` : `Keeps ${naira(profit)}`}
+                      </span>
+                    </td>
+                  )
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}
+
+function FormulaCard({ formula, draft, setDraft, onSaved, commission = 10 }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const dirty = JSON.stringify(draft) !== JSON.stringify(formula)
@@ -45,9 +119,16 @@ function FormulaCard({ formula, draft, setDraft, onSaved }) {
         use_anchors: draft.use_anchors !== false,
         anchor_near_km: Number(draft.anchor_near_km ?? 1),
         anchor_reach_km: Number(draft.anchor_reach_km ?? 3),
+        fuel: {
+          enabled: Boolean(draft.fuel?.enabled),
+          reference_price: num(draft.fuel?.reference_price, 1400),
+          current_price: num(draft.fuel?.current_price, 1400),
+        },
         vehicles: draft.vehicles.map((v) => ({
           ...v, base: Number(v.base || 0), per_km: Number(v.per_km || 0), minimum: Number(v.minimum || 0),
           round_to: Math.max(1, Number(v.round_to || 1)), extra_passenger: Number(v.extra_passenger || 0),
+          fuel_share: num(v.fuel_share, 50), km_per_litre: num(v.km_per_litre, 9),
+          wear_per_km: num(v.wear_per_km), pickup_km: num(v.pickup_km),
         })),
       }
       await apiRequest(`${BASE}/formula`, { method: 'PUT', body: JSON.stringify(body) })
@@ -106,6 +187,33 @@ function FormulaCard({ formula, draft, setDraft, onSaved }) {
           </label>
         </div>
       </fieldset>
+      <fieldset className="fc-anchors fc-fuel">
+        <legend>
+          <label className="check-row">
+            <input type="checkbox" checked={Boolean(draft.fuel?.enabled)}
+              onChange={(event) => setDraft((d) => ({ ...d, fuel: { ...d.fuel, enabled: event.target.checked } }))} />
+            <strong><Fuel size={16} aria-hidden="true" /> Fares follow the fuel price</strong>
+          </label>
+        </legend>
+        <p className="muted small">
+          Set your prices at the reference fuel price. When petrol changes, update <strong>Fuel price today</strong> and
+          save: every okada and car fare moves at once (listed routes, hand-set prices and dropped pins). Only the fuel
+          share of each fare moves.
+        </p>
+        <div className="fc-grid">
+          <NumberField label="Reference fuel price (per litre)" value={String(draft.fuel?.reference_price ?? 1400)}
+            onChange={(x) => setDraft((d) => ({ ...d, fuel: { ...d.fuel, reference_price: x } }))} />
+          <NumberField label="Fuel price today (per litre)" value={String(draft.fuel?.current_price ?? 1400)}
+            onChange={(x) => setDraft((d) => ({ ...d, fuel: { ...d.fuel, current_price: x } }))} />
+        </div>
+        {draft.fuel?.enabled && num(draft.fuel?.reference_price) > 0 && (
+          <p className="small"><strong>{draft.vehicles.filter((v) => v.enabled).map((v) => {
+            const f = 1 + (num(v.fuel_share) / 100) * (num(draft.fuel.current_price) / num(draft.fuel.reference_price) - 1)
+            const pct = Math.round((f - 1) * 100)
+            return `${v.label} ${pct >= 0 ? '+' : ''}${pct}%`
+          }).join(' · ')}</strong> compared with the prices you’ve set.</p>
+        )}
+      </fieldset>
       <div className="fc-vehicles">
         {draft.vehicles.map((v, i) => (
           <fieldset key={v.vehicle_type} className={`fc-vehicle ${v.enabled ? '' : 'is-off'}`}>
@@ -125,6 +233,19 @@ function FormulaCard({ formula, draft, setDraft, onSaved }) {
                   onChange={(x) => setVehicle(i, 'extra_passenger', x)} />
               )}
             </div>
+            <details className="fc-costs">
+              <summary>Running costs (for fuel prices and the profit check)</summary>
+              <div className="fc-grid">
+                <DecimalField label="Fuel share of the fare (%)" value={String(v.fuel_share ?? '')}
+                  onChange={(x) => setVehicle(i, 'fuel_share', x)} hint="How much of the fare is fuel." />
+                <DecimalField label="Km per litre" value={String(v.km_per_litre ?? '')}
+                  onChange={(x) => setVehicle(i, 'km_per_litre', x)} hint="In town traffic." />
+                <NumberField label="Wear per km" value={String(v.wear_per_km ?? '')}
+                  onChange={(x) => setVehicle(i, 'wear_per_km', x)} />
+                <DecimalField label="Empty km to pickup" value={String(v.pickup_km ?? '')}
+                  onChange={(x) => setVehicle(i, 'pickup_km', x)} hint="Unpaid driving per trip." />
+              </div>
+            </details>
             <p className="muted small">
               Example: 3 km = {naira(Math.max(Number(v.minimum || 0), Math.round(
                 (Number(v.base || 0) + Number(v.per_km || 0) * 3) / Math.max(1, Number(v.round_to || 1)),
@@ -133,6 +254,7 @@ function FormulaCard({ formula, draft, setDraft, onSaved }) {
           </fieldset>
         ))}
       </div>
+      <ProfitCheck draft={draft} commission={commission} />
     </section>
   )
 }
@@ -532,6 +654,7 @@ export default function AdminFaresPage() {
           </section>
 
           {draft && <FormulaCard formula={data.formula} draft={draft} setDraft={setDraft}
+            commission={data.commission_percent ?? 10}
             onSaved={() => {
               setNotice('Formula saved. Check the preview below, then apply.')
               load(areaId)

@@ -7937,3 +7937,73 @@ def test_database_busy_answers_503_quickly(client):
              "query_string": b"", "server": ("test", 80), "scheme": "http"}
     response = asyncio.run(main_module.database_busy(Request(scope), PoolTimeoutError("pool full")))
     assert response.status_code == 503 and response.headers["retry-after"] == "2"
+
+
+# ---------- Fuel-linked fares ----------
+
+def _set_fuel(client, admin, area_id, enabled, current, reference=1400, **vehicle_changes):
+    rules = client.get(f"/api/v1/admin/fare-calculator?service_area_id={area_id}", headers=admin).json()["formula"]
+    rules["fuel"] = {"enabled": enabled, "reference_price": reference, "current_price": current}
+    for v in rules["vehicles"]:
+        v.update(vehicle_changes.get(v["vehicle_type"], {}))
+    saved = client.put("/api/v1/admin/fare-calculator/formula", json=rules, headers=admin)
+    assert saved.status_code == 200, saved.text
+    return saved.json()
+
+
+def test_fares_follow_the_fuel_price(client, monkeypatch):
+    monkeypatch.setattr(settings, "geoapify_api_key", None)
+    admin = login(client, *ADMIN_LOGIN)
+    passenger = login(client, *PASSENGER_LOGIN)
+    area_id, (a, b, _c), _manual = _calc_area(client)
+
+    def car_price():
+        r = client.get(f"/api/v1/place-fare-options?origin_place_id={a}&destination_place_id={b}")
+        assert r.status_code == 200, r.text
+        return next(o for o in r.json() if o["vehicle_type"] == "car")["quoted_fare"]
+
+    assert car_price() == "5000.00"
+    # Defaults for the running costs are filled in per vehicle.
+    rules = client.get(f"/api/v1/admin/fare-calculator?service_area_id={area_id}", headers=admin).json()
+    car = next(v for v in rules["formula"]["vehicles"] if v["vehicle_type"] == "car")
+    assert car["fuel_share"] == 60 and car["km_per_litre"] == 9.0 and car["pickup_km"] == 2.0
+    assert rules["formula"]["fuel"]["enabled"] is False and rules["commission_percent"] == 10.0
+
+    # Petrol +10% (N1,400 -> N1,540): a car fare that is 60% fuel goes up 6%, rounded to N50.
+    _set_fuel(client, admin, area_id, True, 1540)
+    assert car_price() == "5300.00"
+    # The booking charges the same, worked out on the server.
+    booked = client.post("/api/v1/ride-requests", headers=passenger, json={
+        "origin_place_id": a, "destination_place_id": b, "vehicle_type": "car", "passenger_count": 1})
+    assert booked.status_code == 201, booked.text
+    assert booked.json()["quoted_fare"] == "5300.00"
+    with session_for(client) as db:
+        db.get(RideRequest, booked.json()["id"]).status = "cancelled"
+        db.commit()
+    # Cheaper fuel lowers fares too; switching the link off restores the set prices.
+    _set_fuel(client, admin, area_id, True, 1260)
+    assert car_price() == "4700.00"
+    _set_fuel(client, admin, area_id, False, 1540)
+    assert car_price() == "5000.00"
+
+    # Dropped pins move with fuel as well (okada: 45% fuel share by default).
+    _calc_area.area_id = area_id
+    _enable_pins(client, admin)
+    pin = {"latitude": 7.6250, "longitude": 5.2200, "label": "Blue gate"}
+    quote = lambda: next(o for o in client.post("/api/v1/point-fare-options", json={
+        "origin": {"place_id": a}, "destination": {"point": pin}}).json()["options"]
+        if o["vehicle_type"] == "motorcycle")["quoted_fare"]
+    assert quote() == "1500.00"
+    _set_fuel(client, admin, area_id, True, 1960)  # +40% fuel -> +18% fare
+    assert quote() == "1750.00"
+
+
+def test_fuel_settings_are_checked(client):
+    admin = login(client, *ADMIN_LOGIN)
+    area_id, _places, _manual = _calc_area(client)
+    rules = client.get(f"/api/v1/admin/fare-calculator?service_area_id={area_id}", headers=admin).json()["formula"]
+    rules["fuel"] = {"enabled": True, "reference_price": 1400, "current_price": 5}
+    assert client.put("/api/v1/admin/fare-calculator/formula", json=rules, headers=admin).status_code == 422
+    rules["fuel"]["current_price"] = 1500
+    rules["vehicles"][0]["fuel_share"] = 140
+    assert client.put("/api/v1/admin/fare-calculator/formula", json=rules, headers=admin).status_code == 422

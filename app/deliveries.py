@@ -28,6 +28,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app import messaging, promos
+from app import fuel_pricing
 from app.app_settings import booking_rules, delivery_rules, is_motorcycle, quote_amount
 from app.auth import get_current_user, require_staff
 from app.config import settings
@@ -87,6 +88,7 @@ def delivery_options(db: Session, origin_id: int, destination_id: int) -> list[d
         PlaceFare.origin_place_id == origin_id, PlaceFare.destination_place_id == destination_id,
         PlaceFare.is_active.is_(True)))}
     rules, extras = booking_rules(db), delivery_rules(db)
+    fuel_rules = fuel_pricing.current_rules(db)
     options = []
     for size, meta in SIZES.items():
         found = _fare_for(fares, size)
@@ -94,7 +96,7 @@ def delivery_options(db: Session, origin_id: int, destination_id: int) -> list[d
             continue
         vehicle, fare = found
         extra = Decimal(extras.get(f"{size}_extra", 0))
-        price = (quote_amount(rules, fare, vehicle, 1) + extra).quantize(Decimal("0.01"))
+        price = (quote_amount(rules, fare, vehicle, 1, fuel_rules) + extra).quantize(Decimal("0.01"))
         options.append({"size": size, "label": meta["label"], "hint": meta["hint"], "vehicle_type": vehicle,
                         "price": str(price)})
     return options

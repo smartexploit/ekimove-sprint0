@@ -22,6 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app import fuel_pricing
 from app.app_settings import booking_rules, max_passengers, quote_amount
 from app.auth import require_staff
 from app.config import settings
@@ -151,6 +152,7 @@ def public_fares(db: Session, limit: int = 300) -> list[dict]:
             Place.id.in_({fare.destination_place_id for fare, *_ in rows}), Place.status == "active"))
     }
     rules = booking_rules(db)
+    fuel_rules = fuel_pricing.current_rules(db)
     result = []
     for fare, origin, area, _zone in rows:
         destination = destinations.get(fare.destination_place_id)
@@ -158,7 +160,7 @@ def public_fares(db: Session, limit: int = 300) -> list[dict]:
             continue
         result.append({
             "area": area.name, "from": origin.name, "to": destination.name, "vehicle_type": fare.vehicle_type,
-            "amount": str(quote_amount(rules, fare, fare.vehicle_type, 1)),
+            "amount": str(quote_amount(rules, fare, fare.vehicle_type, 1, fuel_rules)),
         })
     result.sort(key=lambda item: (item["area"], item["from"], item["to"], item["vehicle_type"]))
     return result[:limit]

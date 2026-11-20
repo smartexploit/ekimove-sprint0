@@ -368,3 +368,12 @@ Scaling knobs (Render environment variables on the API service):
 - `DB_POOL_TIMEOUT` (default 8 s): when every connection is busy the API answers `503 Retry-After: 2` instead of letting requests pile up.
 - More instances: set `REDIS_URL` first so rate limits are shared between processes and instances.
 - Beyond a few hundred simultaneous trips: replace polling with server push (WebSockets/SSE) and merge the per-trip polls.
+
+
+## Fuel-linked fares and the driver profit check
+
+Admin → Fare calculator → **Fares follow the fuel price**. Prices (formula, listed routes, hand-set anchors, dropped pins) are set at the **reference fuel price**. Enter **Fuel price today** and save: every okada and car quote moves at once by `1 + fuel_share × (today / reference − 1)`, rounded to the vehicle's step (`app/fuel_pricing.py`). Stored prices never change, so returning to the reference price restores them; extras (second passenger, delivery size) don't move. Moving-vehicle jobs are quoted by hand and aren't affected.
+
+Each vehicle has **running costs** (fuel share %, km per litre, wear per km, empty km to pickup; defaults okada 45% / 40 km/L / ₦15 / 1.5 km, car 60% / 9 km/L / ₦40 / 2 km). The **Driver profit check** table uses them to show what a driver keeps on 3, 6 and 10 km trips after commission, fuel and wear: red is a loss.
+
+Places that aren't on the list: tick **Riders can drop a pin** in the same card; such trips are priced from road distance (Google or Geoapify, else straight line × road factor) with anchors and the fuel link.

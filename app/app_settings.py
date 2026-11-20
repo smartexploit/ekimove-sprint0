@@ -99,8 +99,14 @@ def seats_needed(vehicle_type: str, passenger_count: int) -> int:
     return 1 if is_motorcycle(vehicle_type) else passenger_count
 
 
-def quote_amount(rules: dict, fare, vehicle_type: str, passenger_count: int) -> Decimal:
+def quote_amount(rules: dict, fare, vehicle_type: str, passenger_count: int, fuel_rules: dict | None = None) -> Decimal:
+    """Route price for this many passengers. ``fuel_rules`` (the fare formula)
+    moves the route price with the fuel price; extras stay as set."""
     base = Decimal(fare.base_amount) * Decimal(fare.vehicle_multiplier)
+    if fuel_rules is not None:
+        from app import fuel_pricing
+
+        base = fuel_pricing.adjust(fuel_rules, vehicle_type, base)
     extra_each = Decimal(fare.extra_passenger_amount or 0)
     if is_motorcycle(vehicle_type):
         extras = Decimal(0)

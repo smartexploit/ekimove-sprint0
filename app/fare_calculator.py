@@ -59,6 +59,31 @@ class VehicleFormula(BaseModel):
     minimum: int = Field(ge=0, le=500_000)
     round_to: int = Field(ge=1, le=1_000)
     extra_passenger: int = Field(default=0, ge=0, le=100_000)
+    # Fuel link (see app/fuel_pricing.py): the share of this vehicle's fare
+    # that is fuel, and the running costs used by the driver profit check.
+    fuel_share: int | None = Field(default=None, ge=0, le=100)
+    km_per_litre: float | None = Field(default=None, gt=0, le=200)
+    wear_per_km: int | None = Field(default=None, ge=0, le=10_000)
+    pickup_km: float | None = Field(default=None, ge=0, le=20)
+
+    @model_validator(mode="after")
+    def running_cost_defaults(self):
+        bike = self.vehicle_type in ("motorcycle", "okada", "bike")
+        defaults = {"fuel_share": 45 if bike else 60, "km_per_litre": 40.0 if bike else 9.0,
+                    "wear_per_km": 15 if bike else 40, "pickup_km": 1.5 if bike else 2.0}
+        for key, value in defaults.items():
+            if getattr(self, key) is None:
+                setattr(self, key, value)
+        return self
+
+
+class Fuel(BaseModel):
+    """Fares are set at the reference fuel price; when the current price
+    differs, the fuel share of every fare moves with it."""
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = False
+    reference_price: int = Field(default=1400, ge=100, le=50_000)
+    current_price: int = Field(default=1400, ge=100, le=50_000)
 
 
 class Formula(BaseModel):
@@ -74,6 +99,7 @@ class Formula(BaseModel):
     use_anchors: bool = True
     anchor_near_km: float = Field(default=1.0, ge=0.2, le=3.0)
     anchor_reach_km: float = Field(default=3.0, ge=0.5, le=10.0)
+    fuel: Fuel = Field(default_factory=Fuel)
     vehicles: list[VehicleFormula] = Field(min_length=1, max_length=8)
 
     @model_validator(mode="after")
@@ -324,6 +350,7 @@ def preview(db: Session, area_id: int) -> dict:
         "map_service": bool(distance_provider()),
         "summary": summary, "routes": routes,
         "anchors": sum(len(v) for v in anchors.values()),
+        "commission_percent": settings.commission_percent,
     }
 
 
