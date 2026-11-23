@@ -8,6 +8,7 @@ import LazyMap from '../../components/map/LazyMap.jsx'
 import { getLiveMap } from '../../services/tripService.js'
 import { markDelivered } from '../../services/deliveryService.js'
 import { formatDateTime } from '../../utils/format.js'
+import { whenVisible } from '../../utils/whenVisible.js'
 
 const REFRESH_MS = 10000
 const STATE = {
@@ -30,7 +31,7 @@ export default function AdminMapPage() {
   useEffect(() => {
     let active = true
     Promise.resolve().then(() => active && load())
-    const timer = window.setInterval(load, REFRESH_MS)
+    const timer = window.setInterval(whenVisible(load), REFRESH_MS)
     return () => {
       active = false
       window.clearInterval(timer)

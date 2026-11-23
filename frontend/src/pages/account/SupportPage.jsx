@@ -12,6 +12,7 @@ import {
   startThread,
 } from '../../services/accountService.js'
 import { formatDateTime } from '../../utils/format.js'
+import { whenVisible } from '../../utils/whenVisible.js'
 
 const POLL_MS = 5000
 
@@ -86,7 +87,7 @@ export default function SupportPage() {
       .then((data) => active && setThread(data))
       .catch((err) => active && setError(err.message || 'Could not open this conversation.'))
     load()
-    const timer = window.setInterval(load, POLL_MS)
+    const timer = window.setInterval(whenVisible(load), POLL_MS)
     return () => {
       active = false
       window.clearInterval(timer)

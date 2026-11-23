@@ -3,6 +3,7 @@ import { KeyRound, Share2, Star } from 'lucide-react'
 import LazyMap from '../map/LazyMap.jsx'
 import { getTracking, shareTrip, stopSharingTrip } from '../../services/tripService.js'
 import { etaText, tripMarkers } from '../../utils/tracking.js'
+import { whenVisible } from '../../utils/whenVisible.js'
 
 const POLL_MS = 8000
 
@@ -19,7 +20,7 @@ export default function TripTracker({ rideId, emergencyContact }) {
     let active = true
     const load = () => getTracking(rideId).then((data) => active && setView(data)).catch(() => {})
     load()
-    const timer = window.setInterval(load, POLL_MS)
+    const timer = window.setInterval(whenVisible(load), POLL_MS)
     return () => {
       active = false
       window.clearInterval(timer)

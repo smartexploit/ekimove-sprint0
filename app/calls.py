@@ -284,8 +284,22 @@ def incoming_call(current_user: User = Depends(get_current_user), db: Session = 
         _settle(db, call)
         db.commit()
     if call is None or call.status != "ringing":
-        return {"call": None}
-    return {"call": call_view(db, call, current_user)}
+        # Calls only happen during a trip, so check often only while on one.
+        return {"call": None, "next_check": TRIP_CHECK_SECONDS if _on_a_trip(db, current_user) else IDLE_CHECK_SECONDS}
+    return {"call": call_view(db, call, current_user), "next_check": TRIP_CHECK_SECONDS}
+
+
+TRIP_CHECK_SECONDS = 4
+IDLE_CHECK_SECONDS = 12
+ON_TRIP_STATUSES = ("assigned", "driver_arriving", "in_progress")
+
+
+def _on_a_trip(db: Session, user: User) -> bool:
+    as_passenger = (select(Ride.id).join(RideRequest, Ride.request_id == RideRequest.id)
+                    .where(RideRequest.passenger_user_id == user.id, Ride.status.in_(ON_TRIP_STATUSES)))
+    as_driver = (select(Ride.id).join(Driver, Ride.driver_id == Driver.id)
+                 .where(Driver.user_id == user.id, Ride.status.in_(ON_TRIP_STATUSES)))
+    return db.scalar(as_passenger.union_all(as_driver).limit(1)) is not None
 
 
 @router.get("/calls/{call_id}")

@@ -90,6 +90,8 @@ export default function DriverStatusPage() {
         is_online: result.is_online,
       }))
       setActionMessage(result.message || 'Online status updated.')
+      // Let the trip watcher switch to fast (online) or slow (offline) checks now.
+      window.dispatchEvent(new Event('ekimove:driver-status'))
     } catch (err) {
       setActionError(err.message || 'Unable to update your online status.')
     } finally {

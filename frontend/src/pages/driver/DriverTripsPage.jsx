@@ -15,6 +15,7 @@ import { BadgeCheck, Star } from 'lucide-react'
 import { apiRequest } from '../../services/authService.js'
 import { formatNaira, formatShortDate } from '../../utils/format.js'
 import { vehicleLabel } from '../../utils/vehicles.js'
+import { whenVisible } from '../../utils/whenVisible.js'
 
 const nextStatus = {
   assigned: 'driver_arriving',
@@ -228,7 +229,7 @@ export default function DriverTripsPage() {
     }
 
     fetchRides()
-    const intervalId = window.setInterval(fetchRides, 15000)
+    const intervalId = window.setInterval(whenVisible(fetchRides), 15000)
     // Reload at once when the driver accepts an offer.
     window.addEventListener(TRIPS_CHANGED_EVENT, fetchRides)
     return () => {

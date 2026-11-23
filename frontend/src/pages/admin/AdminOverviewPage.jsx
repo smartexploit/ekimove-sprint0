@@ -7,6 +7,7 @@ import Alert from '../../components/ui/Alert.jsx'
 import NotificationsCard from '../../components/account/NotificationsCard.jsx'
 import { getOverview } from '../../services/accountService.js'
 import { formatDateTime, formatNaira } from '../../utils/format.js'
+import { whenVisible } from '../../utils/whenVisible.js'
 
 const naira = (value) => formatNaira(value, { decimals: 0 })
 const REFRESH_MS = 20000
@@ -65,7 +66,7 @@ export default function AdminOverviewPage() {
   useEffect(() => {
     let active = true
     Promise.resolve().then(() => active && load())
-    const timer = window.setInterval(load, REFRESH_MS)
+    const timer = window.setInterval(whenVisible(load), REFRESH_MS)
     return () => {
       active = false
       window.clearInterval(timer)

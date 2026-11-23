@@ -10,6 +10,7 @@ import { formatNaira } from '../../utils/format.js'
 import { vehicleLabel } from '../../utils/vehicles.js'
 import AutoDispatchCard from '../../components/admin/AutoDispatchCard.jsx'
 import DriverRoster from '../../components/admin/DriverRoster.jsx'
+import { whenVisible } from '../../utils/whenVisible.js'
 
 function waited(seconds) {
   if (seconds < 60) return `${seconds}s`
@@ -91,7 +92,7 @@ export default function AdminDispatchPage() {
 
   // Keep the automatic-offer status fresh without disturbing a selection.
   useEffect(() => {
-    const timer = window.setInterval(() => loadRequests(true), 5000)
+    const timer = window.setInterval(whenVisible(() => loadRequests(true)), 5000)
     return () => window.clearInterval(timer)
   }, [loadRequests])
 

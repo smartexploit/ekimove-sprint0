@@ -128,6 +128,7 @@ export function CallProvider({ children }) {
   useEffect(() => {
     let timer = null
     let stopped = false
+    let delay = INCOMING_POLL_MS
     const check = async () => {
       timer = null
       const user = getStoredUser()
@@ -135,7 +136,9 @@ export function CallProvider({ children }) {
       if (getAccessToken() && CALL_ROLES.includes(user?.role) && document.visibilityState === 'visible'
           && !session.current && !viewRef.current) {
         try {
-          const { call } = await getIncomingCall()
+          const { call, next_check: nextCheck } = await getIncomingCall()
+          // The server says how soon to check again: often during a trip, less often otherwise.
+          delay = Math.min(Math.max(Number(nextCheck) || 4, 2), 30) * 1000
           if (call && !seen.current.has(call.id) && !session.current && !viewRef.current) {
             seen.current.add(call.id)
             setView({ state: 'incoming', call, muted: false })
@@ -144,7 +147,7 @@ export function CallProvider({ children }) {
           /* checked again shortly */
         }
       }
-      if (!stopped) timer = window.setTimeout(check, INCOMING_POLL_MS)
+      if (!stopped) timer = window.setTimeout(check, delay)
     }
     const wake = () => {
       if (document.visibilityState === 'visible' && timer) {

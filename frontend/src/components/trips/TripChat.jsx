@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { MessageCircle, Send } from 'lucide-react'
 import { getTripMessages, sendTripMessage } from '../../services/promoService.js'
+import { whenVisible } from '../../utils/whenVisible.js'
 
 const POLL_MS = 5000
 const QUICK = {
@@ -27,7 +28,7 @@ export default function TripChat({ rideId, who, unread = 0, other = who === 'dri
     let active = true
     const load = () => getTripMessages(rideId).then((data) => active && setChat(data)).catch(() => {})
     load()
-    const timer = window.setInterval(load, POLL_MS)
+    const timer = window.setInterval(whenVisible(load), POLL_MS)
     return () => {
       active = false
       window.clearInterval(timer)

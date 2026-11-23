@@ -56,14 +56,25 @@ export default function OfferWatcher() {
   const lastOfferId = useRef(null)
   const [fullSeconds, setFullSeconds] = useState(30)
 
-  // Poll for offers while the page is visible.
+  // Poll for offers while the page is visible. The server says how soon to
+  // check again: every few seconds while online, much less often while offline.
   useEffect(() => {
     let active = true
+    let timer = null
+    let delay = POLL_MS
+    const schedule = () => {
+      window.clearTimeout(timer)
+      if (active) timer = window.setTimeout(check, delay)
+    }
     const check = () => {
-      if (document.visibilityState !== 'visible') return
+      if (document.visibilityState !== 'visible') {
+        schedule()
+        return
+      }
       getCurrentOffer()
         .then((data) => {
           if (!active) return
+          delay = Math.min(Math.max(Number(data.next_check) || 3, 2), 60) * 1000
           setOnline(Boolean(data.is_online))
           const next = data.offer
           setOffer(next)
@@ -78,14 +89,20 @@ export default function OfferWatcher() {
           }
         })
         .catch(() => {})
+        .finally(schedule)
+    }
+    const wake = () => {
+      if (document.visibilityState === 'visible') check()
     }
     check()
-    const timer = window.setInterval(check, POLL_MS)
-    document.addEventListener('visibilitychange', check)
+    document.addEventListener('visibilitychange', wake)
+    // Going online or offline changes how often to check, so check right away.
+    window.addEventListener('ekimove:driver-status', check)
     return () => {
       active = false
-      window.clearInterval(timer)
-      document.removeEventListener('visibilitychange', check)
+      window.clearTimeout(timer)
+      document.removeEventListener('visibilitychange', wake)
+      window.removeEventListener('ekimove:driver-status', check)
     }
   }, [])
 

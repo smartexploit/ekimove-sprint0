@@ -8113,3 +8113,49 @@ def test_automatic_area_needs_pinned_places(client):
     assert refused.status_code == 422 and "Pin your places first" in refused.json()["detail"]
     rows = client.get("/api/v1/admin/service-areas", headers=admin).json()
     assert next(r for r in rows if r["id"] == area_id)["unpinned_places"] == 1
+
+
+# ---------- how often the apps check (database traffic) ----------
+
+def test_apps_check_less_often_when_nothing_can_happen(client):
+    driver = login(client, *DRIVER_LOGIN)
+    with session_for(client) as db:
+        db.query(Driver).update({Driver.is_online: False})
+        db.commit()
+    assert client.get("/api/v1/driver/offers/current", headers=driver).json()["next_check"] == 20
+    with session_for(client) as db:
+        db.query(Driver).update({Driver.is_online: True})
+        db.commit()
+    assert client.get("/api/v1/driver/offers/current", headers=driver).json()["next_check"] == 3
+    # Nobody is on a trip, so calls are checked slowly.
+    passenger = login(client, *PASSENGER_LOGIN)
+    assert client.get("/api/v1/calls/incoming", headers=passenger).json() == {"call": None, "next_check": 12}
+    assert client.get("/api/v1/calls/incoming", headers=driver).json()["next_check"] == 12
+
+
+def test_call_check_is_quick_during_a_trip(client):
+    passenger, driver, _admin, _ride_id = _call_parties(client)
+    assert client.get("/api/v1/calls/incoming", headers=passenger).json()["next_check"] == 4
+    assert client.get("/api/v1/calls/incoming", headers=driver).json()["next_check"] == 4
+
+
+def test_quiet_offer_check_stays_cheap(client):
+    from sqlalchemy import event
+    from sqlalchemy.engine import Engine
+    import app.dispatch as dispatch_module
+
+    driver = login(client, *DRIVER_LOGIN)
+    statements = []
+
+    def record(conn, cursor, statement, params, context, executemany):
+        statements.append(statement)
+
+    dispatch_module.reset_dispatch_throttle()
+    event.listen(Engine, "before_cursor_execute", record)
+    try:
+        assert client.get("/api/v1/driver/offers/current", headers=driver).status_code == 200
+    finally:
+        event.remove(Engine, "before_cursor_execute", record)
+    # No trip is waiting, so the dispatch settings aren't read at all.
+    assert not any("app_settings" in s for s in statements)
+    assert len(statements) <= 5

@@ -7,6 +7,7 @@ import LazyMap from '../../components/map/LazyMap.jsx'
 import { getSharedTrip } from '../../services/tripService.js'
 import { etaText, tripMarkers } from '../../utils/tracking.js'
 import { vehicleLabel } from '../../utils/vehicles.js'
+import { whenVisible } from '../../utils/whenVisible.js'
 
 /** Public page a passenger shares with a trusted contact. No sign-in. */
 export default function TrackSharePage() {
@@ -24,7 +25,7 @@ export default function TrackSharePage() {
       })
       .catch((err) => active && setError(err.message || 'This trip link isn’t available.'))
     load()
-    const timer = window.setInterval(load, 10000)
+    const timer = window.setInterval(whenVisible(load), 10000)
     return () => {
       active = false
       window.clearInterval(timer)

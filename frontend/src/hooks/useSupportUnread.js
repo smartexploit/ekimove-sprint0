@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getSupportUnread } from '../services/accountService.js'
+import { whenVisible } from '../utils/whenVisible.js'
 
 /** Number of support conversations with replies not yet read (polls). */
 export default function useSupportUnread(enabled = true) {
@@ -11,7 +12,7 @@ export default function useSupportUnread(enabled = true) {
       .then((data) => active && setUnread(Number(data?.unread) || 0))
       .catch(() => {})
     load()
-    const timer = window.setInterval(load, 30000)
+    const timer = window.setInterval(whenVisible(load), 30000)
     return () => {
       active = false
       window.clearInterval(timer)

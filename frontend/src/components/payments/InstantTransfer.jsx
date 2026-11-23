@@ -8,6 +8,7 @@ import {
   getRidePayment,
 } from '../../services/paymentService.js'
 import { formatNaira } from '../../utils/format.js'
+import { whenVisible } from '../../utils/whenVisible.js'
 
 const POLL_MS = 5000
 
@@ -45,7 +46,7 @@ export default function InstantTransfer({ rideId, amount, paid, onPaid, onUnavai
           if (active && payment?.status === 'confirmed') onPaid(payment)
         })
         .catch(() => {})
-    const timer = window.setInterval(check, POLL_MS)
+    const timer = window.setInterval(whenVisible(check), POLL_MS)
     return () => {
       active = false
       window.clearInterval(timer)

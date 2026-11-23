@@ -69,6 +69,8 @@ DEFAULTS = {"auto_dispatch_enabled": "true", "dispatch_offer_seconds": "30", "di
 _throttle_lock = threading.Lock()
 _last_run = 0.0
 MIN_SECONDS_BETWEEN_RUNS = 2.0
+ONLINE_CHECK_SECONDS = 3
+OFFLINE_CHECK_SECONDS = 20
 
 
 def _now() -> datetime:
@@ -307,21 +309,28 @@ def advance_dispatch(db: Session, force: bool = False) -> None:
         _last_run = time.monotonic()
     try:
         now = _now()
+        expired = False
         for offer in db.scalars(select(RideOffer).where(RideOffer.status == "pending")).all():
             if (_as_utc(offer.expires_at) or now) <= now:
                 offer.status = "expired"
                 offer.responded_at = now
-        db.commit()
+                expired = True
+        if expired:
+            db.commit()
 
-        rules = dispatch_rules(db)
-        if not rules["auto_dispatch_enabled"]:
-            return
         waiting_ids = db.scalars(
             select(RideRequest.id).where(RideRequest.status == "requested",
                                          or_(RideRequest.dispatch_status.is_(None),
                                              RideRequest.dispatch_status != "manual"))
             .order_by(RideRequest.created_at, RideRequest.id)
         ).all()
+        if not waiting_ids:
+            # Nothing to offer: skip reading the dispatch settings (this runs on
+            # every driver's offer check, so the quiet path must stay cheap).
+            return
+        rules = dispatch_rules(db)
+        if not rules["auto_dispatch_enabled"]:
+            return
         from app.app_settings import schedule_lead_minutes  # avoid an import cycle
         from app.scheduling import due_for_dispatch
 
@@ -431,7 +440,11 @@ def my_current_offer(current_user: User = Depends(get_current_user), db: Session
     offer = db.scalar(select(RideOffer).where(RideOffer.driver_id == driver.id, RideOffer.status == "pending"))
     if offer is not None and (_as_utc(offer.expires_at) or _now()) <= _now():
         offer = None
-    return {"offer": offer_result(db, offer) if offer else None, "is_online": driver.is_online}
+    # How soon the app should check again: quickly while the driver can get
+    # trips, slowly while they're offline (this check runs on every open app).
+    next_check = ONLINE_CHECK_SECONDS if driver.is_online or offer else OFFLINE_CHECK_SECONDS
+    return {"offer": offer_result(db, offer) if offer else None, "is_online": driver.is_online,
+            "next_check": next_check}
 
 
 def _my_pending_offer(db: Session, offer_id: int, driver: Driver) -> RideOffer:
