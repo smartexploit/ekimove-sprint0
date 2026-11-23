@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useOutletContext } from 'react-router-dom'
-import { ArrowRight, Gift, LifeBuoy, Package, MessageCircle, Route, Truck, UserRound, Wallet } from 'lucide-react'
+import { ArrowRight, Bus, Gift, LifeBuoy, Package, MessageCircle, Route, Truck, UserRound, Wallet } from 'lucide-react'
 import VehicleIcon from '../../components/ui/VehicleIcon.jsx'
 import useBookingRules from '../../hooks/useBookingRules.js'
 import useSupportUnread from '../../hooks/useSupportUnread.js'
@@ -71,6 +71,17 @@ export default function DashboardPage() {
           </nav>
           <Hills base="#F2F5F1" />
         </section>
+
+        <Link to="/travel" className="card row row-between travel-promo">
+          <span className="row" style={{ gap: 12, flexWrap: 'nowrap' }}>
+            <span className="instant-icon" aria-hidden="true"><Bus size={20} /></span>
+            <span className="stack stack-sm">
+              <strong>Travelling home for the holidays?</strong>
+              <span className="muted small">Book your seat on an EkiMove bus to Lagos, Ibadan, Abeokuta, Akure or Abuja.</span>
+            </span>
+          </span>
+          <ArrowRight size={20} aria-hidden="true" />
+        </Link>
 
         <InstallAppCard />
 

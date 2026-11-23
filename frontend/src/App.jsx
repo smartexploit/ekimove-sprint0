@@ -20,6 +20,9 @@ const DriverApplicationPage = lazy(() => import('./pages/driver/DriverApplicatio
 const DriverStatusPage = lazy(() => import('./pages/driver/DriverStatusPage.jsx'))
 const DriverTripsPage = lazy(() => import('./pages/driver/DriverTripsPage.jsx'))
 const DriverEarningsPage = lazy(() => import('./pages/driver/DriverEarningsPage.jsx'))
+const DriverTravelPage = lazy(() => import('./pages/driver/DriverTravelPage.jsx'))
+const TravelPage = lazy(() => import('./pages/passenger/TravelPage.jsx'))
+const AdminTravelPage = lazy(() => import('./pages/admin/AdminTravelPage.jsx'))
 const HaulagePage = lazy(() => import('./pages/passenger/HaulagePage.jsx'))
 const InvitePage = lazy(() => import('./pages/passenger/InvitePage.jsx'))
 const SendPackagePage = lazy(() => import('./pages/passenger/SendPackagePage.jsx'))
@@ -98,6 +101,7 @@ export default function App() {
           <Route path="/admin/staff-cards" element={<AdminStaffCardsPage />} />
           <Route path="/admin/pins" element={<AdminPinsPage />} />
           <Route path="/admin/service-area" element={<AdminServiceAreaPage />} />
+          <Route path="/admin/travel" element={<AdminTravelPage />} />
           <Route path="/admin/dispatch" element={<AdminDispatchPage />} />
           <Route path="/admin/overview" element={<AdminOverviewPage />} />
           <Route path="/admin/map" element={<AdminMapPage />} />
@@ -120,9 +124,11 @@ export default function App() {
           <Route path="/driver/status" element={<DriverStatusPage />} />
           <Route path="/driver/trips" element={<DriverTripsPage />} />
           <Route path="/driver/earnings" element={<DriverEarningsPage />} />
+          <Route path="/driver/travel" element={<DriverTravelPage />} />
         </Route>
         <Route element={<ProtectedRoute requiredRole={['passenger', 'driver']} />}>
           <Route path="/profile" element={<ProfilePage />} />
+          <Route path="/travel" element={<TravelPage />} />
           <Route path="/support" element={<SupportPage />} />
           <Route path="/receipts/:rideId" element={<ReceiptPage />} />
         </Route>

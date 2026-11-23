@@ -187,7 +187,7 @@ class VehicleUpdate(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
     vehicle_type: str | None = Field(default=None, min_length=2, max_length=32)
     plate_number: str | None = Field(default=None, min_length=2, max_length=32)
-    capacity: int | None = Field(default=None, ge=1, le=8)
+    capacity: int | None = Field(default=None, ge=1, le=60)
 
 
 @router.patch("/driver-vehicles/{vehicle_id}")

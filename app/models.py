@@ -278,6 +278,8 @@ class BankDeposit(Base):
     account_number: Mapped[str | None] = mapped_column(String(20), nullable=True)
     sender_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
     payment_id: Mapped[int | None] = mapped_column(ForeignKey("payments.id", ondelete="RESTRICT"), nullable=True, index=True)
+    # Or the student-travel booking this money paid for.
+    travel_booking_id: Mapped[int | None] = mapped_column(ForeignKey("travel_bookings.id", ondelete="RESTRICT"), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(16), default="unmatched", nullable=False, index=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     resolved_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=True)
@@ -336,11 +338,12 @@ class EarningEntry(Base):
     __tablename__ = "earning_entries"
     __table_args__ = (
         CheckConstraint(
-            "kind IN ('trip', 'cancellation_fee', 'payout', 'payout_reversal', 'adjustment')",
+            "kind IN ('trip', 'cancellation_fee', 'payout', 'payout_reversal', 'adjustment', 'travel')",
             name="ck_earning_entries_kind",
         ),
         UniqueConstraint("ride_id", "kind", name="uq_earning_entries_ride_kind"),
         UniqueConstraint("payout_id", "kind", name="uq_earning_entries_payout_kind"),
+        UniqueConstraint("travel_departure_id", "kind", name="uq_earning_entries_travel_kind"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -348,6 +351,8 @@ class EarningEntry(Base):
     kind: Mapped[str] = mapped_column(String(24), index=True)
     ride_id: Mapped[int | None] = mapped_column(ForeignKey("rides.id", ondelete="RESTRICT"), nullable=True, index=True)
     payout_id: Mapped[int | None] = mapped_column(ForeignKey("driver_payouts.id", ondelete="RESTRICT"), nullable=True, index=True)
+    # Earnings from a completed student-travel departure (kind "travel").
+    travel_departure_id: Mapped[int | None] = mapped_column(ForeignKey("travel_departures.id", ondelete="RESTRICT"), nullable=True, index=True)
     gross: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"))
     commission: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"))
     commission_percent: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
@@ -901,4 +906,90 @@ class PlaceSuggestion(Base):
     reviewed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"),
                                                             nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class TravelDeparture(Base):
+    """A scheduled bus trip students book seats on (e.g. EKSU to Lagos)."""
+
+    __tablename__ = "travel_departures"
+    __table_args__ = (
+        CheckConstraint("status IN ('open', 'closed', 'departed', 'completed', 'cancelled')",
+                        name="ck_travel_departures_status"),
+        CheckConstraint("seats_total >= 1", name="ck_travel_departures_seats"),
+        CheckConstraint("price_per_seat >= 0", name="ck_travel_departures_price"),
+        CheckConstraint("deposit_percent BETWEEN 10 AND 100", name="ck_travel_departures_deposit"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    origin: Mapped[str] = mapped_column(String(80), index=True)          # the school, e.g. "EKSU"
+    pickup_spot: Mapped[str] = mapped_column(String(160))
+    destination: Mapped[str] = mapped_column(String(80), index=True)     # e.g. "Lagos"
+    drop_off: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    departs_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    seats_total: Mapped[int] = mapped_column(Integer)
+    price_per_seat: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    allow_deposit: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    deposit_percent: Mapped[int] = mapped_column(Integer, default=50, nullable=False)
+    balance_due_hours: Mapped[int] = mapped_column(Integer, default=24, nullable=False)
+    refund_cutoff_hours: Mapped[int] = mapped_column(Integer, default=48, nullable=False)
+    operator_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    driver_id: Mapped[int | None] = mapped_column(ForeignKey("drivers.id", ondelete="RESTRICT"), nullable=True, index=True)
+    vehicle_id: Mapped[int | None] = mapped_column(ForeignKey("vehicles.id", ondelete="RESTRICT"), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="open", nullable=False, index=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    departed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class TravelBooking(Base):
+    """Seats a student booked on a departure; the ticket code is shown at the bus."""
+
+    __tablename__ = "travel_bookings"
+    __table_args__ = (
+        CheckConstraint("status IN ('awaiting_payment', 'reserved', 'paid', 'cancelled', 'expired')",
+                        name="ck_travel_bookings_status"),
+        CheckConstraint("payment_option IN ('full', 'deposit')", name="ck_travel_bookings_option"),
+        CheckConstraint("seats BETWEEN 1 AND 10", name="ck_travel_bookings_seats"),
+        CheckConstraint("amount_paid >= 0", name="ck_travel_bookings_paid"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    departure_id: Mapped[int] = mapped_column(ForeignKey("travel_departures.id", ondelete="RESTRICT"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
+    ticket_code: Mapped[str] = mapped_column(String(16), unique=True, index=True)
+    seats: Mapped[int] = mapped_column(Integer)
+    traveller_names: Mapped[list] = mapped_column(JSON, default=list)
+    payment_option: Mapped[str] = mapped_column(String(8), default="full", nullable=False)
+    amount_total: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    deposit_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    amount_paid: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"))
+    status: Mapped[str] = mapped_column(String(20), default="awaiting_payment", nullable=False, index=True)
+    matric_number: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    kin_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # The student agreed that their name may be shared with their school.
+    share_with_school: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    checked_in_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    refund_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    refund_status: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)   # due / paid
+    refund_reference: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class TravelPayment(Base):
+    """Money received for a travel booking (a matched transfer or recorded by staff)."""
+
+    __tablename__ = "travel_payments"
+    __table_args__ = (CheckConstraint("amount > 0", name="ck_travel_payments_amount"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    booking_id: Mapped[int] = mapped_column(ForeignKey("travel_bookings.id", ondelete="RESTRICT"), index=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    method: Mapped[str] = mapped_column(String(24))          # bank_transfer / cash
+    reference: Mapped[str | None] = mapped_column(String(120), nullable=True, unique=True)
+    recorded_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

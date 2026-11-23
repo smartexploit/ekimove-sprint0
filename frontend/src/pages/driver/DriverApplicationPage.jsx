@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { CalendarClock, Car, CheckCircle2, Motorbike, Truck } from 'lucide-react'
+import { Bus, CalendarClock, Car, CheckCircle2, Motorbike, Truck } from 'lucide-react'
 import AuthLayout from '../../layouts/AuthLayout.jsx'
 import Alert from '../../components/ui/Alert.jsx'
 import PasswordInput from '../../components/ui/PasswordInput.jsx'
@@ -24,8 +24,9 @@ const VEHICLE_KINDS = [
   ['motorcycle', 'Motorcycle', 'Okada trips and small deliveries', Motorbike],
   ['car', 'Car', 'Rides for up to 4 passengers', Car],
   ['moving', 'Moving vehicle', 'Big car, van or Dyna truck for moving jobs', Truck],
+  ['bus', 'Travel bus', 'Long trips where students book seats ahead (14 to 60 seats)', Bus],
 ]
-const DEFAULT_SEATS = { motorcycle: 1, car: 4, big_car: 2, van: 2, dyna: 1 }
+const DEFAULT_SEATS = { motorcycle: 1, car: 4, big_car: 2, van: 2, dyna: 1, bus: 18 }
 
 export default function DriverApplicationPage() {
   const [error, setError] = useState('')
@@ -48,7 +49,7 @@ export default function DriverApplicationPage() {
     const email = String(form.get('email') || '').trim().toLowerCase()
     const plate = String(form.get('plate_number') || '').trim().replace(/\s+/g, ' ')
     const problem =
-      (vehicleKind ? '' : 'Choose your vehicle: a motorcycle, a car or a moving vehicle.') ||
+      (vehicleKind ? '' : 'Choose your vehicle: a motorcycle, a car, a moving vehicle or a travel bus.') ||
       (vehicleType ? '' : 'Choose which moving vehicle you drive: a big car, a van or a Dyna truck.') ||
       nameProblem(form.get('full_name'), 'full legal name') ||
       phoneProblem(form.get('phone')) ||
@@ -249,7 +250,9 @@ export default function DriverApplicationPage() {
                 max={SEAT_LIMITS[vehicleType] || 8} value={seats} onChange={(event) => setSeats(event.target.value)}
                 aria-describedby="vehicle-capacity-hint" required />
               <span className="field-hint" id="vehicle-capacity-hint">
-                {vehicleKind === 'moving'
+                {vehicleKind === 'bus'
+                  ? 'Passenger seats on the bus, not counting you. Students book these seats.'
+                  : vehicleKind === 'moving'
                   ? 'Seats for customers riding along with their load, not counting you.'
                   : 'Passengers you can carry, not counting you. Motorcycle: 1 or 2. Car: up to 4.'}
               </span>

@@ -348,14 +348,19 @@ async def paystack_webhook(request: Request, db: Session = Depends(get_db)) -> d
         return {"status": "duplicate"}
 
     payment = find_payment_for_deposit(db, deposit)
+    booking = None
     if payment is not None:
         confirm_payment_from_deposit(db, payment, deposit, None, "automatically")
     else:
-        deposit.note = "No unpaid ride with this exact fare was waiting for this passenger."
+        from app.travel import match_deposit  # avoid an import cycle
+
+        booking = match_deposit(db, deposit)
+    if payment is None and booking is None:
+        deposit.note = "No unpaid ride or travel ticket with this exact amount was waiting for this passenger."
         _audit(db, None, "deposit.unmatched", "bank_deposit", reference,
                f"Deposit of NGN {amount} could not be matched automatically.")
     db.commit()
-    return {"status": "matched" if payment is not None else "unmatched"}
+    return {"status": "matched" if payment is not None or booking is not None else "unmatched"}
 
 
 # --------------------------------------------------------------------------

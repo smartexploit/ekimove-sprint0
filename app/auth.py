@@ -143,6 +143,7 @@ STAFF_PERMISSIONS = {
     "finance": "Finance: payments, deposits, refunds, payouts and reports",
     "website": "Website and promotions: website text, launch status and promo codes",
     "pins": "Map pins: check place pins, set pins on site, add places and review riders' suggestions",
+    "travel": "Student travel: bus departures, seat bookings, tickets, check-in and school reports",
 }
 
 

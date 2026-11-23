@@ -18,7 +18,7 @@ import {
   Rocket,
   Route,
   ShieldCheck,
-  Wallet, Hexagon,
+  Wallet, Hexagon, Bus,
 } from 'lucide-react'
 import Logo from '../components/brand/Logo.jsx'
 import useSupportUnread from '../hooks/useSupportUnread.js'
@@ -31,6 +31,7 @@ const NAV = [
   ['/admin/map', 'Live map', MapIcon],
   ['/admin/dispatch', 'Dispatch', Route],
   ['/admin/loads', 'Loads', Truck],
+  ['/admin/travel', 'Student travel', Bus],
   ['/admin/support', 'Support', LifeBuoy],
   ['/admin/people', 'People', Users],
   ['/admin/payments', 'Payments', Wallet],

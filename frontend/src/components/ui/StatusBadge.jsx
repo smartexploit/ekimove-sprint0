@@ -44,6 +44,20 @@ const STATUS = {
     investigating: ['Investigating', 'gold'],
     resolved: ['Resolved', 'green'],
   },
+  ticket: {
+    awaiting_payment: ['Waiting for payment', 'gold'],
+    reserved: ['Seat reserved', 'bright'],
+    paid: ['Paid', 'green'],
+    cancelled: ['Cancelled', 'red'],
+    expired: ['Expired', 'neutral'],
+  },
+  departure: {
+    open: ['Open for booking', 'green'],
+    closed: ['Booking closed', 'gold'],
+    departed: ['On the road', 'solid'],
+    completed: ['Arrived', 'neutral'],
+    cancelled: ['Cancelled', 'red'],
+  },
   area: {
     draft: ['Draft', 'neutral'],
     pending: ['Pending', 'gold'],

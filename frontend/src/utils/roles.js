@@ -21,6 +21,7 @@ export const ADMIN_PAGES = {
   '/admin/team': 'super',
   '/admin/staff-cards': 'super',
   '/admin/pins': ['pins'],
+  '/admin/travel': ['travel'],
 }
 
 export const STAFF_ROLES = ['super_admin', 'staff']

@@ -17,7 +17,7 @@ from app.database import Base, get_db
 import app.main as main_module
 import app.driver_applications as driver_applications_module
 from app.main import app
-from app.models import (AuditLog, Driver, Fare, Payment, Place, PlaceFare, Ride, RideRequest, ServiceArea, User, Vehicle, Zone)
+from app.models import (AuditLog, Driver, EarningEntry, Fare, Payment, Place, PlaceFare, Ride, RideRequest, ServiceArea, TravelBooking, User, Vehicle, Zone)
 
 
 @pytest.fixture()
@@ -6736,7 +6736,8 @@ def add_staff_member(client, admin, permissions, email="tolu@ekimove.com.ng", ro
 def test_super_admin_adds_staff_with_a_temporary_password(client):
     admin = login(client, *ADMIN_LOGIN)
     listing = client.get("/api/v1/admin/staff", headers=admin).json()
-    assert {p["key"] for p in listing["permissions"]} == {"dispatch", "drivers", "support", "finance", "website", "pins"}
+    assert {p["key"] for p in listing["permissions"]} == {"dispatch", "drivers", "support", "finance", "website", "pins",
+                                                          "travel"}
     assert "support_agent" in listing["presets"]
     member, headers = add_staff_member(client, admin, ["support", "dispatch"])
     me = client.get("/api/v1/auth/me", headers=headers).json()
@@ -6744,7 +6745,7 @@ def test_super_admin_adds_staff_with_a_temporary_password(client):
     assert me["must_change_password"] is False and me["email"] == "tolu@ekimove.com.ng" and me["phone"] is None
     team = client.get("/api/v1/admin/staff", headers=admin).json()["team"]
     assert any(t["id"] == member["id"] and t["last_sign_in"] for t in team)
-    assert len(client.get("/api/v1/auth/me", headers=admin).json()["staff_permissions"]) == 6
+    assert len(client.get("/api/v1/auth/me", headers=admin).json()["staff_permissions"]) == 7
 
 
 def test_staff_need_a_work_email_and_sign_in_with_it(client):
@@ -6845,7 +6846,7 @@ def test_super_admin_can_add_a_second_super_admin(client, quiet_messaging_and_pu
     admin = login(client, *ADMIN_LOGIN)
     member, partner = add_staff_member(client, admin, [], email="partner@ekimove.com.ng", role="super_admin")
     me = client.get("/api/v1/auth/me", headers=partner).json()
-    assert me["role"] == "super_admin" and len(me["staff_permissions"]) == 6
+    assert me["role"] == "super_admin" and len(me["staff_permissions"]) == 7
     # Full access, including the team and settings.
     for path in ["/api/v1/admin/staff", "/api/v1/admin/settings", "/api/v1/admin/locations/fares"]:
         assert client.get(path, headers=partner).status_code == 200, path
@@ -8159,3 +8160,225 @@ def test_quiet_offer_check_stays_cheap(client):
     # No trip is waiting, so the dispatch settings aren't read at all.
     assert not any("app_settings" in s for s in statements)
     assert len(statements) <= 5
+
+
+
+# ---------- student travel ----------
+
+def _travel_departure(client, admin, **changes):
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    body = {"origin": "EKSU", "pickup_spot": "EKSU main gate", "destination": "Lagos", "drop_off": "Ojota park",
+            "departs_at": (_dt.now(_tz.utc) + _td(days=5)).isoformat(), "seats_total": 14,
+            "price_per_seat": "20000", "deposit_percent": 50, "balance_due_hours": 24, "refund_cutoff_hours": 48}
+    body.update(changes)
+    response = client.post("/api/v1/admin/travel/departures", json=body, headers=admin)
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def _book(client, headers, departure_id, seats=1, option="full", **extra):
+    names = extra.pop("names", [f"Student {i + 1}" for i in range(seats)])
+    response = client.post("/api/v1/travel/bookings", headers=headers, json={
+        "departure_id": departure_id, "seats": seats, "traveller_names": names, "payment_option": option, **extra})
+    return response
+
+
+def _driver_id(client):
+    with session_for(client) as db:
+        return db.scalar(select(Driver.id).join(User, Driver.user_id == User.id).where(User.phone == DRIVER_LOGIN[0]))
+
+
+def test_student_books_pays_deposit_then_balance_and_boards(client, paystack):
+    admin = login(client, *ADMIN_LOGIN)
+    student = login(client, *PASSENGER_LOGIN)
+    _create_virtual_account(client, student)
+    dep = _travel_departure(client, admin, driver_id=_driver_id(client))
+    listing = client.get("/api/v1/travel/departures").json()
+    assert listing["destinations"] == ["Lagos"] and listing["departures"][0]["seats_left"] == 14
+    assert listing["departures"][0]["deposit_per_seat"] == "10000.00"
+
+    booked = _book(client, student, dep["id"], seats=2, option="deposit", matric_number="eks/21/0042",
+                   share_with_school=True)
+    assert booked.status_code == 201, booked.text
+    ticket = booked.json()["booking"]
+    assert ticket["status"] == "awaiting_payment" and ticket["due_now"] == "20000.00"
+    assert ticket["amount_total"] == "40000.00" and ticket["ticket_code"].startswith("EKT")
+    assert client.get("/api/v1/travel/departures").json()["departures"][0]["seats_left"] == 12
+
+    # The deposit lands in the student's account and is matched to the booking.
+    assert _signed_webhook(client, _deposit_event(paystack, "trv-dep-1", "20000")).json() == {"status": "matched"}
+    mine = client.get("/api/v1/travel/bookings", headers=student).json()["bookings"][0]
+    assert mine["status"] == "reserved" and mine["balance"] == "20000.00" and mine["due_now"] == "20000.00"
+
+    # Not fully paid: the driver can't board them yet.
+    driver = login(client, *DRIVER_LOGIN)
+    refused = client.post(f"/api/v1/driver/travel/{dep['id']}/check-in", json={"code": ticket["ticket_code"]},
+                          headers=driver)
+    assert refused.status_code == 409 and "isn't paid yet" in refused.json()["detail"]
+
+    assert _signed_webhook(client, _deposit_event(paystack, "trv-dep-2", "20000")).json() == {"status": "matched"}
+    assert client.get("/api/v1/travel/bookings", headers=student).json()["bookings"][0]["status"] == "paid"
+    trips = client.get("/api/v1/driver/travel", headers=driver).json()
+    assert trips[0]["seats_booked"] == 2 and trips[0]["passengers"][0]["traveller_names"] == ["Student 1", "Student 2"]
+    assert "phone" not in trips[0]["passengers"][0]
+    boarded = client.post(f"/api/v1/driver/travel/{dep['id']}/check-in",
+                          json={"code": ticket["ticket_code"].lower()}, headers=driver)
+    assert boarded.status_code == 200 and boarded.json()["checked_in"] is True
+
+    # The trip happens; the driver is credited the fares minus 10%.
+    assert client.post(f"/api/v1/driver/travel/{dep['id']}/status", json={"status": "departed"},
+                       headers=driver).status_code == 200
+    assert client.post(f"/api/v1/driver/travel/{dep['id']}/status", json={"status": "completed"},
+                       headers=driver).status_code == 200
+    with session_for(client) as db:
+        entry = db.scalar(select(EarningEntry).where(EarningEntry.kind == "travel"))
+        assert entry.gross == Decimal("40000.00") and entry.amount == Decimal("36000.00")
+
+
+def test_seats_cannot_be_oversold_and_unpaid_holds_expire(client):
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    admin = login(client, *ADMIN_LOGIN)
+    student = login(client, *PASSENGER_LOGIN)
+    dep = _travel_departure(client, admin, seats_total=3)
+    assert _book(client, student, dep["id"], seats=3).status_code == 201
+    full = _book(client, login(client, "08000000002", "Second-Test-Password-2!"), dep["id"])
+    assert full.status_code == 409 and "full" in full.json()["detail"]
+    # Nobody paid within the hold time: the seats come back.
+    with session_for(client) as db:
+        for booking in db.scalars(select(TravelBooking)).all():
+            booking.created_at = _dt.now(_tz.utc) - _td(minutes=61)
+        db.commit()
+    assert client.get("/api/v1/travel/departures").json()["departures"][0]["seats_left"] == 3
+    assert client.get("/api/v1/travel/bookings", headers=student).json()["bookings"][0]["status"] == "expired"
+
+
+def test_deposit_rules_and_names_per_seat(client):
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    admin = login(client, *ADMIN_LOGIN)
+    student = login(client, *PASSENGER_LOGIN)
+    soon = _travel_departure(client, admin, departs_at=(_dt.now(_tz.utc) + _td(hours=10)).isoformat())
+    refused = _book(client, student, soon["id"], option="deposit")
+    assert refused.status_code == 409 and "pay in full" in refused.json()["detail"]
+    assert _book(client, student, soon["id"], seats=2, names=["Only One"]).status_code == 422
+    no_deposit = _travel_departure(client, admin, allow_deposit=False)
+    assert _book(client, student, no_deposit["id"], option="deposit").status_code == 409
+    assert _book(client, student, no_deposit["id"], seats=5).status_code == 422
+
+
+def test_cancelling_refunds_before_the_cutoff_only(client):
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    admin = login(client, *ADMIN_LOGIN)
+    student = login(client, *PASSENGER_LOGIN)
+    early = _travel_departure(client, admin)
+    late = _travel_departure(client, admin, departs_at=(_dt.now(_tz.utc) + _td(hours=30)).isoformat())
+    paid = []
+    for dep in (early, late):
+        booking = _book(client, student, dep["id"]).json()["booking"]
+        recorded = client.post(f"/api/v1/admin/travel/bookings/{booking['id']}/payments", headers=admin,
+                               json={"amount": "20000", "method": "cash"})
+        assert recorded.status_code == 200 and recorded.json()["fully_paid"] is True
+        paid.append(booking["id"])
+    first = client.post(f"/api/v1/travel/bookings/{paid[0]}/cancel", headers=student).json()["booking"]
+    assert first["status"] == "cancelled" and first["refund_amount"] == "20000.00" and first["refund_status"] == "due"
+    second = client.post(f"/api/v1/travel/bookings/{paid[1]}/cancel", headers=student).json()["booking"]
+    assert second["refund_amount"] == "0.00" and second["refund_status"] is None
+    # Staff record the refund as sent.
+    assert client.post(f"/api/v1/admin/travel/bookings/{paid[0]}/refund-paid", headers=admin,
+                       json={"reference": "TRF-001"}).json()["refund_status"] == "paid"
+
+
+def test_cancelled_departure_refunds_everyone(client):
+    admin = login(client, *ADMIN_LOGIN)
+    student = login(client, *PASSENGER_LOGIN)
+    dep = _travel_departure(client, admin)
+    booking = _book(client, student, dep["id"], option="deposit").json()["booking"]
+    client.post(f"/api/v1/admin/travel/bookings/{booking['id']}/payments", headers=admin,
+                json={"amount": "10000", "method": "bank_transfer", "reference": "BANK-1"})
+    unpaid = _book(client, login(client, "08000000002", "Second-Test-Password-2!"), dep["id"]).json()["booking"]
+    result = client.post(f"/api/v1/admin/travel/departures/{dep['id']}/status", headers=admin,
+                         json={"status": "cancelled"})
+    assert result.status_code == 200 and result.json()["refunds_due"] == "10000.00"
+    manifest = {b["booking_id"]: b for b in client.get(f"/api/v1/admin/travel/departures/{dep['id']}/manifest",
+                                                       headers=admin).json()["bookings"]}
+    assert manifest[booking["id"]]["refund_status"] == "due" and manifest[unpaid["id"]]["refund_status"] is None
+    assert all(b["status"] == "cancelled" for b in manifest.values())
+
+
+def test_school_report_counts_everyone_but_names_only_with_consent(client):
+    admin = login(client, *ADMIN_LOGIN)
+    dep = _travel_departure(client, admin)
+    ibadan = _travel_departure(client, admin, destination="Ibadan")
+    first = _book(client, login(client, *PASSENGER_LOGIN), dep["id"], seats=2, names=["Ada Obi", "Tunde Ade"],
+                  share_with_school=True, matric_number="EKS/21/1").json()["booking"]
+    second = _book(client, login(client, "08000000002", "Second-Test-Password-2!"), ibadan["id"],
+                   names=["Private Student"]).json()["booking"]
+    for booking in (first, second):
+        client.post(f"/api/v1/admin/travel/bookings/{booking['id']}/payments", headers=admin,
+                    json={"amount": booking["amount_total"], "method": "cash"})
+    report = client.get("/api/v1/admin/travel/report?origin=eksu", headers=admin).json()
+    assert report["travellers"] == 3 and report["departures"] == 2 and report["named_travellers"] == 2
+    assert report["by_destination"][0] == {"destination": "Lagos", "travellers": 2, "departures": 1}
+    csv_text = client.get("/api/v1/admin/travel/report.csv?origin=EKSU", headers=admin).text
+    assert "Ada Obi" in csv_text and "EKS/21/1" in csv_text and "Private Student" not in csv_text
+    assert "1 more traveller(s) did not agree" in csv_text
+
+
+def test_travel_desk_needs_the_travel_permission(client):
+    admin = login(client, *ADMIN_LOGIN)
+    student = login(client, *PASSENGER_LOGIN)
+    assert client.get("/api/v1/admin/travel/departures", headers=student).status_code == 403
+    _member, dispatcher = add_staff_member(client, admin, ["dispatch"])
+    assert client.get("/api/v1/admin/travel/departures", headers=dispatcher).status_code == 403
+    _member, travel = add_staff_member(client, admin, ["travel"], email="travel@ekimove.com.ng")
+    assert client.get("/api/v1/admin/travel/departures", headers=travel).status_code == 200
+    # Staff can't book seats; drivers only see their own buses.
+    dep = _travel_departure(client, admin)
+    assert _book(client, admin, dep["id"]).status_code == 403
+    assert client.post(f"/api/v1/driver/travel/{dep['id']}/check-in", json={"code": "EKTAAAAAA"},
+                       headers=login(client, *DRIVER_LOGIN)).status_code == 404
+
+
+def test_departure_checks(client):
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    admin = login(client, *ADMIN_LOGIN)
+    past = client.post("/api/v1/admin/travel/departures", headers=admin, json={
+        "origin": "EKSU", "pickup_spot": "Main gate", "destination": "Akure", "seats_total": 14,
+        "price_per_seat": "8000", "departs_at": (_dt.now(_tz.utc) - _td(hours=1)).isoformat()})
+    assert past.status_code == 422
+    dep = _travel_departure(client, admin)
+    student = login(client, *PASSENGER_LOGIN)
+    _book(client, student, dep["id"], seats=3)
+    body = {k: dep[k] for k in ("origin", "pickup_spot", "destination", "drop_off", "departs_at", "deposit_percent",
+                                "balance_due_hours", "refund_cutoff_hours")}
+    fewer = client.put(f"/api/v1/admin/travel/departures/{dep['id']}", headers=admin,
+                       json={**body, "seats_total": 2, "price_per_seat": "20000"})
+    assert fewer.status_code == 422
+    repriced = client.put(f"/api/v1/admin/travel/departures/{dep['id']}", headers=admin,
+                          json={**body, "seats_total": 14, "price_per_seat": "25000"})
+    assert repriced.status_code == 409
+
+
+def test_bus_drivers_can_apply_with_their_seat_count(client, monkeypatch):
+    bus = apply_as_driver(client, monkeypatch, vehicle_type="bus", capacity="18")
+    assert bus.status_code == 201, bus.text
+    too_big = apply_as_driver(client, monkeypatch, vehicle_type="bus", capacity="70", phone="08000000772",
+                              email="bus2@example.com", plate_number="EKT-772-AB")
+    assert too_big.status_code == 422 and "60" in str(too_big.json()["detail"])
+
+
+
+def test_travel_desk_lists_approved_bus_drivers(client):
+    admin = login(client, *ADMIN_LOGIN)
+    with session_for(client) as db:
+        driver_id = db.scalar(select(Driver.id).join(User, Driver.user_id == User.id).where(User.phone == DRIVER_LOGIN[0]))
+        db.add(Vehicle(driver_id=driver_id, vehicle_type="bus", plate_number="EKT-BUS-01", capacity=18, is_approved=True))
+        db.commit()
+    drivers = client.get("/api/v1/admin/travel/drivers", headers=admin).json()
+    assert drivers[0]["buses"] == [{"vehicle_id": drivers[0]["buses"][0]["vehicle_id"], "plate_number": "EKT-BUS-01",
+                                    "seats": 18}]
+    bus = drivers[0]["buses"][0]
+    too_many = client.post("/api/v1/admin/travel/departures", headers=admin, json={
+        "origin": "EKSU", "pickup_spot": "Main gate", "destination": "Akure", "seats_total": 20,
+        "price_per_seat": "8000", "departs_at": "2099-12-13T07:00", "driver_id": drivers[0]["driver_id"],
+        "vehicle_id": bus["vehicle_id"]})
+    assert too_many.status_code == 422 and "18 seats" in too_many.json()["detail"]

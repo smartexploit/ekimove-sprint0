@@ -18,7 +18,7 @@ const POLL_MS = 5000
  * no one to wait for. While the ride is unpaid the status is re-checked
  * every few seconds and `onPaid` fires as soon as it is confirmed.
  */
-export default function InstantTransfer({ rideId, amount, paid, onPaid, onUnavailable }) {
+export default function InstantTransfer({ rideId, amount, paid, onPaid, onUnavailable, checkPaid, paidText }) {
   const [state, setState] = useState({ loaded: false, account: null })
   const [agree, setAgree] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -35,23 +35,27 @@ export default function InstantTransfer({ rideId, amount, paid, onPaid, onUnavai
   }, [])
 
   const account = state.account
-  const watching = Boolean(account && rideId && !paid)
+  // checkPaid: for things other than rides (e.g. travel tickets), resolves true once paid.
+  const watching = Boolean(account && (rideId || checkPaid) && !paid)
 
   useEffect(() => {
     if (!watching) return undefined
     let active = true
     const check = () =>
-      getRidePayment(rideId)
-        .then((payment) => {
-          if (active && payment?.status === 'confirmed') onPaid(payment)
+      (checkPaid
+        ? checkPaid().then((done) => {
+          if (active && done) onPaid?.()
         })
+        : getRidePayment(rideId).then((payment) => {
+          if (active && payment?.status === 'confirmed') onPaid(payment)
+        }))
         .catch(() => {})
     const timer = window.setInterval(whenVisible(check), POLL_MS)
     return () => {
       active = false
       window.clearInterval(timer)
     }
-  }, [watching, rideId, onPaid])
+  }, [watching, rideId, onPaid, checkPaid])
 
   async function createAccount() {
     setBusy(true)
@@ -83,7 +87,7 @@ export default function InstantTransfer({ rideId, amount, paid, onPaid, onUnavai
           <div>
             <h2 className="instant-title">Get your own EkiMove account number</h2>
             <p className="muted small" style={{ marginTop: 4 }}>
-              Transfer to it from any bank app and your ride is marked paid in
+              Transfer to it from any bank app and your payment is confirmed in
               seconds. It stays yours for every trip.
             </p>
           </div>
@@ -131,9 +135,9 @@ export default function InstantTransfer({ rideId, amount, paid, onPaid, onUnavai
 
       {paid ? (
         <p className="instant-status is-paid" role="status">
-          <CircleCheck size={18} aria-hidden="true" /> Payment received. Your driver can start the trip.
+          <CircleCheck size={18} aria-hidden="true" /> {paidText || 'Payment received. Your driver can start the trip.'}
         </p>
-      ) : rideId ? (
+      ) : rideId || checkPaid ? (
         <p className="instant-status" role="status">
           <LoaderCircle size={18} className="spin" aria-hidden="true" />
           Waiting for your transfer. Send the exact amount and this updates on its own.

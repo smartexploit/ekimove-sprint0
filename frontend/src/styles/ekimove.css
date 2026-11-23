@@ -5289,3 +5289,140 @@ a.chip {
 .sa-choice-hint { font-size: .8rem; color: #4b5e55; }
 .sa-advanced summary { cursor: pointer; font-weight: 700; }
 .sa-reset { align-self: flex-start; }
+
+/* ---------- Student travel ---------- */
+.travel-route {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--green-800);
+  flex-wrap: wrap;
+}
+.travel-when {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-700);
+  font-weight: 600;
+}
+.travel-price {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex-shrink: 0;
+}
+.travel-price .money {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--green-800);
+}
+.travel-facts {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+.travel-facts > div {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 8px;
+  font-size: 14px;
+}
+.travel-facts dt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-500);
+}
+.travel-facts dd {
+  margin: 0;
+  color: var(--ink);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.travel-book {
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+.ticket {
+  border-left: 5px solid var(--gold-500);
+}
+.ticket.is-dim {
+  opacity: 0.7;
+  border-left-color: var(--line-strong);
+}
+.ticket-code {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex-shrink: 0;
+  padding: 8px 12px;
+  border: 2px dashed var(--green-600);
+  border-radius: var(--radius-sm);
+  background: var(--green-50);
+}
+.ticket-code strong {
+  font-size: 18px;
+  letter-spacing: 0.08em;
+  color: var(--green-800);
+}
+.ticket-mini {
+  letter-spacing: 0.06em;
+  color: var(--green-800);
+}
+.travel-promo {
+  text-decoration: none;
+  color: inherit;
+  flex-wrap: nowrap;
+  border: 1px solid var(--gold-500);
+  background: var(--gold-100);
+}
+.travel-stats {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@media (min-width: 760px) {
+  .travel-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+.manifest-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.manifest-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--field);
+}
+.manifest-list li span:first-child {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.manifest-list li.is-done {
+  background: var(--green-50);
+  border-color: var(--green-200);
+  color: var(--green-800);
+}
+.title-with-icon {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ticket-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}

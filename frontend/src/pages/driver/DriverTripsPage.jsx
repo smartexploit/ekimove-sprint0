@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { RefreshCw, Route } from 'lucide-react'
+import { Bus, RefreshCw, Route } from 'lucide-react'
 import AppShell from '../../layouts/AppShell.jsx'
 import Alert from '../../components/ui/Alert.jsx'
 import StatusBadge from '../../components/ui/StatusBadge.jsx'
@@ -16,6 +16,26 @@ import { apiRequest } from '../../services/authService.js'
 import { formatNaira, formatShortDate } from '../../utils/format.js'
 import { vehicleLabel } from '../../utils/vehicles.js'
 import { whenVisible } from '../../utils/whenVisible.js'
+import { getMyBusTrips } from '../../services/travelService.js'
+
+/** Bus drivers on student-travel departures get a way to their passenger lists. */
+function BusTripsCard() {
+  const [count, setCount] = useState(0)
+  useEffect(() => {
+    let active = true
+    getMyBusTrips().then((list) => active && setCount(list.length)).catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [])
+  if (!count) return null
+  return (
+    <Link className="card row row-between" to="/driver/travel" style={{ textDecoration: 'none', color: 'inherit' }}>
+      <span className="row" style={{ gap: 10 }}><Bus size={22} aria-hidden="true" /> <strong>Bus trips</strong></span>
+      <span className="muted small">{count} departure{count === 1 ? '' : 's'} · Open passenger list</span>
+    </Link>
+  )
+}
 
 const nextStatus = {
   assigned: 'driver_arriving',
@@ -283,6 +303,7 @@ export default function DriverTripsPage() {
     >
       <div className="stack">
         <ProfileStrip />
+        <BusTripsCard />
         <Alert tone="error">{error}</Alert>
         <Alert tone="success">{notice}</Alert>
 

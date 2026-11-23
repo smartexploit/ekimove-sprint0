@@ -50,17 +50,19 @@ function DetailsList({ application }) {
   )
 }
 
-const GROUP_LABELS = { motorcycle: 'Motorcycle', car: 'Car', moving: 'Moving vehicle', other: 'Other (old type)' }
+const GROUP_LABELS = { motorcycle: 'Motorcycle', car: 'Car', moving: 'Moving vehicle', bus: 'Travel bus', other: 'Other (old type)' }
 const VEHICLE_FILTERS = [
   ['all', 'All vehicles'],
   ['motorcycle', 'Motorcycles'],
   ['car', 'Cars'],
   ['moving', 'Moving vehicles'],
+  ['bus', 'Travel buses'],
 ]
 const TYPE_OPTIONS = [
   ['motorcycle', 'Motorcycle'],
   ['car', 'Car'],
   ...MOVING_VEHICLES.map(([value, label]) => [value, `Moving: ${label}`]),
+  ['bus', 'Travel bus'],
 ]
 
 /** Correct a vehicle's type, plate or seats (e.g. a car saved as a motorcycle). */

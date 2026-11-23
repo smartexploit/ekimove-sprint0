@@ -24,8 +24,10 @@ router = APIRouter(tags=["driver applications"])
 # What a driver can sign up with: a motorcycle, a car, or a moving vehicle
 # (a big car, van or Dyna truck for moving jobs). Each has a passenger limit.
 MOVING_VEHICLE_TYPES = set(HAULAGE_TYPES)
-DRIVER_VEHICLE_TYPES = {"motorcycle", "car"} | MOVING_VEHICLE_TYPES
-SEAT_LIMITS = {"motorcycle": 2, "car": 4, "big_car": 6, "van": 8, "dyna": 2}
+# Travel buses carry students on long trips (seats booked ahead); they never get town rides.
+TRAVEL_VEHICLE_TYPES = {"bus"}
+DRIVER_VEHICLE_TYPES = {"motorcycle", "car"} | MOVING_VEHICLE_TYPES | TRAVEL_VEHICLE_TYPES
+SEAT_LIMITS = {"motorcycle": 2, "car": 4, "big_car": 6, "van": 8, "dyna": 2, "bus": 60}
 PLATE_PATTERN = r"[A-Z0-9][A-Z0-9 -]{3,13}[A-Z0-9]"
 
 
@@ -36,7 +38,7 @@ def clean_plate(plate_number: str) -> str:
 def vehicle_problem(vehicle_type: str, capacity: int) -> str | None:
     """Why this vehicle can't be registered, or None."""
     if vehicle_type not in DRIVER_VEHICLE_TYPES:
-        return "Choose your vehicle: a motorcycle, a car, or a moving vehicle (big car, van or Dyna truck)."
+        return "Choose your vehicle: a motorcycle, a car, a moving vehicle (big car, van or Dyna truck) or a travel bus."
     limit = SEAT_LIMITS[vehicle_type]
     if capacity > limit:
         name = HAULAGE_TYPES.get(vehicle_type, vehicle_type.replace("_", " ")).split(" (")[0].lower()
@@ -66,7 +68,7 @@ async def submit_driver_application(
     password: str = Form(min_length=12, max_length=128),
     vehicle_type: str = Form(min_length=2, max_length=32),
     plate_number: str = Form(min_length=2, max_length=32),
-    capacity: int = Form(ge=1, le=8),
+    capacity: int = Form(ge=1, le=60),
     face_photo: UploadFile = File(...),
     accept_policies: bool = Form(False),
     email: str | None = Form(default=None, max_length=254),

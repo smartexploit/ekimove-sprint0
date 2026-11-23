@@ -144,6 +144,21 @@ EkiMove keeps `COMMISSION_PERCENT` (10% by default) of every fare; the driver ke
 ## Load bookings (big cars, vans, dyna trucks)
 Passengers describe the load and route on *Move a load*. That opens a support chat. EkiMove support agrees the price and terms there, then sends the quote from *Admin → Loads*. The customer accepts (the job joins the normal dispatch queue) or declines. Once a driver with a matching vehicle is assigned, the customer pays through EkiMove like any ride, and the driver's earnings and commission work the same way. Drivers can register big cars, vans/buses and dyna trucks.
 
+## Student travel (holiday buses)
+Students book seats on scheduled buses (e.g. EKSU to Lagos, Ibadan, Abeokuta, Akure or Abuja) in **Travel home** (`/travel`).
+Staff with the **Student travel** permission run it from **Admin → Student travel** (`app/travel.py`):
+- **Departures:** school, pickup spot, destination, date and time (Nigerian time), seats, price per seat, an optional
+  deposit (default 50%, balance due 24 hours before), the full-refund cut-off (default 48 hours before), and the bus
+  driver and bus (vehicle type `bus`, up to 60 seats; buses never get town rides).
+- **Bookings:** up to 4 seats with a name per seat; seats are held for 60 minutes while unpaid. Transfers into the
+  student's personal account number are matched to the ticket automatically (exact deposit, balance or full amount);
+  staff can record cash or transfers by hand. Each booking gets a ticket code (`EKT…`).
+- **Boarding:** the driver (Driver → Bus trips) or staff enter the ticket code; only fully paid tickets can board.
+- **After the trip:** when the bus is marked arrived, the driver is credited what was collected minus the commission
+  (earning kind `travel`) and paid out with the daily payouts. Cancelling a departure makes refunds due for everyone.
+- **School report:** travellers by destination and day; the CSV names list includes only students who ticked
+  "share with my school" (everyone else is counted, not named).
+
 ## Support chat
 Passengers and drivers can chat with the EkiMove team under *Support*; the team answers from *Admin → Support* (unanswered chats first, with a count in the menu). Conversations can be marked resolved and reopen when the customer writes again.
 
