@@ -1,12 +1,17 @@
-import { useCallback, useEffect, useState } from 'react'
-import { ArrowRight, Bus, Clock, MapPin, Ticket, Users } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { ArrowRight, Bus, Clock, MapPin, Share2, Ticket, Users } from 'lucide-react'
 import AppShell from '../../layouts/AppShell.jsx'
 import Alert from '../../components/ui/Alert.jsx'
 import CopyButton from '../../components/ui/CopyButton.jsx'
 import StatusBadge from '../../components/ui/StatusBadge.jsx'
 import InstantTransfer from '../../components/payments/InstantTransfer.jsx'
+import SOSButton from '../../components/SOSButton.jsx'
+import LazyMap from '../../components/map/LazyMap.jsx'
+import { whenVisible } from '../../utils/whenVisible.js'
 import { getStoredUser } from '../../services/authService.js'
-import { bookSeats, cancelTicket, getDepartures, getMyTickets } from '../../services/travelService.js'
+import {
+  bookSeats, cancelTicket, getDepartures, getMyTickets, shareBusTrip, stopSharingBusTrip,
+} from '../../services/travelService.js'
 import { formatNaira } from '../../utils/format.js'
 import { travelTime } from '../../utils/travel.js'
 
@@ -197,6 +202,92 @@ function PayPanel({ ticket, payment, onPaid }) {
   )
 }
 
+function minutesAgo(iso) {
+  const minutes = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000))
+  return minutes < 1 ? 'just now' : `${minutes} min ago`
+}
+
+/** On the travel day: where the bus is, a link for family, and SOS. */
+function LiveTrip({ ticket, onChanged }) {
+  const dep = ticket.departure
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [copied, setCopied] = useState('')
+  const link = ticket.share_path ? `${window.location.origin}${ticket.share_path}` : ''
+  const markers = useMemo(() => (ticket.bus_location ? [{
+    id: 'bus', kind: 'driver', latitude: ticket.bus_location.latitude, longitude: ticket.bus_location.longitude,
+    label: 'BUS', popup: `Your bus${ticket.bus?.plate_number ? ` · ${ticket.bus.plate_number}` : ''}`,
+  }] : []), [ticket.bus_location, ticket.bus])
+
+  async function share() {
+    setBusy(true)
+    setError('')
+    try {
+      const { path } = await shareBusTrip(ticket.id)
+      const url = `${window.location.origin}${path}`
+      const text = `Follow my EkiMove bus from ${dep.origin} to ${dep.destination}:`
+      if (navigator.share) {
+        await navigator.share({ title: 'My EkiMove bus trip', text, url }).catch(() => {})
+      } else if (navigator.clipboard) {
+        await navigator.clipboard.writeText(`${text} ${url}`)
+        setCopied('Link copied. Paste it in WhatsApp or a text to your family.')
+      }
+      onChanged()
+    } catch (err) {
+      setError(err.message || 'Could not create the link.')
+    } finally {
+      setBusy(false)
+    }
+  }
+  async function stop() {
+    setBusy(true)
+    try {
+      await stopSharingBusTrip(ticket.id)
+      setCopied('')
+      onChanged()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const ended = ['completed', 'cancelled'].includes(dep.status)
+  return (
+    <div className="stack stack-sm live-trip">
+      {ticket.bus?.plate_number && (
+        <p className="small row" style={{ gap: 6 }}>
+          <Bus size={15} aria-hidden="true" /> Bus <span className="plate plate-light">{ticket.bus.plate_number}</span>
+          {ticket.bus.driver_name ? ` · Driver ${ticket.bus.driver_name}` : ''}
+        </p>
+      )}
+      {dep.status === 'departed' && (
+        <>
+          <p className="instant-status">
+            On the road since {ticket.departed_at ? travelTime(ticket.departed_at) : 'departure'}.
+            {ticket.bus_location ? ` Bus location updated ${minutesAgo(ticket.bus_location.updated_at)}.` : ' Waiting for the bus’s location.'}
+          </p>
+          {markers.length > 0 && <LazyMap markers={markers} height={240} label="Where your bus is" />}
+        </>
+      )}
+      {dep.status === 'completed' && <p className="instant-status is-paid">Your bus has arrived. Welcome home!</p>}
+      <Alert tone="error">{error}</Alert>
+      <Alert tone="success">{copied}</Alert>
+      {!ended && (
+        <div className="row">
+          <button type="button" className="btn btn-sm" onClick={share} disabled={busy}>
+            <Share2 size={16} aria-hidden="true" /> {link ? 'Share again' : 'Share trip with family'}
+          </button>
+          {link && <button type="button" className="btn btn-ghost btn-sm" onClick={stop} disabled={busy}>Stop sharing</button>}
+          {ticket.sos_available && (
+            <SOSButton sosPath={`/api/v1/travel/bookings/${ticket.id}/sos`} withLocation
+              subject={`your bus to ${dep.destination}`} />
+          )}
+        </div>
+      )}
+      {link && !ended && <p className="muted small">Trip sharing is on: anyone with your link can follow the bus until you arrive.</p>}
+    </div>
+  )
+}
+
 function TicketCard({ ticket, payment, onChanged }) {
   const dep = ticket.departure
   const [paying, setPaying] = useState(ticket.status === 'awaiting_payment')
@@ -251,6 +342,7 @@ function TicketCard({ ticket, payment, onChanged }) {
           {ticket.checked_in ? 'You’ve boarded. Safe journey!' : 'Show this ticket code at the bus on the day.'}
         </p>
       )}
+      {['reserved', 'paid'].includes(ticket.status) && <LiveTrip ticket={ticket} onChanged={onChanged} />}
       {ticket.status === 'awaiting_payment' && ticket.hold_expires_at && (
         <Alert tone="warning">Pay {naira(ticket.due_now)} by {travelTime(ticket.hold_expires_at)} to keep your seat.</Alert>
       )}
@@ -312,6 +404,14 @@ export default function TravelPage() {
       active = false
     }
   }, [])
+
+  // While a bus is on the road (or about to leave), keep the ticket fresh.
+  const live = tickets.list.some((t) => t.sos_available || t.departure.status === 'departed')
+  useEffect(() => {
+    if (!live) return undefined
+    const timer = window.setInterval(whenVisible(load), 20000)
+    return () => window.clearInterval(timer)
+  }, [live, load])
 
   const shown = departures.list.filter((d) => !destination || d.destination === destination)
   const current = tickets.list.filter((t) => ['awaiting_payment', 'reserved', 'paid'].includes(t.status))

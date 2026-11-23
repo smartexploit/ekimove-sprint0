@@ -483,6 +483,8 @@ class Incident(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     ride_id: Mapped[int | None] = mapped_column(ForeignKey("rides.id", ondelete="RESTRICT"), nullable=True, index=True)
+    # Or the student-travel ticket it was raised from (SOS on a bus).
+    travel_booking_id: Mapped[int | None] = mapped_column(ForeignKey("travel_bookings.id", ondelete="RESTRICT"), nullable=True, index=True)
     reporter_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=True)
     severity: Mapped[str] = mapped_column(String(16), default="medium", nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(24), default="open", nullable=False, index=True)
@@ -973,6 +975,8 @@ class TravelBooking(Base):
     # The student agreed that their name may be shared with their school.
     share_with_school: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     checked_in_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Link the student shares with family to follow the bus (no sign-in).
+    share_token: Mapped[str | None] = mapped_column(String(48), nullable=True, unique=True, index=True)
     refund_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     refund_status: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)   # due / paid
     refund_reference: Mapped[str | None] = mapped_column(String(120), nullable=True)

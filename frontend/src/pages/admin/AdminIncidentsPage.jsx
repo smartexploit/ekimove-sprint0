@@ -134,10 +134,12 @@ export default function AdminIncidentsPage() {
                   </div>
                 </div>
 
-                <p style={{ fontSize: 15 }}>{incident.description || 'No description supplied.'}</p>
+                <p style={{ fontSize: 15, whiteSpace: 'pre-line', overflowWrap: 'anywhere' }}>{incident.description || 'No description supplied.'}</p>
 
                 <dl className="rows">
-                  <div><dt>Ride</dt><dd>#{incident.ride_id}</dd></div>
+                  {incident.travel_booking_id
+                    ? <div><dt>From</dt><dd>Student bus ticket (see details above)</dd></div>
+                    : <div><dt>Ride</dt><dd>#{incident.ride_id}</dd></div>}
                   <div><dt>Reported by</dt><dd>User #{incident.reporter_user_id}</dd></div>
                   <div><dt>Reported</dt><dd>{incident.created_at ? formatDateTime(incident.created_at) : 'Unavailable'}</dd></div>
                 </dl>

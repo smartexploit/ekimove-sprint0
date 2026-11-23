@@ -8382,3 +8382,47 @@ def test_travel_desk_lists_approved_bus_drivers(client):
         "price_per_seat": "8000", "departs_at": "2099-12-13T07:00", "driver_id": drivers[0]["driver_id"],
         "vehicle_id": bus["vehicle_id"]})
     assert too_many.status_code == 422 and "18 seats" in too_many.json()["detail"]
+
+
+def test_bus_trip_safety_share_link_sos_and_live_location(client):
+    admin = login(client, *ADMIN_LOGIN)
+    student = login(client, *PASSENGER_LOGIN)
+    driver = login(client, *DRIVER_LOGIN)
+    dep = _travel_departure(client, admin, driver_id=_driver_id(client))
+    booking = _book(client, student, dep["id"], kin_phone="08099990000").json()["booking"]
+    # Unpaid: no sharing, and SOS isn't open days before the trip.
+    assert client.post(f"/api/v1/travel/bookings/{booking['id']}/share", headers=student).status_code == 409
+    client.post(f"/api/v1/admin/travel/bookings/{booking['id']}/payments", headers=admin,
+                json={"amount": "20000", "method": "cash"})
+    assert client.post(f"/api/v1/travel/bookings/{booking['id']}/sos", json={}, headers=student).status_code == 409
+
+    path = client.post(f"/api/v1/travel/bookings/{booking['id']}/share", headers=student).json()["path"]
+    token = path.rsplit("/", 1)[1]
+    shared = client.get(f"/api/v1/travel/share/{token}").json()
+    assert shared["status"] == "open" and shared["bus_location"] is None and shared["destination"] == "Lagos"
+
+    # The bus leaves; the driver's phone shares its location.
+    client.post(f"/api/v1/driver/travel/{dep['id']}/status", json={"status": "departed"}, headers=driver)
+    assert client.post("/api/v1/driver/location", json={"latitude": 7.45, "longitude": 4.9},
+                       headers=driver).status_code == 200
+    shared = client.get(f"/api/v1/travel/share/{token}").json()
+    assert shared["status"] == "departed" and shared["bus_location"]["latitude"] == 7.45
+    mine = client.get("/api/v1/travel/bookings", headers=student).json()["bookings"][0]
+    assert mine["sos_available"] is True and mine["bus_location"]["longitude"] == 4.9 and mine["share_path"] == path
+    assert client.get("/api/v1/admin/live-map", headers=admin).json()["buses"][0]["location"]["latitude"] == 7.45
+
+    sos = client.post(f"/api/v1/travel/bookings/{booking['id']}/sos", headers=student,
+                      json={"description": "The driver is speeding badly.", "latitude": 7.44, "longitude": 4.91})
+    assert sos.status_code == 201, sos.text
+    incident = next(i for i in client.get("/api/v1/admin/incidents", headers=admin).json()
+                    if i["id"] == sos.json()["incident_id"])
+    assert incident["travel_booking_id"] == booking["id"] and incident["severity"] == "critical"
+    assert "speeding" in incident["description"] and "08099990000" in incident["description"]
+    assert "maps.google.com/?q=7.45000,4.90000" in incident["description"]
+    assert client.get("/api/v1/admin/travel/departures", headers=admin).json()[0]["open_sos"] == 1
+    # Someone else can't raise SOS on this ticket.
+    other = login(client, "08000000002", "Second-Test-Password-2!")
+    assert client.post(f"/api/v1/travel/bookings/{booking['id']}/sos", json={}, headers=other).status_code == 404
+    # Stopping the share kills the link.
+    client.delete(f"/api/v1/travel/bookings/{booking['id']}/share", headers=student)
+    assert client.get(f"/api/v1/travel/share/{token}").status_code == 404

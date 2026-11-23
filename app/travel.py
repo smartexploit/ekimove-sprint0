@@ -36,7 +36,8 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_user, require_staff
 from app.config import settings
 from app.database import get_db
-from app.models import AuditLog, Driver, EarningEntry, TravelBooking, TravelDeparture, TravelPayment, User, Vehicle
+from app.models import (AuditLog, Driver, EarningEntry, Incident, TravelBooking, TravelDeparture, TravelPayment, User,
+                        Vehicle)
 
 router = APIRouter(prefix="/api/v1", tags=["student travel"])
 
@@ -48,6 +49,9 @@ ACTIVE = ("awaiting_payment", "reserved", "paid")
 CONFIRMED = ("reserved", "paid")
 CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 CENT = Decimal("0.01")
+SHARE_GRACE = timedelta(hours=6)        # a family link keeps working this long after arrival
+SOS_OPENS_BEFORE = timedelta(hours=2)   # SOS shows on the ticket from shortly before departure
+LOCATION_STALE = timedelta(minutes=10)
 
 
 def _now() -> datetime:
@@ -181,6 +185,40 @@ def match_deposit(db: Session, deposit) -> TravelBooking | None:
     return None
 
 
+# ---------------------------------------------------------------- safety
+
+def bus_location(db: Session, dep: TravelDeparture) -> dict | None:
+    """Where the bus is: the driver's phone location while the bus is on the road."""
+    if dep.status != "departed" or dep.driver_id is None:
+        return None
+    driver = db.get(Driver, dep.driver_id)
+    if driver is None or driver.last_latitude is None or driver.last_longitude is None:
+        return None
+    updated = _aware(driver.location_updated_at)
+    return {"latitude": driver.last_latitude, "longitude": driver.last_longitude, "updated_at": _iso(updated),
+            "stale": updated is None or _now() - updated > LOCATION_STALE}
+
+
+def sos_open(dep: TravelDeparture, booking: TravelBooking) -> bool:
+    if booking.status not in CONFIRMED:
+        return False
+    if dep.status == "departed":
+        return True
+    return dep.status in ("open", "closed") and _now() >= _aware(dep.departs_at) - SOS_OPENS_BEFORE
+
+
+def _bus_details(db: Session, dep: TravelDeparture) -> dict:
+    name = plate = None
+    if dep.driver_id:
+        driver = db.get(Driver, dep.driver_id)
+        user = db.get(User, driver.user_id) if driver else None
+        name = user.full_name if user else None
+    if dep.vehicle_id:
+        vehicle = db.get(Vehicle, dep.vehicle_id)
+        plate = vehicle.plate_number if vehicle else None
+    return {"driver_name": name, "plate_number": plate}
+
+
 # ---------------------------------------------------------------- views
 
 def departure_view(db: Session, dep: TravelDeparture, now: datetime | None = None) -> dict:
@@ -222,6 +260,11 @@ def booking_view(db: Session, booking: TravelBooking, dep: TravelDeparture | Non
         "refund_status": booking.refund_status,
         "created_at": _iso(booking.created_at),
         "departure": departure_view(db, dep, now),
+        "bus": _bus_details(db, dep) if booking.status in CONFIRMED else None,
+        "bus_location": bus_location(db, dep) if booking.status in CONFIRMED else None,
+        "departed_at": _iso(dep.departed_at), "completed_at": _iso(dep.completed_at),
+        "share_path": f"/bus/{booking.share_token}" if booking.share_token else None,
+        "sos_available": sos_open(dep, booking),
     }
 
 
@@ -346,6 +389,109 @@ def cancel_booking(booking_id: int, current_user: User = Depends(get_current_use
     return {"booking": booking_view(db, booking)}
 
 
+def _my_booking(db: Session, booking_id: int, user: User) -> TravelBooking:
+    booking = db.get(TravelBooking, booking_id)
+    if booking is None or booking.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Booking not found.")
+    return booking
+
+
+@router.post("/travel/bookings/{booking_id}/share")
+def share_trip(booking_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    """A link family can open to follow the bus, without signing in."""
+    booking = _my_booking(db, booking_id, current_user)
+    dep = db.get(TravelDeparture, booking.departure_id)
+    if booking.status not in CONFIRMED or dep.status in ("completed", "cancelled"):
+        raise HTTPException(status_code=409, detail="You can share a trip once your seat is paid for.")
+    if not booking.share_token:
+        booking.share_token = secrets.token_urlsafe(24)
+        _audit(db, current_user.id, "travel.share_started", "travel_booking", booking.id, "Trip link created.")
+        db.commit()
+    return {"path": f"/bus/{booking.share_token}"}
+
+
+@router.delete("/travel/bookings/{booking_id}/share")
+def stop_sharing(booking_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    booking = _my_booking(db, booking_id, current_user)
+    booking.share_token = None
+    db.commit()
+    return {"ok": True}
+
+
+@router.get("/travel/share/{token}")
+def shared_bus(token: str, db: Session = Depends(get_db)) -> dict:
+    """Public view for a student's family: the bus, its status and where it is."""
+    booking = (db.scalar(select(TravelBooking).where(TravelBooking.share_token == token))
+               if 16 <= len(token) <= 64 else None)
+    if booking is None:
+        raise HTTPException(status_code=404, detail="This trip link isn't valid.")
+    dep = db.get(TravelDeparture, booking.departure_id)
+    ended = _aware(dep.completed_at)
+    if dep.status == "cancelled" or booking.status not in CONFIRMED or (ended and _now() - ended > SHARE_GRACE):
+        raise HTTPException(status_code=410, detail="This trip has ended, so the link no longer works.")
+    from app.trips import short_name  # avoid an import cycle
+
+    return {
+        "travellers": [short_name(n) for n in booking.traveller_names or []],
+        "origin": dep.origin, "pickup_spot": dep.pickup_spot, "destination": dep.destination,
+        "drop_off": dep.drop_off, "departs_at": _iso(dep.departs_at), "status": dep.status,
+        "departed_at": _iso(dep.departed_at), "completed_at": _iso(dep.completed_at),
+        "boarded": booking.checked_in_at is not None,
+        "driver_name": short_name(_bus_details(db, dep)["driver_name"]),
+        "plate_number": _bus_details(db, dep)["plate_number"],
+        "bus_location": bus_location(db, dep),
+        "support_phone": settings.support_phone,
+    }
+
+
+class SOSIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    description: str = Field(default="I need help on the bus.", min_length=5, max_length=1000)
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+
+
+@router.post("/travel/bookings/{booking_id}/sos", status_code=201)
+def travel_sos(booking_id: int, payload: SOSIn, current_user: User = Depends(get_current_user),
+               db: Session = Depends(get_db)) -> dict:
+    """Alert the EkiMove safety team from a bus trip."""
+    booking = _my_booking(db, booking_id, current_user)
+    dep = db.get(TravelDeparture, booking.departure_id)
+    if not sos_open(dep, booking):
+        raise HTTPException(status_code=409, detail="SOS opens on your ticket from 2 hours before the bus leaves.")
+    bus = _bus_details(db, dep)
+    where = bus_location(db, dep)
+    lines = [
+        f"SOS from a student on the bus {dep.origin} to {dep.destination} "
+        f"({_aware(dep.departs_at).astimezone(LAGOS):%a %d %b, %H:%M}).",
+        f"Student: {current_user.full_name} ({current_user.phone or 'no phone'}), ticket {booking.ticket_code}, "
+        f"travellers: {', '.join(booking.traveller_names or [])}.",
+        f"Bus: {bus['driver_name'] or 'driver not set'}, {bus['plate_number'] or 'plate not set'}; "
+        f"status {dep.status}.",
+    ]
+    if booking.kin_phone:
+        lines.append(f"Parent or guardian: {booking.kin_phone}.")
+    if payload.latitude is not None and payload.longitude is not None:
+        lines.append(f"Student's phone location: https://maps.google.com/?q={payload.latitude:.5f},{payload.longitude:.5f}")
+    if where:
+        lines.append(f"Bus last seen: https://maps.google.com/?q={where['latitude']:.5f},{where['longitude']:.5f}")
+    lines.append(f"What's happening: {' '.join(payload.description.split())}")
+    incident = Incident(travel_booking_id=booking.id, reporter_user_id=current_user.id, severity="critical",
+                        status="open", description="\n".join(lines))
+    db.add(incident)
+    db.flush()
+    from app.push import notify_admins  # avoid an import cycle
+
+    notify_admins(db, "SOS on a student bus", f"{dep.origin} to {dep.destination}: {current_user.full_name}. Act now.",
+                  url="/admin/incidents", tag=f"travel-sos-{booking.id}", urgent=True,
+                  permission=("dispatch", "support", "travel"))
+    _audit(db, current_user.id, "travel.sos_reported", "incident", incident.id,
+           f"SOS from ticket {booking.ticket_code} ({dep.origin} to {dep.destination}).")
+    db.commit()
+    return {"incident_id": incident.id,
+            "message": "SOS sent. The EkiMove safety team has been alerted and will contact you now."}
+
+
 # ---------------------------------------------------------------- staff
 
 class DepartureIn(BaseModel):
@@ -423,6 +569,9 @@ def _admin_departure(db: Session, dep: TravelDeparture) -> dict:
         "refunds_due": str(sum((_money(b.refund_amount) for b in bookings if b.refund_status == "due"),
                                Decimal("0.00"))),
         "departed_at": _iso(dep.departed_at), "completed_at": _iso(dep.completed_at),
+        "bus_location": bus_location(db, dep),
+        "open_sos": int(db.scalar(select(func.count(Incident.id)).where(
+            Incident.travel_booking_id.in_([b.id for b in bookings] or [0]), Incident.status != "resolved")) or 0),
     })
     return view
 
@@ -559,6 +708,19 @@ def admin_departure_status(departure_id: int, payload: StatusIn, db: Session = D
     _set_status(db, dep, payload.status, staff.id)
     db.commit()
     return _admin_departure(db, dep)
+
+
+def admin_buses_on_road(db: Session) -> list[dict]:
+    """Student buses currently travelling, for the live map."""
+    out = []
+    for dep in db.scalars(select(TravelDeparture).where(TravelDeparture.status == "departed")).all():
+        bus = _bus_details(db, dep)
+        out.append({"departure_id": dep.id, "route": f"{dep.origin} to {dep.destination}",
+                    "driver_name": bus["driver_name"], "plate_number": bus["plate_number"],
+                    "seats_booked": sum(b.seats for b in db.scalars(select(TravelBooking).where(
+                        TravelBooking.departure_id == dep.id, TravelBooking.status.in_(CONFIRMED))).all()),
+                    "departed_at": _iso(dep.departed_at), "location": bus_location(db, dep)})
+    return out
 
 
 def _manifest_row(db: Session, booking: TravelBooking, private: bool) -> dict:

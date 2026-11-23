@@ -1,9 +1,33 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ArrowRight, Bus, CheckCircle2 } from 'lucide-react'
+import { ArrowRight, Bus, CheckCircle2, LocateFixed } from 'lucide-react'
 import AppShell from '../../layouts/AppShell.jsx'
 import Alert from '../../components/ui/Alert.jsx'
 import StatusBadge from '../../components/ui/StatusBadge.jsx'
 import { driverCheckIn, driverTripStatus, getMyBusTrips } from '../../services/travelService.js'
+import { shareLocation } from '../../services/dispatchService.js'
+
+const SEND_EVERY_MS = 15000
+
+/** While the bus is on the road, send its location so students' families can follow it. */
+function useShareBusLocation(onRoad) {
+  const [state, setState] = useState('idle')
+  useEffect(() => {
+    if (!onRoad || !navigator.geolocation) return undefined
+    let last = 0
+    const watch = navigator.geolocation.watchPosition(
+      (position) => {
+        setState('on')
+        if (Date.now() - last < SEND_EVERY_MS) return
+        last = Date.now()
+        shareLocation(position.coords.latitude, position.coords.longitude).catch(() => {})
+      },
+      () => setState('off'),
+      { enableHighAccuracy: true, maximumAge: 15000, timeout: 30000 },
+    )
+    return () => navigator.geolocation.clearWatch(watch)
+  }, [onRoad])
+  return onRoad ? state : 'idle'
+}
 import { travelTime } from '../../utils/travel.js'
 
 function BusTrip({ trip, onChanged }) {
@@ -95,10 +119,19 @@ export default function DriverTravelPage() {
     }
   }, [])
 
+  const onRoad = trips.list.some((t) => t.status === 'departed')
+  const sharing = useShareBusLocation(onRoad)
+
   return (
     <AppShell title="Bus trips" description="Your student travel departures. Board each student with their ticket code.">
       <div className="stack">
         <Alert tone="error">{error}</Alert>
+        {sharing === 'on' && (
+          <p className="instant-status is-paid"><LocateFixed size={18} aria-hidden="true" /> Sharing the bus location with students’ families. Keep this page open until you arrive.</p>
+        )}
+        {sharing === 'off' && (
+          <Alert tone="warning">Turn on location for EkiMove so families can follow the bus.</Alert>
+        )}
         {trips.loaded && trips.list.length === 0 && (
           <div className="card empty">
             <span className="empty-icon"><Bus size={28} aria-hidden="true" /></span>

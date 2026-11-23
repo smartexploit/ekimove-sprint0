@@ -1540,6 +1540,7 @@ def admin_list_incidents(
         {
             "id": item.id,
             "ride_id": item.ride_id,
+            "travel_booking_id": item.travel_booking_id,
             "reporter_user_id": item.reporter_user_id,
             "severity": item.severity,
             "status": item.status,

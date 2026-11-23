@@ -39,6 +39,7 @@ const AdminWebsitePage = lazy(() => import('./pages/admin/AdminWebsitePage.jsx')
 const PoliciesPage = lazy(() => import('./pages/public/PoliciesPage.jsx'))
 const ForgotPasswordPage = lazy(() => import('./pages/auth/ForgotPasswordPage.jsx'))
 const TrackSharePage = lazy(() => import('./pages/public/TrackSharePage.jsx'))
+const BusTrackPage = lazy(() => import('./pages/public/BusTrackPage.jsx'))
 const AdminDispatchPage = lazy(() => import('./pages/admin/AdminDispatchPage.jsx'))
 const AdminDriverVerificationPage = lazy(() => import('./pages/admin/AdminDriverVerificationPage.jsx'))
 const AdminTeamPage = lazy(() => import('./pages/admin/AdminTeamPage.jsx'))
@@ -76,6 +77,7 @@ export default function App() {
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/driver/apply" element={<DriverApplicationPage />} />
         <Route path="/t/:token" element={<TrackSharePage />} />
+        <Route path="/bus/:token" element={<BusTrackPage />} />
         <Route path="/unlock" element={<UnlockPage />} />
         <Route path="/fares" element={<FaresPage />} />
         <Route path="/map-a-place" element={<MapAPlacePage />} />

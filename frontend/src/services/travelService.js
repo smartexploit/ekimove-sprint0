@@ -29,3 +29,8 @@ export const getTravelReport = (query) => apiRequest(`/api/v1/admin/travel/repor
 export const getMyBusTrips = () => apiRequest('/api/v1/driver/travel')
 export const driverCheckIn = (id, code) => post(`/api/v1/driver/travel/${id}/check-in`, { code })
 export const driverTripStatus = (id, status) => post(`/api/v1/driver/travel/${id}/status`, { status })
+
+// Safety: family link and live bus
+export const shareBusTrip = (id) => post(`/api/v1/travel/bookings/${id}/share`)
+export const stopSharingBusTrip = (id) => apiRequest(`/api/v1/travel/bookings/${id}/share`, { method: 'DELETE' })
+export const getSharedBus = (token) => apiRequest(`/api/v1/travel/share/${encodeURIComponent(token)}`)

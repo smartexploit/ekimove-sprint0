@@ -371,7 +371,10 @@ def admin_live_map(db: Session = Depends(get_db), _admin: User = Depends(require
             "driver_location": ({"latitude": driver.last_latitude, "longitude": driver.last_longitude}
                                 if driver and driver.last_latitude is not None else None),
         })
-    return {"generated_at": now.isoformat(), "center": DEFAULT_CENTER, "drivers": drivers, "trips": trips}
+    from app.travel import admin_buses_on_road  # avoid an import cycle
+
+    return {"generated_at": now.isoformat(), "center": DEFAULT_CENTER, "drivers": drivers, "trips": trips,
+            "buses": admin_buses_on_road(db)}
 
 
 @router.get("/admin/rides/{ride_id}/trail")

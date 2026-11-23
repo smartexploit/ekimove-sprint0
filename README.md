@@ -158,6 +158,11 @@ Staff with the **Student travel** permission run it from **Admin → Student tra
   (earning kind `travel`) and paid out with the daily payouts. Cancelling a departure makes refunds due for everyone.
 - **School report:** travellers by destination and day; the CSV names list includes only students who ticked
   "share with my school" (everyone else is counted, not named).
+- **Safety on the road:** when the driver marks the bus as left, their phone shares its location (Driver → Bus
+  trips, keep the page open). Students see the bus on a map in their ticket, can share a no-sign-in link with family
+  (`/bus/<token>`, stops working 6 hours after arrival or when they stop sharing), and get an **SOS** button from 2
+  hours before departure. A bus SOS creates a critical incident (with the student, ticket, bus, guardian's phone and
+  map links) and alerts dispatch, support and travel staff. Moving buses show on Admin → Live map.
 
 ## Support chat
 Passengers and drivers can chat with the EkiMove team under *Support*; the team answers from *Admin → Support* (unanswered chats first, with a count in the menu). Conversations can be marked resolved and reopen when the customer writes again.

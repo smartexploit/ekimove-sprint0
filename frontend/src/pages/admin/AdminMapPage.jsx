@@ -53,6 +53,13 @@ export default function AdminMapPage() {
     data.trips.forEach((t) => {
       if (t.pickup) list.push({ id: `p${t.ride_id}`, kind: 'pickup', ...t.pickup, popup: `Trip #${t.ride_id} pickup: ${t.pickup.name}` })
     })
+    ;(data.buses || []).forEach((bus) => {
+      if (bus.location) {
+        list.push({ id: `bus${bus.departure_id}`, kind: bus.location.stale ? 'driver-stale' : 'driver-busy',
+          latitude: bus.location.latitude, longitude: bus.location.longitude, label: 'BUS',
+          popup: `Student bus ${bus.route}\n${bus.driver_name || ''} ${bus.plate_number || ''}\n${bus.seats_booked} students` })
+      }
+    })
     return list
   }, [data])
 
@@ -124,6 +131,26 @@ export default function AdminMapPage() {
                 </ul>
               )}
             </section>
+
+            {(data.buses || []).length > 0 && (
+              <section className="stack stack-sm" aria-labelledby="buses-title">
+                <h2 id="buses-title" className="section-title">Student buses on the road</h2>
+                <ul className="list-card" style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+                  {data.buses.map((bus) => (
+                    <li className="list-item" key={bus.departure_id}>
+                      <div className="list-item-main">
+                        <p className="list-item-title">{bus.route} · {bus.seats_booked} students</p>
+                        <p className="list-item-meta">
+                          {bus.driver_name || 'No driver'}{bus.plate_number ? ` · ${bus.plate_number}` : ''} ·{' '}
+                          {bus.location ? `location ${formatDateTime(bus.location.updated_at)}` : 'not sharing location yet'}
+                        </p>
+                      </div>
+                      <Link className="btn btn-sm" to="/admin/travel">Travel desk</Link>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
 
             <section className="stack stack-sm" aria-labelledby="trips-title">
               <h2 id="trips-title" className="section-title">Live trips</h2>
