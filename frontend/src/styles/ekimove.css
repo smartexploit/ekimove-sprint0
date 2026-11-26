@@ -5426,3 +5426,12 @@ a.chip {
   gap: 12px;
   flex-wrap: wrap;
 }
+
+.policy-key {
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 4px solid var(--gold-500);
+  background: var(--gold-100);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+}

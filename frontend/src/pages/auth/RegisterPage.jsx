@@ -282,6 +282,8 @@ export default function RegisterPage() {
             <Link className="text-link" to="/policies/privacy" target="_blank" rel="noreferrer">Privacy Policy</Link>{' '}
             and{' '}
             <Link className="text-link" to="/policies/community" target="_blank" rel="noreferrer">Safety Guidelines</Link>.
+            {' '}I understand that EkiMove connects me with independent, verified drivers and does not own or operate
+            the vehicles.
           </span>
         </label>
 

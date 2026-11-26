@@ -1,7 +1,7 @@
 // EkiMove policies. Keep POLICY_VERSION in step with POLICY_VERSION in
 // app/verification.py: bumping both asks everyone to accept again.
-export const POLICY_VERSION = '2026-11-01'
-export const POLICY_EFFECTIVE = '1 November 2026'
+export const POLICY_VERSION = '2026-11-26'
+export const POLICY_EFFECTIVE = '26 November 2026'
 
 export const POLICIES = [
   {
@@ -10,8 +10,14 @@ export const POLICIES = [
     summary: 'The agreement between you and EkiMove for using the app.',
     sections: [
       ['Who we are', [
-        'EkiMove is a ride-booking and load-moving platform for Ekiti State, Nigeria. The app connects passengers and customers with independent, verified drivers.',
+        'EkiMove is a technology platform, starting in Ekiti State, Nigeria. The app connects passengers and customers with independent, verified drivers and transport operators for rides, package deliveries, moving and student travel.',
         'By creating an account or using EkiMove, you agree to these Terms, our Privacy Policy, our Community & Safety Guidelines and our Cancellation & Refund Policy. Drivers also agree to the Driver Agreement.',
+      ]],
+      ['EkiMove’s role', [
+        'EkiMove provides the app that connects you with drivers. We do not own, rent or operate the motorcycles, cars, vans, trucks or buses used for trips. Each vehicle is owned or controlled by an independent driver or transport operator, who provides the transport service to you.',
+        'Drivers and operators are responsible for how they drive, the condition of their vehicle, their licences, papers and insurance, and for obeying the law on the road.',
+        'Before a driver can take trips, we check their identity, vehicle and plate number. Every trip also has safety features: the pickup PIN, live trip sharing, SOS, in-app calls and a full trip record. These help to reduce risks, but we cannot control what happens on the road, and we cannot guarantee the conduct of drivers, other passengers or other road users.',
+        'You choose to travel, or send or move items, through EkiMove, and you agree to follow the Community & Safety Guidelines. If something goes wrong, report it at once through SOS or Support. We will investigate, act against any account that broke our rules, share trip records with you and the police where the law allows, and help you make a claim against the person responsible or their insurer.',
       ]],
       ['Your account', [
         'You must be at least 18 years old and give accurate details, including your real name and a phone number or email address you control.',
@@ -47,7 +53,9 @@ export const POLICIES = [
         'Everyone must follow the Community & Safety Guidelines. We may warn, suspend or remove accounts that break them, give false information, misuse payments or put others at risk. Serious cases may be reported to the police.',
       ]],
       ['Our responsibility', [
-        'We work to keep EkiMove safe and available, but the app is provided as it is and may sometimes be unavailable. To the extent the law allows, EkiMove is not liable for indirect losses or for events outside our reasonable control. Nothing in these Terms limits rights you have under Nigerian consumer protection law.',
+        'We work to keep EkiMove safe and available, but the app is provided as it is and may sometimes be unavailable.',
+        'Because EkiMove connects you with independent drivers and operators and does not provide the transport itself, to the extent the law allows, EkiMove is not liable for loss, damage, injury or delay caused by a driver, operator, passenger or other road user, by road, weather or traffic conditions, or by other events outside our reasonable control. EkiMove is also not liable for indirect losses, such as lost earnings or missed appointments.',
+        'Nothing in these Terms limits rights you have under Nigerian law, including the Federal Competition and Consumer Protection Act 2018, or excludes any liability that cannot be excluded by law.',
       ]],
       ['Changes and law', [
         'We may update these Terms. If a change is important, we will ask you to accept the new version in the app before you continue.',

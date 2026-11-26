@@ -40,7 +40,7 @@ from app.trips import ACTIVE, short_name, trail_points
 router = APIRouter(prefix="/api/v1", tags=["verification"])
 
 # Bump this when the policies change in a way people must accept again.
-POLICY_VERSION = "2026-11-01"
+POLICY_VERSION = "2026-11-26"
 ID_TYPES = {"nin": "National ID (NIN)", "voters_card": "Voter's card",
             "drivers_licence": "Driver's licence", "passport": "International passport"}
 ID_PATTERNS = {"nin": r"\d{11}", "voters_card": r"[A-Z0-9 ]{9,23}", "drivers_licence": r"[A-Z0-9-]{8,20}",

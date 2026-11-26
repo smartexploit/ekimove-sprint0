@@ -45,6 +45,13 @@ export default function PolicyGate({ role }) {
         <p className="muted small">
           They explain how EkiMove works, how we keep trips safe and how we use your data. Tap each one to read it.
         </p>
+        {role !== 'driver' && (
+          <p className="small policy-key">
+            <strong>Please note:</strong> EkiMove connects you with independent, verified drivers. We don’t own or
+            operate the vehicles. We check every driver and give every trip safety features like the pickup PIN, trip
+            sharing and SOS, but drivers are responsible for their driving and their vehicles.
+          </p>
+        )}
         <ul className="plain-list small">
           {list.map((policy) => (
             <li key={policy.slug}>
@@ -57,7 +64,9 @@ export default function PolicyGate({ role }) {
         <Alert tone="error">{error}</Alert>
         <label className="check-row">
           <input type="checkbox" checked={agree} onChange={(event) => setAgree(event.target.checked)} />
-          I have read and agree to these policies.
+          {role === 'driver'
+            ? 'I have read and agree to these policies.'
+            : 'I have read and agree to these policies, and I understand that EkiMove connects me with independent drivers and does not own or operate the vehicles.'}
         </label>
         <button type="button" className="btn btn-primary" disabled={!agree || busy} onClick={accept}>
           {busy ? 'Saving…' : 'Agree and continue'}
