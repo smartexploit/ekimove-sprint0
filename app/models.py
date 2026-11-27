@@ -989,6 +989,28 @@ class TravelBooking(Base):
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class TravelCardCheckout(Base):
+    """One Interswitch checkout a student started for a travel booking.
+
+    Kept for every attempt, so a payment that completes in an older browser tab
+    is still found and credited.
+    """
+
+    __tablename__ = "travel_card_checkouts"
+    __table_args__ = (
+        CheckConstraint("status IN ('pending', 'paid')", name="ck_travel_card_checkouts_status"),
+        CheckConstraint("amount > 0", name="ck_travel_card_checkouts_amount"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    booking_id: Mapped[int] = mapped_column(ForeignKey("travel_bookings.id", ondelete="RESTRICT"), index=True)
+    reference: Mapped[str] = mapped_column(String(60), unique=True, index=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    status: Mapped[str] = mapped_column(String(12), default="pending", nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class TravelPayment(Base):
     """Money received for a travel booking (a matched transfer or recorded by staff)."""
 
@@ -998,7 +1020,7 @@ class TravelPayment(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     booking_id: Mapped[int] = mapped_column(ForeignKey("travel_bookings.id", ondelete="RESTRICT"), index=True)
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
-    method: Mapped[str] = mapped_column(String(24))          # bank_transfer / cash
+    method: Mapped[str] = mapped_column(String(24))          # bank_transfer / cash / card
     reference: Mapped[str | None] = mapped_column(String(120), nullable=True, unique=True)
     recorded_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

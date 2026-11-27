@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { goToInterswitch } from '../../utils/interswitch.js'
 import { ArrowRight, Bus, Clock, MapPin, Share2, Ticket, Users } from 'lucide-react'
 import AppShell from '../../layouts/AppShell.jsx'
 import Alert from '../../components/ui/Alert.jsx'
@@ -11,6 +13,7 @@ import { whenVisible } from '../../utils/whenVisible.js'
 import { getStoredUser } from '../../services/authService.js'
 import {
   bookSeats, cancelTicket, getDepartures, getMyTickets, shareBusTrip, stopSharingBusTrip,
+  startTicketCard, verifyTicketCard,
 } from '../../services/travelService.js'
 import { formatNaira } from '../../utils/format.js'
 import { travelTime } from '../../utils/travel.js'
@@ -164,7 +167,79 @@ function DepartureCard({ departure, user, open, onOpen, onBooked }) {
   )
 }
 
+/** Pay what's due through Interswitch checkout (card, and transfer or USSD where Interswitch offers them). */
+function CardPay({ ticket, onPaid }) {
+  const [email, setEmail] = useState(() => getStoredUser()?.email || '')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  async function pay(event) {
+    event.preventDefault()
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setError('Enter your email address. Interswitch sends your receipt there.')
+      return
+    }
+    setError('')
+    setBusy(true)
+    try {
+      const result = await startTicketCard(ticket.id, email.trim())
+      if (!result.checkout) {
+        setBusy(false)
+        onPaid()
+        return
+      }
+      goToInterswitch(result.checkout, {
+        returnPath: `/travel?ticket=${ticket.id}`,
+        itemName: `EkiMove bus ticket ${ticket.ticket_code}`,
+        customerName: getStoredUser()?.full_name || '',
+        customerId: ticket.ticket_code,
+      })
+    } catch (err) {
+      setError(err.message || 'Could not open the card payment page.')
+      setBusy(false)
+    }
+  }
+
+  return (
+    <form className="card card-outline stack stack-sm" onSubmit={pay} aria-label="Pay by card">
+      <p className="small">
+        Pay <strong className="money">{naira(ticket.due_now)}</strong> on Interswitch’s secure page. Your ticket
+        updates as soon as the payment goes through.
+      </p>
+      <label className="field" htmlFor={`card-email-${ticket.id}`}>
+        <span className="field-label">Email for your receipt</span>
+        <input id={`card-email-${ticket.id}`} className="input" type="email" autoComplete="email" value={email}
+          onChange={(event) => setEmail(event.target.value)} required />
+      </label>
+      <Alert tone="error">{error}</Alert>
+      <div>
+        <button className="btn btn-primary" type="submit" disabled={busy}>
+          {busy ? 'Opening Interswitch…' : `Pay ${naira(ticket.due_now)}`}
+        </button>
+      </div>
+    </form>
+  )
+}
+
 function PayPanel({ ticket, payment, onPaid }) {
+  const [method, setMethod] = useState('transfer')
+  if (!payment.card) return <TransferPay ticket={ticket} payment={payment} onPaid={onPaid} />
+  return (
+    <div className="stack stack-sm">
+      <div className="segmented segmented-block" role="tablist" aria-label="How to pay">
+        {[['transfer', 'Bank transfer'], ['card', 'Card']].map(([key, label]) => (
+          <button key={key} type="button" role="tab" aria-selected={method === key}
+            className={method === key ? 'is-active' : ''} onClick={() => setMethod(key)}>{label}</button>
+        ))}
+      </div>
+      {method === 'card'
+        ? <CardPay ticket={ticket} onPaid={onPaid} />
+        : <TransferPay ticket={ticket} payment={payment} onPaid={onPaid} />}
+    </div>
+  )
+}
+
+function TransferPay({ ticket, payment, onPaid }) {
   const [useBank, setUseBank] = useState(!payment.instant)
   const checkPaid = useCallback(
     () => getMyTickets().then((data) => {
@@ -383,6 +458,8 @@ export default function TravelPage() {
   const [openId, setOpenId] = useState(null)
   const [error, setError] = useState('')
   const [user] = useState(() => getStoredUser())
+  const [notice, setNotice] = useState('')
+  const [searchParams] = useSearchParams()
 
   const load = useCallback(() => Promise.all([getDepartures(), getMyTickets()])
     .then(([deps, mine]) => {
@@ -405,6 +482,24 @@ export default function TravelPage() {
     }
   }, [])
 
+  // Back from Interswitch checkout (?ticket=…&txnref=…): check the payment now.
+  const returnedTicket = searchParams.get('txnref') ? Number(searchParams.get('ticket')) : 0
+  useEffect(() => {
+    if (!returnedTicket) return undefined
+    let active = true
+    verifyTicketCard(returnedTicket)
+      .then((result) => {
+        if (!active) return
+        setNotice(Number(result.credited) > 0 ? 'Payment received. Your ticket is updated.'
+          : 'We haven’t received the card payment yet. If you paid, it will show here within a few minutes.')
+        load()
+      })
+      .catch(() => active && setNotice('We couldn’t check the card payment just now. If you paid, it will show here soon.'))
+    return () => {
+      active = false
+    }
+  }, [returnedTicket, load])
+
   // While a bus is on the road (or about to leave), keep the ticket fresh.
   const live = tickets.list.some((t) => t.sos_available || t.departure.status === 'departed')
   useEffect(() => {
@@ -422,6 +517,7 @@ export default function TravelPage() {
       description="Book your seat on an EkiMove bus for the holidays. Pay in full or a deposit, then show your ticket at the bus.">
       <div className="stack stack-lg">
         <Alert tone="error">{error}</Alert>
+        <Alert tone="info">{notice}</Alert>
 
         {current.length > 0 && (
           <section className="stack" aria-labelledby="tickets-title">

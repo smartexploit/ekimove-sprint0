@@ -7,8 +7,9 @@ How it works
   They pay in full, or a deposit (e.g. 50%) and the balance before
   ``balance_due_hours`` ahead of departure.
 - Money that lands in the student's personal account number is matched to
-  the booking automatically (see instant_payments.paystack_webhook); staff
-  can also record cash or bank transfers by hand.
+  the booking automatically (see instant_payments.paystack_webhook). When
+  card payments are switched on, students can also pay through Interswitch
+  checkout (see travel_card). Staff can record cash or transfers by hand.
 - On the day the student shows the ticket code at the bus; the driver (or
   staff) checks them in. Only fully paid tickets can board.
 - When the trip is completed, the bus driver is credited the money collected
@@ -126,11 +127,14 @@ def due_now(booking: TravelBooking) -> Decimal:
 
 def expire_holds(db: Session) -> None:
     """Free the seats of bookings that were never paid for."""
+    from app.travel_card import checkout_in_progress  # avoid an import cycle
+
     cutoff = _now() - timedelta(minutes=HOLD_MINUTES)
     stale = db.scalars(select(TravelBooking).where(TravelBooking.status == "awaiting_payment",
                                                    TravelBooking.created_at < cutoff)).all()
     for booking in stale:
-        if _money(booking.amount_paid) == 0:
+        # Keep the seats while the student is in the middle of paying by card.
+        if _money(booking.amount_paid) == 0 and not checkout_in_progress(db, booking.id):
             booking.status = "expired"
     if stale:
         db.commit()
@@ -278,7 +282,9 @@ def _payment_options() -> dict:
         bank = {"bank_name": settings.bank_transfer_bank_name,
                 "account_number": settings.bank_transfer_account_number,
                 "account_name": settings.bank_transfer_account_name}
-    return {"instant": instant_transfers_enabled(), "bank": bank}
+    from app.interswitch_payments import card_payments_enabled  # avoid an import cycle
+
+    return {"instant": instant_transfers_enabled(), "bank": bank, "card": card_payments_enabled()}
 
 
 # ---------------------------------------------------------------- students

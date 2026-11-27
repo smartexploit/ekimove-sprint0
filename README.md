@@ -114,6 +114,8 @@ Passengers pay by bank transfer into a **personal EkiMove account number** (a Pa
 4. Check *Admin → Launch checklist*: "Card payments (Interswitch)" should be green. Make one small real card payment on a test ride and confirm it shows as paid, and that the money settles into the business bank account.
 To switch card payments off again (e.g. a problem with Interswitch), set `INTERSWITCH_ENABLED=false`; bank transfers keep working.
 
+**Student travel tickets by card:** with card payments on, the ticket's *Pay* button offers **Bank transfer** or **Card**. Card opens Interswitch checkout for what's due now (the deposit or the balance); the checkout page can also offer transfer, USSD or wallets if Interswitch has switched them on for the account. Every checkout is recorded (`travel_card_checkouts`), so a payment finished in an older tab is still credited, and an earlier checkout is checked with Interswitch before a new one starts, so nobody pays twice. Seats aren't released while a checkout started in the last 30 minutes is unfinished. Money that arrives after a booking expired gets the seats back if they're still free; otherwise, and for any overpayment, the amount is listed under refunds due.
+
 ## Driver earnings and payouts
 EkiMove keeps `COMMISSION_PERCENT` (10% by default) of every fare; the driver keeps the rest.
 

@@ -17,7 +17,7 @@ from app.database import Base, get_db
 import app.main as main_module
 import app.driver_applications as driver_applications_module
 from app.main import app
-from app.models import (AuditLog, Driver, EarningEntry, Fare, Payment, Place, PlaceFare, Ride, RideRequest, ServiceArea, TravelBooking, User, Vehicle, Zone)
+from app.models import (AuditLog, Driver, EarningEntry, Fare, Payment, Place, PlaceFare, Ride, RideRequest, ServiceArea, TravelBooking, TravelPayment, User, Vehicle, Zone)
 
 
 @pytest.fixture()
@@ -8666,3 +8666,187 @@ def test_launch_checklist_shows_card_payment_state(client, monkeypatch):
     monkeypatch.setattr(settings, "interswitch_webhook_secret", "s")
     assert card_item()["status"] == "ok"
     assert "MX231877" not in json.dumps(card_item())
+
+
+# --- Student travel: paying by Interswitch checkout ---
+
+def _card_on(monkeypatch, secret="isw-webhook-secret"):
+    monkeypatch.setattr(settings, "interswitch_enabled", True)
+    monkeypatch.setattr(settings, "interswitch_merchant_code", "TEST-MERCHANT")
+    monkeypatch.setattr(settings, "interswitch_pay_item_id", "TEST-PAYITEM")
+    monkeypatch.setattr(settings, "interswitch_webhook_secret", secret)
+
+
+def _interswitch_answers(monkeypatch, paid_refs: set):
+    """Fake requery: references in paid_refs are paid in full, others are not."""
+    import app.interswitch_payments as interswitch_module
+
+    calls = []
+
+    class FakeResponse:
+        status_code = 200
+        text = ""
+
+        def __init__(self, params):
+            self.params = params
+
+        def json(self):
+            ref = self.params["transactionreference"]
+            return {"ResponseCode": "00" if ref in paid_refs else "Z0",
+                    "Amount": str(self.params["amount"]), "MerchantReference": ref}
+
+    def fake_get(*_a, **kwargs):
+        calls.append(kwargs["params"])
+        return FakeResponse(kwargs["params"])
+
+    monkeypatch.setattr(interswitch_module.requests, "get", fake_get)
+    return calls
+
+
+def test_student_pays_deposit_then_balance_by_card(client, monkeypatch):
+    _card_on(monkeypatch)
+    paid = set()
+    _interswitch_answers(monkeypatch, paid)
+    admin = login(client, *ADMIN_LOGIN)
+    student = login(client, *PASSENGER_LOGIN)
+    dep = _travel_departure(client, admin)
+    ticket = _book(client, student, dep["id"], seats=2, option="deposit").json()["booking"]
+    url = f"/api/v1/travel/bookings/{ticket['id']}/card"
+
+    started = client.post(url, headers=student, json={"customer_email": "ada@example.com"})
+    assert started.status_code == 200, started.text
+    checkout = started.json()["checkout"]
+    assert checkout["amount"] == 2000000 and checkout["txn_ref"].startswith(f"EKIMOVE-T{ticket['id']}-")
+    assert checkout["redirect_url"].startswith("https://newwebpay-sandbox.interswitchng.com/")
+
+    # Not paid yet: nothing is credited.
+    assert client.post(url + "/verify", headers=student).json()["credited"] == "0.00"
+    paid.add(checkout["txn_ref"])
+    verified = client.post(url + "/verify", headers=student).json()
+    assert verified["credited"] == "20000.00"
+    assert verified["booking"]["status"] == "reserved" and verified["booking"]["due_now"] == "20000.00"
+    # Checking again doesn't credit twice.
+    assert client.post(url + "/verify", headers=student).json()["credited"] == "0.00"
+
+    balance = client.post(url, headers=student, json={"customer_email": "ada@example.com"}).json()["checkout"]
+    assert balance["amount"] == 2000000 and balance["txn_ref"] != checkout["txn_ref"]
+    paid.add(balance["txn_ref"])
+    # The student closed the page; Interswitch's notification finishes it.
+    event = {"event": "TRANSACTION.COMPLETED", "data": {"merchantReference": balance["txn_ref"]}}
+    assert _send_interswitch_event(client, event).json() == {"status": "confirmed"}
+    assert _send_interswitch_event(client, event).json() == {"status": "already_done"}
+    mine = client.get("/api/v1/travel/bookings", headers=student).json()["bookings"][0]
+    assert mine["status"] == "paid" and mine["amount_paid"] == "40000.00" and mine["refund_status"] is None
+    with session_for(client) as db:
+        methods = [p.method for p in db.scalars(select(TravelPayment)).all()]
+        assert methods == ["card", "card"]
+    # Fully paid: no new checkout.
+    done = client.post(url, headers=student, json={"customer_email": "ada@example.com"})
+    assert done.status_code == 409 or done.json()["checkout"] is None
+
+
+def test_paid_old_checkout_is_credited_before_a_new_one(client, monkeypatch):
+    _card_on(monkeypatch)
+    paid = set()
+    _interswitch_answers(monkeypatch, paid)
+    admin = login(client, *ADMIN_LOGIN)
+    student = login(client, *PASSENGER_LOGIN)
+    ticket = _book(client, student, _travel_departure(client, admin)["id"]).json()["booking"]
+    url = f"/api/v1/travel/bookings/{ticket['id']}/card"
+    first = client.post(url, headers=student, json={"customer_email": "ada@example.com"}).json()["checkout"]
+    paid.add(first["txn_ref"])      # paid in another tab
+    again = client.post(url, headers=student, json={"customer_email": "ada@example.com"}).json()
+    assert again["checkout"] is None and again["booking"]["status"] == "paid"
+
+
+def test_card_checkout_keeps_seats_and_late_money_is_handled(client, monkeypatch):
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    from app.models import TravelCardCheckout
+
+    _card_on(monkeypatch)
+    paid = set()
+    _interswitch_answers(monkeypatch, paid)
+    admin = login(client, *ADMIN_LOGIN)
+    student = login(client, *PASSENGER_LOGIN)
+    other = login(client, "08000000002", "Second-Test-Password-2!")
+    dep = _travel_departure(client, admin, seats_total=1)
+    ticket = _book(client, student, dep["id"]).json()["booking"]
+    url = f"/api/v1/travel/bookings/{ticket['id']}/card"
+    checkout = client.post(url, headers=student, json={"customer_email": "ada@example.com"}).json()["checkout"]
+
+    # The hold time is up, but the student is paying: the seat is kept.
+    with session_for(client) as db:
+        db.scalar(select(TravelBooking)).created_at = _dt.now(_tz.utc) - _td(minutes=61)
+        db.commit()
+    assert client.get("/api/v1/travel/departures").json()["departures"][0]["seats_left"] == 0
+
+    # Much later the checkout is abandoned and the seat goes to someone else...
+    with session_for(client) as db:
+        db.scalar(select(TravelCardCheckout)).created_at = _dt.now(_tz.utc) - _td(minutes=40)
+        db.commit()
+    assert client.get("/api/v1/travel/departures").json()["departures"][0]["seats_left"] == 1
+    assert _book(client, other, dep["id"]).status_code == 201
+
+    # ...then the first student's payment arrives: no seat, so it's all refunded.
+    paid.add(checkout["txn_ref"])
+    event = {"event": "TRANSACTION.COMPLETED", "data": {"merchantReference": checkout["txn_ref"]}}
+    assert _send_interswitch_event(client, event).json() == {"status": "confirmed"}
+    mine = client.get("/api/v1/travel/bookings", headers=student).json()["bookings"][0]
+    assert mine["status"] == "expired" and mine["refund_amount"] == "20000.00" and mine["refund_status"] == "due"
+
+
+def test_late_card_money_gets_the_seat_back_when_still_free(client, monkeypatch):
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    from app.models import TravelCardCheckout
+
+    _card_on(monkeypatch)
+    paid = set()
+    _interswitch_answers(monkeypatch, paid)
+    admin = login(client, *ADMIN_LOGIN)
+    student = login(client, *PASSENGER_LOGIN)
+    dep = _travel_departure(client, admin)
+    ticket = _book(client, student, dep["id"]).json()["booking"]
+    url = f"/api/v1/travel/bookings/{ticket['id']}/card"
+    checkout = client.post(url, headers=student, json={"customer_email": "ada@example.com"}).json()["checkout"]
+    with session_for(client) as db:
+        db.scalar(select(TravelBooking)).created_at = _dt.now(_tz.utc) - _td(minutes=120)
+        db.scalar(select(TravelCardCheckout)).created_at = _dt.now(_tz.utc) - _td(minutes=90)
+        db.commit()
+    assert client.get("/api/v1/travel/bookings", headers=student).json()["bookings"][0]["status"] == "expired"
+    paid.add(checkout["txn_ref"])
+    verified = client.post(url + "/verify", headers=student).json()
+    assert verified["booking"]["status"] == "paid" and verified["booking"]["refund_status"] is None
+
+
+def test_card_for_tickets_needs_card_payments_and_the_owner(client, monkeypatch):
+    admin = login(client, *ADMIN_LOGIN)
+    student = login(client, *PASSENGER_LOGIN)
+    ticket = _book(client, student, _travel_departure(client, admin)["id"]).json()["booking"]
+    url = f"/api/v1/travel/bookings/{ticket['id']}/card"
+    off = client.post(url, headers=student, json={"customer_email": "ada@example.com"})
+    assert off.status_code == 503
+    _card_on(monkeypatch)
+    _interswitch_answers(monkeypatch, set())
+    stranger = login(client, "08000000002", "Second-Test-Password-2!")
+    assert client.post(url, headers=stranger, json={"customer_email": "x@example.com"}).status_code == 404
+    assert client.post(url + "/verify", headers=stranger).status_code == 404
+
+
+def test_new_card_checkout_waits_when_interswitch_cant_check_the_last_one(client, monkeypatch):
+    import requests as requests_module
+    import app.interswitch_payments as interswitch_module
+
+    _card_on(monkeypatch)
+    _interswitch_answers(monkeypatch, set())
+    admin = login(client, *ADMIN_LOGIN)
+    student = login(client, *PASSENGER_LOGIN)
+    ticket = _book(client, student, _travel_departure(client, admin)["id"]).json()["booking"]
+    url = f"/api/v1/travel/bookings/{ticket['id']}/card"
+    assert client.post(url, headers=student, json={"customer_email": "ada@example.com"}).status_code == 200
+
+    def down(*_a, **_k):
+        raise requests_module.ConnectionError("down")
+
+    monkeypatch.setattr(interswitch_module.requests, "get", down)
+    again = client.post(url, headers=student, json={"customer_email": "ada@example.com"})
+    assert again.status_code == 503 and "pay by bank transfer" in again.json()["detail"]

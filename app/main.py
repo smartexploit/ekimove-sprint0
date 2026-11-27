@@ -30,6 +30,7 @@ from app import fuel_pricing
 from app.fare_calculator import router as fare_calculator_router
 from app.service_boundary import router as service_boundary_router
 from app.travel import router as travel_router
+from app.travel_card import router as travel_card_router
 from app import deliveries as deliveries_module
 from app.deliveries import check_delivery_code, recipient_text, router as deliveries_router
 from app.support import router as support_router
@@ -151,6 +152,7 @@ app.include_router(launch_checklist_router)
 app.include_router(fare_calculator_router)
 app.include_router(service_boundary_router)
 app.include_router(travel_router)
+app.include_router(travel_card_router)
 app.include_router(onboarding_router)
 app.include_router(staff_router)
 app.include_router(pins_router)

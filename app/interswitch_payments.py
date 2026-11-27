@@ -85,9 +85,7 @@ def initiate_interswitch(
             detail="Card payments aren't available yet. Please pay by bank transfer.",
         )
 
-    mode = settings.interswitch_mode.strip().upper()
-    if mode not in ("TEST", "LIVE"):
-        raise HTTPException(status_code=503, detail="Invalid Interswitch mode.")
+    checkout_mode()
 
     ride = _owned_ride(ride_id, user, db)
     if ride.status in ("cancelled", "incident_review", "completed"):
@@ -145,27 +143,9 @@ def initiate_interswitch(
         db.commit()
         db.refresh(payment)
 
-    amount_kobo = int(
-        (Decimal(str(payment.amount)) * 100).quantize(
-            Decimal("1"), rounding=ROUND_HALF_UP
-        )
-    )
     return {
         "payment": _result(payment),
-        "checkout": {
-            "merchant_code": settings.interswitch_merchant_code,
-            "pay_item_id": settings.interswitch_pay_item_id,
-            "txn_ref": reference,
-            "amount": amount_kobo,
-            "currency": "566",
-            "mode": mode,
-            "customer_email": payload.customer_email,
-            "redirect_url": (
-                "https://newwebpay.interswitchng.com/collections/w/pay"
-                if mode == "LIVE"
-                else "https://newwebpay-sandbox.interswitchng.com/collections/w/pay"
-            ),
-        },
+        "checkout": checkout_details(reference, payment.amount, payload.customer_email),
     }
 
 
@@ -217,23 +197,51 @@ def verify_interswitch(
     return _result(confirmed_payment)
 
 
+def to_kobo(amount) -> int:
+    return int((Decimal(str(amount)) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+def checkout_mode() -> str:
+    mode = (settings.interswitch_mode or "").strip().upper()
+    if mode not in ("TEST", "LIVE"):
+        raise HTTPException(status_code=503, detail="Invalid Interswitch mode.")
+    return mode
+
+
+def checkout_details(reference: str, amount, customer_email: str) -> dict:
+    """What the app needs to send the customer to Interswitch's checkout page."""
+    mode = checkout_mode()
+    return {
+        "merchant_code": settings.interswitch_merchant_code,
+        "pay_item_id": settings.interswitch_pay_item_id,
+        "txn_ref": reference,
+        "amount": to_kobo(amount),
+        "currency": "566",
+        "mode": mode,
+        "customer_email": customer_email,
+        "redirect_url": (
+            "https://newwebpay.interswitchng.com/collections/w/pay"
+            if mode == "LIVE"
+            else "https://newwebpay-sandbox.interswitchng.com/collections/w/pay"
+        ),
+    }
+
+
 def interswitch_says_paid(payment: Payment) -> bool:
-    """Ask Interswitch whether this checkout was paid in full.
+    """Ask Interswitch whether this ride checkout was paid in full."""
+    return reference_paid(payment.provider_transaction_ref, payment.amount, f"payment {payment.id}")
+
+
+def reference_paid(reference: str, amount, label: str) -> bool:
+    """Ask Interswitch whether a checkout reference was paid in full.
 
     Raises 502/503 when Interswitch can't be asked; returns False when it
     answers that the payment isn't complete.
     """
     if not settings.interswitch_merchant_code:
         raise HTTPException(status_code=503, detail="Interswitch is not configured.")
-    amount_kobo = int(
-        (Decimal(str(payment.amount)) * 100).quantize(
-            Decimal("1"), rounding=ROUND_HALF_UP
-        )
-    )
-
-    mode = settings.interswitch_mode.strip().upper()
-    if mode not in ("TEST", "LIVE"):
-        raise HTTPException(status_code=503, detail="Invalid Interswitch mode.")
+    amount_kobo = to_kobo(amount)
+    mode = checkout_mode()
 
     requery_url = (
         settings.interswitch_live_requery_base_url
@@ -246,14 +254,14 @@ def interswitch_says_paid(payment: Payment) -> bool:
             requery_url,
             params={
                 "merchantcode": settings.interswitch_merchant_code,
-                "transactionreference": payment.provider_transaction_ref,
+                "transactionreference": reference,
                 "amount": amount_kobo,
             },
             headers={"Content-Type": "application/json", "Accept": "application/json"},
             timeout=12,
         )
     except requests.RequestException as exc:
-        logger.warning("Interswitch requery for payment %s failed to connect: %s", payment.id, exc)
+        logger.warning("Interswitch requery for %s failed to connect: %s", label, exc)
         raise HTTPException(
             status_code=502,
             detail="Unable to verify with Interswitch. Check the status and retry.",
@@ -265,7 +273,7 @@ def interswitch_says_paid(payment: Payment) -> bool:
     # Interswitch answers an unpaid or unknown checkout with a response code
     # (sometimes on an HTTP error status). Any such answer means "not paid".
     if not isinstance(result, dict) or "ResponseCode" not in result:
-        logger.warning("Interswitch requery for payment %s returned HTTP %s: %s", payment.id,
+        logger.warning("Interswitch requery for %s returned HTTP %s: %s", label,
                        response.status_code, (response.text or "")[:200])
         raise HTTPException(
             status_code=502,
@@ -282,9 +290,8 @@ def interswitch_says_paid(payment: Payment) -> bool:
     return (
         response_code == "00"
         and provider_amount == amount_kobo
-        and returned_reference == payment.provider_transaction_ref
+        and returned_reference == reference
     )
-
 
 def confirm_payment(db: Session, payment: Payment, *, actor_user_id: int | None, how: str) -> bool:
     """Mark a card payment confirmed once, telling the passenger and driver. True if this call did it."""
@@ -342,6 +349,15 @@ async def interswitch_webhook(request: Request, db: Session = Depends(get_db)) -
     reference = str(data.get("merchantReference") or "").strip()
     if not reference.startswith("EKIMOVE-"):
         return {"status": "ignored"}
+
+    from app.models import TravelCardCheckout
+    from app.travel_card import settle_checkout  # avoid an import cycle
+
+    checkout = db.scalar(select(TravelCardCheckout).where(TravelCardCheckout.reference == reference))
+    if checkout is not None:
+        if checkout.status != "pending":
+            return {"status": "already_done"}
+        return {"status": "confirmed" if settle_checkout(db, checkout) else "not_paid"}
 
     payment = db.scalar(select(Payment).where(Payment.provider_transaction_ref == reference,
                                               Payment.method == "interswitch"))

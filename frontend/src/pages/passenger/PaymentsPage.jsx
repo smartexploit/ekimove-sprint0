@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { goToInterswitch } from '../../utils/interswitch.js'
 import { Link, useSearchParams } from 'react-router-dom'
 import { CreditCard, Landmark, Wallet } from 'lucide-react'
 import AppShell from '../../layouts/AppShell.jsx'
@@ -232,55 +233,15 @@ export default function PaymentsPage() {
         return
       }
 
-      const checkout = result.checkout
-      const redirect = new URL(checkout.redirect_url)
-
-      const allowedHosts = [
-        'newwebpay-sandbox.interswitchng.com',
-        'newwebpay.interswitchng.com',
-      ]
-
-      if (
-        redirect.protocol !== 'https:' ||
-        !allowedHosts.includes(redirect.hostname) ||
-        redirect.pathname !== '/collections/w/pay'
-      ) {
-        throw new Error('Invalid Interswitch redirect address.')
-      }
-
       const returnUrl = new URL('/payments', window.location.origin)
       returnUrl.searchParams.set('rideId', String(id))
-
-      const fields = {
-        merchant_code: checkout.merchant_code,
-        pay_item_id: checkout.pay_item_id,
-        site_redirect_url: returnUrl.toString(),
-        txn_ref: checkout.txn_ref,
-        amount: String(checkout.amount),
-        currency: checkout.currency || '566',
-        cust_email: checkout.customer_email,
-        cust_name: result.payment.passenger_name || '',
-        cust_id: String(result.payment.ride_id),
-        pay_item_name: 'EkiMove ride payment',
-        payment_response_type: 'GET',
-      }
-
-      const form = document.createElement('form')
-      form.method = 'POST'
-      form.action = redirect.toString()
-      form.style.display = 'none'
-
-      Object.entries(fields).forEach(([name, value]) => {
-        const input = document.createElement('input')
-        input.type = 'hidden'
-        input.name = name
-        input.value = String(value ?? '')
-        form.appendChild(input)
-      })
-
-      document.body.appendChild(form)
       setMessage('Taking you to Interswitch secure checkout…')
-      form.submit()
+      goToInterswitch(result.checkout, {
+        returnPath: `${returnUrl.pathname}${returnUrl.search}`,
+        itemName: 'EkiMove ride payment',
+        customerName: result.payment.passenger_name || '',
+        customerId: result.payment.ride_id,
+      })
     } catch (err) {
       setError(err.message || 'Unable to start Interswitch checkout.')
       setBusy(false)

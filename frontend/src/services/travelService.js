@@ -10,6 +10,8 @@ export const getDepartures = () => apiRequest('/api/v1/travel/departures')
 export const bookSeats = (body) => post('/api/v1/travel/bookings', body)
 export const getMyTickets = () => apiRequest('/api/v1/travel/bookings')
 export const cancelTicket = (id) => post(`/api/v1/travel/bookings/${id}/cancel`)
+export const startTicketCard = (id, email) => post(`/api/v1/travel/bookings/${id}/card`, { customer_email: email })
+export const verifyTicketCard = (id) => post(`/api/v1/travel/bookings/${id}/card/verify`)
 
 // Travel desk (staff)
 export const adminDepartures = (includePast = false) =>
