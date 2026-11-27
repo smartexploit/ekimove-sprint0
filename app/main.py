@@ -67,7 +67,7 @@ from app.client_ip import client_ip
 from app.contacts import (ContactError, clean_email, clean_name, clean_phone, email_taken, find_user,
                           international_number, is_email, password_problem, phone_taken)
 from app.database import engine, get_db
-from app.driver_applications import router as driver_applications_router
+from app.driver_applications import router as driver_applications_router, vehicle_name
 from app.models import AuditLog, Driver, Fare, Incident, Payment, Place, PlaceFare, Ride, RideOffer, RideRequest, ServiceArea, User, Vehicle, Zone
 
 from app.admin_driver_verification import router as admin_driver_verification_router
@@ -1130,6 +1130,7 @@ def list_my_ride_requests(
                 "arrived": ride.arrived_at is not None,
                 "driver_name": _short_display_name(driver_full_name),
                 "vehicle_plate": vehicle.plate_number if vehicle else None,
+                "vehicle_name": vehicle_name(vehicle),
             }
 
     return [
@@ -1178,6 +1179,7 @@ def list_my_ride_requests(
                 if ride_request.id in assigned_rides
                 else None
             ),
+            "vehicle_name": assigned_rides.get(ride_request.id, {}).get("vehicle_name"),
             **{
                 key: assigned_rides.get(ride_request.id, {}).get(key)
                 for key in (

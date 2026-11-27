@@ -9,8 +9,9 @@ import VehicleIcon from '../../components/ui/VehicleIcon.jsx'
 import SupportContacts from '../../components/SupportContacts.jsx'
 import NotificationsCard from '../../components/account/NotificationsCard.jsx'
 import DriverOnboarding from '../../components/driver/DriverOnboarding.jsx'
+import VehicleDetailsForm from '../../components/driver/VehicleDetailsForm.jsx'
 import { apiRequest } from '../../services/authService.js'
-import { vehicleLabel } from '../../utils/vehicles.js'
+import { vehicleLabel, vehicleName } from '../../utils/vehicles.js'
 
 const statusCopy = {
   pending: {
@@ -214,18 +215,27 @@ export default function DriverStatusPage() {
             ) : (
               <ul className="list-card" style={{ margin: 0, padding: 0, listStyle: 'none' }}>
                 {vehicles.map((vehicle) => (
-                  <li className="list-item" key={vehicle.plate_number}>
-                    <span className="choice-icon" aria-hidden="true">
-                      <VehicleIcon type={vehicle.vehicle_type} />
-                    </span>
-                    <div className="list-item-main">
-                      <p className="list-item-title">{vehicleLabel(vehicle.vehicle_type)}</p>
-                      <p className="list-item-meta">
-                        <span className="plate">{vehicle.plate_number}</span> · {vehicle.capacity}{' '}
-                        {vehicle.capacity === 1 ? 'seat' : 'seats'}
-                      </p>
+                  <li className="list-item vehicle-item" key={vehicle.plate_number}>
+                    <div className="row" style={{ flexWrap: 'nowrap', width: '100%' }}>
+                      <span className="choice-icon" aria-hidden="true">
+                        <VehicleIcon type={vehicle.vehicle_type} />
+                      </span>
+                      <div className="list-item-main">
+                        <p className="list-item-title">{vehicleName(vehicle) || vehicleLabel(vehicle.vehicle_type)}</p>
+                        <p className="list-item-meta">
+                          {vehicleName(vehicle) && <>{vehicleLabel(vehicle.vehicle_type)} · </>}
+                          <span className="plate">{vehicle.plate_number}</span> · {vehicle.capacity}{' '}
+                          {vehicle.capacity === 1 ? 'seat' : 'seats'}
+                        </p>
+                      </div>
+                      <StatusBadge status={vehicle.is_approved ? 'approved' : 'pending'} kind="verification" />
                     </div>
-                    <StatusBadge status={vehicle.is_approved ? 'approved' : 'pending'} kind="verification" />
+                    {vehicle.details_needed && (
+                      <VehicleDetailsForm vehicle={vehicle} onSaved={(saved) => setApplication((current) => ({
+                        ...current,
+                        vehicles: current.vehicles.map((v) => (v.id === saved.id ? saved : v)),
+                      }))} />
+                    )}
                   </li>
                 ))}
               </ul>

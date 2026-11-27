@@ -98,7 +98,7 @@ function LiveRide({ ride, onChanged, emergencyContact }) {
               {ride.driver_name ? `${ride.driver_name} · verified driver` : 'Verified driver'}
             </p>
             <p className="small" style={{ color: 'var(--green-200)', marginTop: 2 }}>
-              {vehicleLabel(ride.vehicle_type)}
+              {ride.vehicle_name || vehicleLabel(ride.vehicle_type)}
               {ride.vehicle_plate ? (
                 <>
                   {' · Plate '}

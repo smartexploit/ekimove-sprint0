@@ -69,7 +69,7 @@ export default function BusTrackPage() {
                 {view.departed_at && <div><dt>Left at</dt><dd>{travelTime(view.departed_at)}</dd></div>}
                 {view.completed_at && <div><dt>Arrived</dt><dd>{travelTime(view.completed_at)}</dd></div>}
                 <div><dt>Boarded</dt><dd>{view.boarded ? 'Yes' : 'Not yet'}</dd></div>
-                {view.plate_number && <div><dt>Bus</dt><dd><span className="plate plate-light">{view.plate_number}</span></dd></div>}
+                {view.plate_number && <div><dt>Bus</dt><dd>{view.vehicle_name ? `${view.vehicle_name} · ` : ''}<span className="plate plate-light">{view.plate_number}</span></dd></div>}
                 {view.driver_name && <div><dt>Driver</dt><dd>{view.driver_name}</dd></div>}
               </dl>
               {view.status === 'departed' && !view.bus_location && (

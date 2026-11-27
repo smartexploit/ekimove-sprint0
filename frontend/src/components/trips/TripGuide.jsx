@@ -65,7 +65,7 @@ function stepContent(stage, trip) {
         action: ['View trip', myRides] }
     case 'coming':
       return { Icon: Navigation, step: 3, title: `${driver} is on the way`, tone: 'go',
-        text: `Be ready at ${trip.origin_text}. When they arrive, check the plate${trip.vehicle_plate ? ` (${trip.vehicle_plate})` : ''}, then give your pickup PIN${trip.pickup_pin ? ` ${trip.pickup_pin}` : ''}.`,
+        text: `Be ready at ${trip.origin_text}. When they arrive, check the ${trip.vehicle_name ? `${trip.vehicle_name} and its ` : ''}plate${trip.vehicle_plate ? ` (${trip.vehicle_plate})` : ''}, then give your pickup PIN${trip.pickup_pin ? ` ${trip.pickup_pin}` : ''}.`,
         action: ['Track on the map', myRides], callHint: true }
     case 'arrived':
       return { Icon: KeyRound, step: 4, title: `${driver} has arrived`, tone: 'go', big: trip.pickup_pin,

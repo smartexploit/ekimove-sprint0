@@ -119,6 +119,7 @@ EkiMove keeps `COMMISSION_PERCENT` (10% by default) of every fare; the driver ke
 - A **car** carries up to 4 passengers.
 - A **motorcycle** carries 1 passenger. The super-admin can allow a **second passenger** at an extra charge under *Admin → Places & fares → Booking rules*. A route's own "extra passenger" amount for motorcycles, if above ₦0, overrides that default charge. The limits are enforced by the API, not just the app.
 - Passengers can pick **Car**, **Motorcycle** or **Move a load** straight from their dashboard; the choice is kept while they pick the route.
+- **Vehicle details:** drivers give the vehicle's make and model, year and colour, and upload a photo of the vehicle when they apply. The photo is private (only reviewers with the drivers permission can open it, under *Admin → Drivers*). Passengers see the colour and model next to the plate, e.g. "Silver Toyota Corolla (2012)". Drivers who applied earlier are asked to add these details on *My driver status*; once a vehicle is approved and complete, changes go through support or an admin's *Correct details*.
 
 ## Automatic driver assignment
 *Admin → Dispatch → Automatic dispatch* has two modes:

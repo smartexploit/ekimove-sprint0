@@ -18,7 +18,7 @@ from app.client_ip import client_ip
 from app.contacts import ContactError, clean_name
 from app.config import settings
 from app.database import get_db
-from app.driver_applications import ALLOWED_IMAGES, MAX_PHOTO_BYTES
+from app.driver_applications import ALLOWED_IMAGES, MAX_PHOTO_BYTES, vehicle_name
 from app.models import (
     AppSetting,
     AuditLog,
@@ -391,7 +391,8 @@ def admin_ride_trail(ride_id: int, db: Session = Depends(get_db), _admin: User =
         "ride_id": ride.id, "status": ride.status, "route": f"{request.origin_text} → {request.destination_text}",
         "passenger": {"id": passenger.id, "name": passenger.full_name, "phone": passenger.phone or passenger.email} if passenger else None,
         "driver": {"id": driver_user.id, "name": driver_user.full_name, "phone": driver_user.phone} if driver_user else None,
-        "vehicle": {"plate_number": vehicle.plate_number, "vehicle_type": vehicle.vehicle_type} if vehicle else None,
+        "vehicle": {"plate_number": vehicle.plate_number, "vehicle_type": vehicle.vehicle_type,
+                    "vehicle_name": vehicle_name(vehicle)} if vehicle else None,
         "assigned_at": _iso(ride.assigned_at), "arrived_at": _iso(ride.arrived_at),
         "started_at": _iso(ride.started_at), "completed_at": _iso(ride.completed_at),
         "cancelled_at": _iso(ride.cancelled_at),

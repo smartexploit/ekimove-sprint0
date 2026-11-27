@@ -255,7 +255,7 @@ function LiveTrip({ ticket, onChanged }) {
     <div className="stack stack-sm live-trip">
       {ticket.bus?.plate_number && (
         <p className="small row" style={{ gap: 6 }}>
-          <Bus size={15} aria-hidden="true" /> Bus <span className="plate plate-light">{ticket.bus.plate_number}</span>
+          <Bus size={15} aria-hidden="true" /> {ticket.bus.vehicle_name || 'Bus'} <span className="plate plate-light">{ticket.bus.plate_number}</span>
           {ticket.bus.driver_name ? ` · Driver ${ticket.bus.driver_name}` : ''}
         </p>
       )}

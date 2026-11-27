@@ -36,6 +36,7 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_user, require_staff
 from app.config import settings
 from app.database import get_db
+from app.driver_applications import vehicle_name
 from app.models import (AuditLog, Driver, EarningEntry, Incident, TravelBooking, TravelDeparture, TravelPayment, User,
                         Vehicle)
 
@@ -208,7 +209,7 @@ def sos_open(dep: TravelDeparture, booking: TravelBooking) -> bool:
 
 
 def _bus_details(db: Session, dep: TravelDeparture) -> dict:
-    name = plate = None
+    name = plate = about = None
     if dep.driver_id:
         driver = db.get(Driver, dep.driver_id)
         user = db.get(User, driver.user_id) if driver else None
@@ -216,7 +217,8 @@ def _bus_details(db: Session, dep: TravelDeparture) -> dict:
     if dep.vehicle_id:
         vehicle = db.get(Vehicle, dep.vehicle_id)
         plate = vehicle.plate_number if vehicle else None
-    return {"driver_name": name, "plate_number": plate}
+        about = vehicle_name(vehicle)
+    return {"driver_name": name, "plate_number": plate, "vehicle_name": about}
 
 
 # ---------------------------------------------------------------- views
@@ -431,14 +433,15 @@ def shared_bus(token: str, db: Session = Depends(get_db)) -> dict:
         raise HTTPException(status_code=410, detail="This trip has ended, so the link no longer works.")
     from app.trips import short_name  # avoid an import cycle
 
+    bus = _bus_details(db, dep)
     return {
         "travellers": [short_name(n) for n in booking.traveller_names or []],
         "origin": dep.origin, "pickup_spot": dep.pickup_spot, "destination": dep.destination,
         "drop_off": dep.drop_off, "departs_at": _iso(dep.departs_at), "status": dep.status,
         "departed_at": _iso(dep.departed_at), "completed_at": _iso(dep.completed_at),
         "boarded": booking.checked_in_at is not None,
-        "driver_name": short_name(_bus_details(db, dep)["driver_name"]),
-        "plate_number": _bus_details(db, dep)["plate_number"],
+        "driver_name": short_name(bus["driver_name"]), "plate_number": bus["plate_number"],
+        "vehicle_name": bus["vehicle_name"],
         "bus_location": bus_location(db, dep),
         "support_phone": settings.support_phone,
     }

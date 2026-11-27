@@ -5435,3 +5435,16 @@ a.chip {
   border-radius: var(--radius-sm);
   color: var(--ink);
 }
+
+/* A driver's vehicle, with room for the details form underneath. */
+.list-item.vehicle-item {
+  flex-direction: column;
+  align-items: stretch;
+}
+.vehicle-photo {
+  max-width: 100%;
+  max-height: 320px;
+  border-radius: 12px;
+  object-fit: contain;
+  background: var(--mist);
+}

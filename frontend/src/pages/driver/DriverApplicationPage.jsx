@@ -7,7 +7,7 @@ import PasswordInput from '../../components/ui/PasswordInput.jsx'
 import { apiUrl } from '../../services/authService.js'
 import DriverDetailsFields from '../../components/driver/DriverDetailsFields.jsx'
 import { REVIEW_HOURS, detailsProblem } from '../../utils/driverOnboarding.js'
-import { MOVING_VEHICLES, SEAT_LIMITS } from '../../utils/vehicles.js'
+import { MOVING_VEHICLES, OLDEST_YEAR, LATEST_YEAR, SEAT_LIMITS, vehicleDetailsProblem } from '../../utils/vehicles.js'
 import {
   NAME_MAX, PASSWORD_MAX, PASSWORD_MIN, emailProblem, nameProblem, nameTyping, nigerianMobile, passwordProblem,
   phoneProblem, phoneTyping,
@@ -27,7 +27,10 @@ const VEHICLE_KINDS = [
   ['bus', 'Travel bus', 'Long trips where students book seats ahead (14 to 60 seats)', Bus],
 ]
 const DEFAULT_SEATS = { motorcycle: 1, car: 4, big_car: 2, van: 2, dyna: 1, bus: 18 }
-
+const MODEL_EXAMPLES = {
+  motorcycle: 'e.g. Bajaj Boxer', car: 'e.g. Toyota Corolla', moving: 'e.g. Toyota Hiace or Mitsubishi Canter',
+  bus: 'e.g. Toyota Hiace or Toyota Coaster',
+}
 export default function DriverApplicationPage() {
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
@@ -56,6 +59,7 @@ export default function DriverApplicationPage() {
       (email ? emailProblem(email) : '') ||
       passwordProblem(form.get('password'), { name: form.get('full_name'), phone: form.get('phone'), email }) ||
       (/^[A-Z0-9][A-Z0-9 -]{3,13}[A-Z0-9]$/.test(plate) ? '' : 'Enter the plate number as it appears on the vehicle, like EKT 123 AB.') ||
+      vehicleDetailsProblem(form) ||
       detailsProblem(form, { vehicleType, ownPhone: form.get('phone') })
     if (problem) {
       setError(problem)
@@ -67,6 +71,8 @@ export default function DriverApplicationPage() {
     form.set('phone', nigerianMobile(form.get('phone')))
     form.set('email', email)
     form.set('plate_number', plate)
+    form.set('make_model', String(form.get('make_model')).trim().replace(/\s+/g, ' '))
+    form.set('color', String(form.get('color')).trim().replace(/\s+/g, ' '))
     form.set('emergency_contact_phone', nigerianMobile(form.get('emergency_contact_phone')))
     form.set('licence_number', String(form.get('licence_number') || '').replace(/\s+/g, '').toUpperCase())
     setLoading(true)
@@ -123,7 +129,7 @@ export default function DriverApplicationPage() {
             </div>
           </div>
           <ol className="next-steps">
-            <li><strong>Review.</strong> We check your details, face photo and vehicle.</li>
+            <li><strong>Review.</strong> We check your details, face photo and vehicle photo.</li>
             <li>
               <strong>Inspection and orientation.</strong> We may invite you to bring your vehicle, licence and
               papers, and show you how to take trips in the app.
@@ -257,7 +263,36 @@ export default function DriverApplicationPage() {
                   : 'Passengers you can carry, not counting you. Motorcycle: 1 or 2. Car: up to 4.'}
               </span>
             </label>
+
+            <label className="field" htmlFor="vehicle-model">
+              <span className="field-label">Make and model</span>
+              <input id="vehicle-model" className="input" name="make_model" maxLength={80} required autoCapitalize="words"
+                placeholder={MODEL_EXAMPLES[vehicleKind] || 'e.g. Toyota Corolla'} />
+            </label>
+
+            <label className="field" htmlFor="vehicle-year">
+              <span className="field-label">Year</span>
+              <input id="vehicle-year" className="input" name="year" type="number" inputMode="numeric"
+                min={OLDEST_YEAR} max={LATEST_YEAR} placeholder="e.g. 2012" aria-describedby="vehicle-year-hint" required />
+              <span className="field-hint" id="vehicle-year-hint">The year the vehicle was made.</span>
+            </label>
+
+            <label className="field" htmlFor="vehicle-colour">
+              <span className="field-label">Colour</span>
+              <input id="vehicle-colour" className="input" name="color" maxLength={40} required autoCapitalize="words"
+                placeholder="e.g. Silver" aria-describedby="vehicle-colour-hint" />
+              <span className="field-hint" id="vehicle-colour-hint">Passengers use the colour and model to spot you.</span>
+            </label>
           </div>
+
+          <label className="field" htmlFor="vehicle-photo">
+            <span className="field-label">Vehicle photo</span>
+            <input id="vehicle-photo" className="input" name="vehicle_photo" type="file" accept="image/jpeg,image/png,image/webp"
+              aria-describedby="vehicle-photo-hint" required />
+            <span className="field-hint" id="vehicle-photo-hint">
+              A clear photo of the whole vehicle with the plate number showing. JPEG, PNG or WebP, up to 5 MB.
+            </span>
+          </label>
         </fieldset>
 
         <DriverDetailsFields vehicleType={vehicleType} idPrefix="apply" />

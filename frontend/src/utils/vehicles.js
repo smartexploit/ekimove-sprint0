@@ -37,3 +37,27 @@ export function vehicleGroup(type) {
   if (value === 'bus') return 'bus'
   return 'other'
 }
+
+export const LATEST_YEAR = new Date().getFullYear() + 1
+export const OLDEST_YEAR = 1980
+
+/** Why the vehicle details can't be sent yet, or ''. Used by the application form and the driver status page. */
+export function vehicleDetailsProblem(form, { photoRequired = true } = {}) {
+  const model = String(form.get('make_model') || '').trim()
+  const year = Number(form.get('year'))
+  const colour = String(form.get('color') || '').trim()
+  const photo = form.get('vehicle_photo')
+  if (!/^[A-Za-z0-9][A-Za-z0-9 .,'()/&-]{1,79}$/.test(model)) return 'Enter the make and model, like Toyota Corolla or Bajaj Boxer.'
+  if (!Number.isInteger(year) || year < OLDEST_YEAR || year > LATEST_YEAR) return `Enter the year the vehicle was made, between ${OLDEST_YEAR} and ${LATEST_YEAR}.`
+  if (!/^[A-Za-z][A-Za-z /-]{1,39}$/.test(colour)) return 'Enter the vehicle’s colour, like Silver or Black.'
+  if (photoRequired && !(photo && photo.size)) return 'Add a clear photo of the vehicle.'
+  if (photo && photo.size > 5 * 1024 * 1024) return 'The vehicle photo must be no larger than 5 MB.'
+  return ''
+}
+
+/** How passengers spot a vehicle, e.g. "Silver Toyota Corolla (2012)"; '' when not given yet. */
+export function vehicleName(vehicle) {
+  if (!vehicle?.make_model) return vehicle?.vehicle_name || ''
+  const name = vehicle.color ? `${vehicle.color} ${vehicle.make_model}` : vehicle.make_model
+  return vehicle.year ? `${name} (${vehicle.year})` : name
+}

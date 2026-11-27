@@ -70,6 +70,7 @@ export default function TrackSharePage() {
               <dl className="rows small">
                 <div><dt>{isDelivery ? 'Rider' : 'Driver'}</dt><dd>{view.driver.name || '—'}</dd></div>
                 <div><dt>Vehicle</dt><dd>{vehicleLabel(view.driver.vehicle_type)}</dd></div>
+                {view.driver.vehicle_name && <div><dt>Vehicle</dt><dd>{view.driver.vehicle_name}</dd></div>}
                 <div><dt>Plate</dt><dd><span className="plate plate-light">{view.driver.plate_number || '—'}</span></dd></div>
               </dl>
               {!ended && <p style={{ fontWeight: 800 }} aria-live="polite">{etaText(view)}</p>}

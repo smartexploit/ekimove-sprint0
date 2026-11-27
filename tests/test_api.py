@@ -1255,6 +1255,8 @@ DRIVER_DETAILS = {
     "emergency_contact_phone": "08039998877",
     "safety_pledges": ["documents", "sober", "protection", "road_rules", "respect", "roadworthy"],
 }
+VEHICLE_DETAILS = {"make_model": "Toyota Corolla", "year": "2012", "color": "silver"}
+VEHICLE_PHOTO = ("car.jpg", b"\xff\xd8\xff\xe0fake-vehicle-image", "image/jpeg")
 
 
 def test_driver_application_creates_pending_driver_and_unapproved_vehicle(
@@ -1266,7 +1268,8 @@ def test_driver_application_creates_pending_driver_and_unapproved_vehicle(
     monkeypatch.setattr(
         driver_applications_module,
         "upload_driver_photo",
-        lambda _photo_bytes: test_photo_ref,
+        lambda _photo_bytes, folder="driver-photos": test_photo_ref if folder == "driver-photos"
+        else "cloudinary:ekimove/vehicle-photos/car|jpg",
     )
     photo_bytes = b"\x89PNG\r\n\x1a\nfake-test-image"
 
@@ -1280,9 +1283,11 @@ def test_driver_application_creates_pending_driver_and_unapproved_vehicle(
             "plate_number": "EKM-NEW-901",
             "capacity": "4",
             **DRIVER_DETAILS,
+            **VEHICLE_DETAILS,
         },
         files={
             "face_photo": ("face.png", photo_bytes, "image/png"),
+            "vehicle_photo": VEHICLE_PHOTO,
         },
     )
 
@@ -1311,6 +1316,8 @@ def test_driver_application_creates_pending_driver_and_unapproved_vehicle(
         assert vehicle is not None
         assert vehicle.plate_number == "EKM-NEW-901"
         assert vehicle.is_approved is False
+        assert (vehicle.make_model, vehicle.year, vehicle.color) == ("Toyota Corolla", 2012, "Silver")
+        assert vehicle.photo_path == "cloudinary:ekimove/vehicle-photos/car|jpg"
     finally:
         session_generator.close()
 
@@ -1332,6 +1339,7 @@ def test_driver_application_rejects_invalid_image_signature(
             "plate_number": "EKM-NEW-902",
             "capacity": "4",
             **DRIVER_DETAILS,
+            **VEHICLE_DETAILS,
         },
         files={
             "face_photo": (
@@ -1339,6 +1347,7 @@ def test_driver_application_rejects_invalid_image_signature(
                 b"this is not a PNG image",
                 "image/png",
             ),
+            "vehicle_photo": VEHICLE_PHOTO,
         },
     )
 
@@ -1372,6 +1381,7 @@ def test_driver_application_rejects_registered_phone(
             "plate_number": "EKM-NEW-903",
             "capacity": "4",
             **DRIVER_DETAILS,
+            **VEHICLE_DETAILS,
         },
         files={
             "face_photo": (
@@ -1379,6 +1389,7 @@ def test_driver_application_rejects_registered_phone(
                 b"\x89PNG\r\n\x1a\nfake-test-image",
                 "image/png",
             ),
+            "vehicle_photo": VEHICLE_PHOTO,
         },
     )
 
@@ -6523,13 +6534,16 @@ def rich_outbox(monkeypatch):
 
 
 def apply_as_driver(client, monkeypatch, **changes):
-    monkeypatch.setattr(driver_applications_module, "upload_driver_photo", lambda _b: "cloudinary:x|png")
+    monkeypatch.setattr(driver_applications_module, "upload_driver_photo",
+                        lambda _b, folder="driver-photos": f"cloudinary:{folder}|png")
     data = {"full_name": "Femi Ogunleye", "phone": "08000000771", "password": "Green-Rider-Motorbike-77!",
             "email": "femi@example.com", "vehicle_type": "motorcycle", "plate_number": "EKT-771-AB",
-            "capacity": "1", "accept_policies": "true", **DRIVER_DETAILS}
+            "capacity": "1", "accept_policies": "true", **DRIVER_DETAILS,
+            "make_model": "Bajaj Boxer", "year": "2020", "color": "Red"}
     data.update(changes)
     data = {k: v for k, v in data.items() if v is not None}
-    return client.post("/api/v1/driver-applications", data=data, files={"face_photo": PHOTO})
+    return client.post("/api/v1/driver-applications", data=data,
+                       files={"face_photo": PHOTO, "vehicle_photo": VEHICLE_PHOTO})
 
 
 def test_new_passenger_gets_a_free_welcome_email_and_inbox_message(client, rich_outbox):
@@ -8426,3 +8440,102 @@ def test_bus_trip_safety_share_link_sos_and_live_location(client):
     # Stopping the share kills the link.
     client.delete(f"/api/v1/travel/bookings/{booking['id']}/share", headers=student)
     assert client.get(f"/api/v1/travel/share/{token}").status_code == 404
+
+
+# --- Vehicle details: make and model, year, colour and a vehicle photo ---
+
+@pytest.mark.parametrize("changes, files, message", [
+    ({"make_model": None}, None, "Field required"),
+    ({"year": "1975"}, None, "between 1980 and"),
+    ({"make_model": "!!"}, None, "make and model"),
+    ({"color": "123"}, None, "colour"),
+    ({}, {"face_photo": PHOTO}, "Field required"),
+    ({}, {"face_photo": PHOTO, "vehicle_photo": ("car.jpg", b"not a picture", "image/jpeg")}, "vehicle photo"),
+])
+def test_driver_application_needs_vehicle_details_and_photo(client, monkeypatch, changes, files, message):
+    monkeypatch.setattr(driver_applications_module, "upload_driver_photo", lambda _b, folder="": "cloudinary:x|png")
+    data = {"full_name": "Femi Ogunleye", "phone": "08000000771", "password": "Green-Rider-Motorbike-77!",
+            "vehicle_type": "motorcycle", "plate_number": "EKT-771-AB", "capacity": "1", **DRIVER_DETAILS,
+            "make_model": "Bajaj Boxer", "year": "2020", "color": "Red", **changes}
+    data = {k: v for k, v in data.items() if v is not None}
+    response = client.post("/api/v1/driver-applications", data=data,
+                           files=files or {"face_photo": PHOTO, "vehicle_photo": VEHICLE_PHOTO})
+    assert response.status_code in (415, 422), response.text
+    assert message in json.dumps(response.json()["detail"])
+
+
+def test_reviewers_see_vehicle_details_and_photo(client, monkeypatch):
+    import app.admin_driver_verification as admin_module
+
+    assert apply_as_driver(client, monkeypatch).status_code == 201
+    admin = login(client, *ADMIN_LOGIN)
+    row = next(r for r in client.get("/api/v1/admin/driver-applications/pending", headers=admin).json()
+               if r["phone"] == "08000000771")
+    vehicle = row["vehicles"][0]
+    assert (vehicle["make_model"], vehicle["year"], vehicle["color"]) == ("Bajaj Boxer", 2020, "Red")
+    assert vehicle["photo_available"] is True and vehicle["details_needed"] is False
+    assert "photo_path" not in vehicle
+
+    seen = []
+    monkeypatch.setattr(admin_module, "download_driver_photo",
+                        lambda ref: seen.append(ref) or (b"\xff\xd8\xffjpg", "image/jpeg"))
+    photo = client.get(f"/api/v1/admin/driver-vehicles/{vehicle['id']}/photo", headers=admin)
+    assert photo.status_code == 200 and photo.content == b"\xff\xd8\xffjpg"
+    assert seen == ["cloudinary:vehicle-photos|png"]
+    assert photo.headers["cache-control"] == "private, no-store"
+    driver = login(client, "08000000771", "Green-Rider-Motorbike-77!")
+    assert client.get(f"/api/v1/admin/driver-vehicles/{vehicle['id']}/photo", headers=driver).status_code == 403
+
+    fixed = client.patch(f"/api/v1/admin/driver-vehicles/{vehicle['id']}", headers=admin,
+                         json={"make_model": "TVS Apache", "year": 2019})
+    assert fixed.status_code == 200, fixed.text
+    assert (fixed.json()["make_model"], fixed.json()["year"], fixed.json()["color"]) == ("TVS Apache", 2019, "Red")
+
+
+def test_earlier_drivers_add_vehicle_details_once(client, monkeypatch):
+    assert apply_as_driver(client, monkeypatch).status_code == 201
+    db, gen = _get_test_db_session()
+    try:
+        vehicle = db.scalar(select(Vehicle).where(Vehicle.plate_number == "EKT-771-AB"))
+        # As if they applied before these details were asked for, and were approved.
+        vehicle.make_model = vehicle.year = vehicle.color = vehicle.photo_path = None
+        vehicle.is_approved = True
+        db.commit()
+        vehicle_id = vehicle.id
+    finally:
+        gen.close()
+
+    driver = login(client, "08000000771", "Green-Rider-Motorbike-77!")
+    me = client.get("/api/v1/driver-applications/me", headers=driver).json()
+    assert me["vehicles"][0]["details_needed"] is True
+    url = f"/api/v1/driver-applications/me/vehicles/{vehicle_id}/details"
+    details = {"make_model": "Honda Ace", "year": "2018", "color": "black"}
+    no_photo = client.post(url, headers=driver, data=details)
+    assert no_photo.status_code == 422 and "photo" in no_photo.json()["detail"]
+    saved = client.post(url, headers=driver, data=details, files={"vehicle_photo": VEHICLE_PHOTO})
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["details_needed"] is False and saved.json()["color"] == "Black"
+    # Approved and complete: changes now go through support.
+    assert client.post(url, headers=driver, data=details).status_code == 409
+
+    from app.driver_applications import vehicle_name
+    db, gen = _get_test_db_session()
+    try:
+        assert vehicle_name(db.get(Vehicle, vehicle_id)) == "Black Honda Ace (2018)"
+    finally:
+        gen.close()
+
+
+def test_drivers_cannot_change_someone_elses_vehicle(client, monkeypatch):
+    assert apply_as_driver(client, monkeypatch).status_code == 201
+    assert apply_as_driver(client, monkeypatch, phone="08000000772", plate_number="EKT-772-AB",
+                           email="tayo@example.com").status_code == 201
+    db, gen = _get_test_db_session()
+    try:
+        theirs = db.scalar(select(Vehicle).where(Vehicle.plate_number == "EKT-772-AB")).id
+    finally:
+        gen.close()
+    driver = login(client, "08000000771", "Green-Rider-Motorbike-77!")
+    response = client.post(f"/api/v1/driver-applications/me/vehicles/{theirs}/details", headers=driver,
+                           data={"make_model": "Honda Ace", "year": "2018", "color": "Black"})
+    assert response.status_code == 404

@@ -51,6 +51,38 @@ ALLOWED_IMAGES = {
     "image/png": (".png", lambda b: b.startswith(b"\x89PNG\r\n\x1a\n")),
     "image/webp": (".webp", lambda b: b.startswith(b"RIFF") and b[8:12] == b"WEBP"),
 }
+OLDEST_VEHICLE_YEAR = 1980
+
+
+def clean_vehicle_details(make_model: str, year: int, color: str) -> tuple[str, int, str]:
+    """Tidy and check the make/model, year and colour a driver typed."""
+    make_model = " ".join(str(make_model or "").split())
+    color = " ".join(str(color or "").split())
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 .,'()/&-]{1,79}", make_model):
+        raise HTTPException(status_code=422, detail="Enter the make and model, like Toyota Corolla or Bajaj Boxer.")
+    latest = datetime.now(timezone.utc).year + 1
+    if not OLDEST_VEHICLE_YEAR <= int(year) <= latest:
+        raise HTTPException(status_code=422, detail=f"Enter the year the vehicle was made, "
+                                                    f"between {OLDEST_VEHICLE_YEAR} and {latest}.")
+    if not re.fullmatch(r"[A-Za-z][A-Za-z /-]{1,39}", color):
+        raise HTTPException(status_code=422, detail="Enter the vehicle's colour, like Silver or Black.")
+    return make_model, int(year), color.title()
+
+
+async def read_image(upload: UploadFile, what: str) -> bytes:
+    """Read an uploaded photo, checking its type, size and contents."""
+    image_rule = ALLOWED_IMAGES.get((upload.content_type or "").lower())
+    if image_rule is None:
+        raise HTTPException(status_code=415, detail=f"Upload a JPEG, PNG, or WebP {what}")
+    try:
+        data = await upload.read(MAX_PHOTO_BYTES + 1)
+    finally:
+        await upload.close()
+    if not data or len(data) > MAX_PHOTO_BYTES:
+        raise HTTPException(status_code=413, detail=f"The {what} must be no larger than 5 MB")
+    if not image_rule[1](data):
+        raise HTTPException(status_code=415, detail=f"The {what} file does not match its image type")
+    return data
 
 # Private development storage. Never mount this directory as static content.
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -69,7 +101,11 @@ async def submit_driver_application(
     vehicle_type: str = Form(min_length=2, max_length=32),
     plate_number: str = Form(min_length=2, max_length=32),
     capacity: int = Form(ge=1, le=60),
+    make_model: str = Form(min_length=2, max_length=80),
+    year: int = Form(),
+    color: str = Form(min_length=2, max_length=40),
     face_photo: UploadFile = File(...),
+    vehicle_photo: UploadFile = File(...),
     accept_policies: bool = Form(False),
     email: str | None = Form(default=None, max_length=254),
     gender: str | None = Form(default=None, max_length=16),
@@ -109,6 +145,7 @@ async def submit_driver_application(
     problem = vehicle_problem(vehicle_type, capacity)
     if problem:
         raise HTTPException(status_code=422, detail=problem)
+    make_model, year, color = clean_vehicle_details(make_model, year, color)
 
     details = onboarding.clean_details(
         gender=gender, date_of_birth=date_of_birth, home_address=home_address, town=town,
@@ -126,27 +163,15 @@ async def submit_driver_application(
     if db.scalar(select(Vehicle).where(Vehicle.plate_number == plate_number)) is not None:
         raise HTTPException(status_code=409, detail="Vehicle plate number is already registered")
 
-    content_type = (face_photo.content_type or "").lower()
-    image_rule = ALLOWED_IMAGES.get(content_type)
-    if image_rule is None:
-        raise HTTPException(status_code=415, detail="Upload a JPEG, PNG, or WebP face photo")
-
-    try:
-        photo_bytes = await face_photo.read(MAX_PHOTO_BYTES + 1)
-    finally:
-        await face_photo.close()
-
-    if not photo_bytes or len(photo_bytes) > MAX_PHOTO_BYTES:
-        raise HTTPException(status_code=413, detail="Photo must be no larger than 5 MB")
-
-    extension, signature_check = image_rule
-    if not signature_check(photo_bytes):
-        raise HTTPException(status_code=415, detail="Photo contents do not match the image type")
+    photo_bytes = await read_image(face_photo, "face photo")
+    vehicle_bytes = await read_image(vehicle_photo, "vehicle photo")
 
     photo_ref = None
+    vehicle_ref = None
 
     try:
         photo_ref = upload_driver_photo(photo_bytes)
+        vehicle_ref = upload_driver_photo(vehicle_bytes, folder="vehicle-photos")
 
         user = User(
             phone=phone,
@@ -175,6 +200,10 @@ async def submit_driver_application(
             vehicle_type=vehicle_type,
             plate_number=plate_number,
             capacity=capacity,
+            make_model=make_model,
+            year=year,
+            color=color,
+            photo_path=vehicle_ref,
             is_approved=False,
         ))
         if accept_policies:
@@ -201,6 +230,7 @@ async def submit_driver_application(
     except IntegrityError:
         db.rollback()
         delete_driver_photo(photo_ref)
+        delete_driver_photo(vehicle_ref)
         raise HTTPException(
             status_code=409,
             detail="Phone number or vehicle plate number is already registered",
@@ -208,6 +238,7 @@ async def submit_driver_application(
     except (SQLAlchemyError, OSError, PhotoStorageError):
         db.rollback()
         delete_driver_photo(photo_ref)
+        delete_driver_photo(vehicle_ref)
         raise HTTPException(
             status_code=503,
             detail="Unable to submit the application. Please try again later.",
@@ -241,16 +272,83 @@ def get_my_driver_application(
         "details": onboarding.driver_details(driver),
         "details_missing": onboarding.details_missing(driver, vehicles),
         "invitations": onboarding.invitations_for(db, driver.id),
-        "vehicles": [
-            {
-                "vehicle_type": vehicle.vehicle_type,
-                "plate_number": vehicle.plate_number,
-                "capacity": vehicle.capacity,
-                "is_approved": vehicle.is_approved,
-            }
-            for vehicle in vehicles
-        ],
+        "vehicles": [vehicle_row(vehicle) for vehicle in vehicles],
     }
+
+
+def vehicle_details_needed(vehicle: Vehicle) -> bool:
+    """True when the vehicle's make and model, year, colour or photo is missing."""
+    return not (vehicle.make_model and vehicle.year and vehicle.color and vehicle.photo_path)
+
+
+def vehicle_name(vehicle: Vehicle | None) -> str | None:
+    """How passengers spot the vehicle, e.g. "Silver Toyota Corolla (2012)"."""
+    if vehicle is None or not vehicle.make_model:
+        return None
+    name = f"{vehicle.color} {vehicle.make_model}" if vehicle.color else vehicle.make_model
+    return f"{name} ({vehicle.year})" if vehicle.year else name
+
+
+def vehicle_row(vehicle: Vehicle) -> dict:
+    """A vehicle as the driver and reviewers see it, never its photo path."""
+    return {
+        "id": vehicle.id,
+        "vehicle_type": vehicle.vehicle_type,
+        "plate_number": vehicle.plate_number,
+        "capacity": vehicle.capacity,
+        "is_approved": vehicle.is_approved,
+        "make_model": vehicle.make_model,
+        "year": vehicle.year,
+        "color": vehicle.color,
+        "photo_available": bool(vehicle.photo_path),
+        "details_needed": vehicle_details_needed(vehicle),
+    }
+
+
+@router.post("/api/v1/driver-applications/me/vehicles/{vehicle_id}/details")
+async def add_my_vehicle_details(
+    vehicle_id: int,
+    make_model: str = Form(min_length=2, max_length=80),
+    year: int = Form(),
+    color: str = Form(min_length=2, max_length=40),
+    vehicle_photo: UploadFile | None = File(default=None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Add (or correct) a vehicle's make and model, year, colour and photo.
+
+    Open while the vehicle awaits approval, or once for drivers who applied
+    before these details were asked for. After that, changes go through support.
+    """
+    if current_user.role != "driver":
+        raise HTTPException(status_code=403, detail="Driver account required")
+    driver = db.scalar(select(Driver).where(Driver.user_id == current_user.id))
+    vehicle = db.get(Vehicle, vehicle_id)
+    if driver is None or vehicle is None or vehicle.driver_id != driver.id:
+        raise HTTPException(status_code=404, detail="Vehicle not found")
+    if vehicle.is_approved and not vehicle_details_needed(vehicle):
+        raise HTTPException(status_code=409, detail="This vehicle is approved, so its details are locked. "
+                                                    "Message support to change them.")
+    make_model, year, color = clean_vehicle_details(make_model, year, color)
+    has_upload = vehicle_photo is not None and bool(vehicle_photo.filename)
+    if not has_upload and not vehicle.photo_path:
+        raise HTTPException(status_code=422, detail="Add a clear photo of the vehicle.")
+
+    new_ref = None
+    try:
+        if has_upload:
+            new_ref = upload_driver_photo(await read_image(vehicle_photo, "vehicle photo"), folder="vehicle-photos")
+        old_ref = vehicle.photo_path if new_ref else None
+        vehicle.make_model, vehicle.year, vehicle.color = make_model, year, color
+        if new_ref:
+            vehicle.photo_path = new_ref
+        db.commit()
+    except (SQLAlchemyError, OSError, PhotoStorageError):
+        db.rollback()
+        delete_driver_photo(new_ref)
+        raise HTTPException(status_code=503, detail="Unable to save the vehicle details. Please try again.") from None
+    delete_driver_photo(old_ref)
+    return vehicle_row(vehicle)
 
 @router.patch("/api/v1/driver-applications/me/online")
 def set_my_driver_online_status(

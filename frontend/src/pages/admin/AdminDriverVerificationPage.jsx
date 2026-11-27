@@ -8,7 +8,9 @@ import DriverInviteForm from '../../components/admin/DriverInviteForm.jsx'
 import { INVITE_KINDS } from '../../utils/driverOnboarding.js'
 import { apiRequest, getAccessToken } from '../../services/authService.js'
 import { initials } from '../../utils/format.js'
-import { MOVING_VEHICLES, SEAT_LIMITS, vehicleGroup, vehicleLabel } from '../../utils/vehicles.js'
+import {
+  LATEST_YEAR, MOVING_VEHICLES, OLDEST_YEAR, SEAT_LIMITS, vehicleGroup, vehicleLabel, vehicleName,
+} from '../../utils/vehicles.js'
 
 const INVITE_STATUS = {
   invited: 'Invited, no answer yet',
@@ -65,12 +67,15 @@ const TYPE_OPTIONS = [
   ['bus', 'Travel bus'],
 ]
 
-/** Correct a vehicle's type, plate or seats (e.g. a car saved as a motorcycle). */
+/** Correct a vehicle's type, plate, seats, model, year or colour (e.g. a car saved as a motorcycle). */
 function VehicleEditor({ vehicle, onSaved, onCancel }) {
   const known = TYPE_OPTIONS.some(([value]) => value === vehicle.vehicle_type)
   const [type, setType] = useState(known ? vehicle.vehicle_type : '')
   const [plate, setPlate] = useState(vehicle.plate_number)
   const [seats, setSeats] = useState(String(vehicle.capacity))
+  const [model, setModel] = useState(vehicle.make_model || '')
+  const [year, setYear] = useState(vehicle.year ? String(vehicle.year) : '')
+  const [colour, setColour] = useState(vehicle.color || '')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -81,7 +86,11 @@ function VehicleEditor({ vehicle, onSaved, onCancel }) {
     try {
       await apiRequest(`/api/v1/admin/driver-vehicles/${vehicle.id}`, {
         method: 'PATCH',
-        body: JSON.stringify({ vehicle_type: type, plate_number: plate, capacity: Number(seats) }),
+        body: JSON.stringify({
+          vehicle_type: type, plate_number: plate, capacity: Number(seats),
+          // Only send the model, year and colour once all three are filled in.
+          ...(model.trim() && year && colour.trim() ? { make_model: model, year: Number(year), color: colour } : {}),
+        }),
       })
       onSaved(`${vehicleLabel(type)} ${plate.toUpperCase()} saved.`)
     } catch (err) {
@@ -113,6 +122,21 @@ function VehicleEditor({ vehicle, onSaved, onCancel }) {
           <span className="field-label">Passenger seats</span>
           <input className="input" type="number" min="1" max={SEAT_LIMITS[type] || 8} value={seats} required
             onChange={(event) => setSeats(event.target.value)} />
+        </label>
+        <label className="field">
+          <span className="field-label">Make and model</span>
+          <input className="input" value={model} maxLength={80} placeholder="e.g. Toyota Corolla"
+            onChange={(event) => setModel(event.target.value)} />
+        </label>
+        <label className="field">
+          <span className="field-label">Year</span>
+          <input className="input" type="number" min={OLDEST_YEAR} max={LATEST_YEAR} value={year} placeholder="e.g. 2012"
+            onChange={(event) => setYear(event.target.value)} />
+        </label>
+        <label className="field">
+          <span className="field-label">Colour</span>
+          <input className="input" value={colour} maxLength={40} placeholder="e.g. Silver"
+            onChange={(event) => setColour(event.target.value)} />
         </label>
       </div>
       <Alert tone="error">{error}</Alert>
@@ -185,7 +209,7 @@ export default function AdminDriverVerificationPage() {
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState('')
   const [photoUrl, setPhotoUrl] = useState('')
-  const [photoDriverId, setPhotoDriverId] = useState(null)
+  const [photoKey, setPhotoKey] = useState('')
   const [inviting, setInviting] = useState(null) // array of driver ids
   const [selected, setSelected] = useState([])
   const [reasons, setReasons] = useState({})
@@ -237,8 +261,8 @@ export default function AdminDriverVerificationPage() {
     }
   }, [photoUrl])
 
-  async function viewPhoto(driverId) {
-    setBusy(`photo-${driverId}`)
+  async function viewPhoto(key, path) {
+    setBusy(`photo-${key}`)
     setError('')
     setMessage('')
 
@@ -252,7 +276,7 @@ export default function AdminDriverVerificationPage() {
       ).replace(/\/+$/, '')
 
       const response = await fetch(
-        `${apiBaseUrl}/api/v1/admin/driver-applications/${driverId}/photo`,
+        `${apiBaseUrl}${path}`,
         { headers: { Authorization: `Bearer ${token}` } },
       )
 
@@ -274,7 +298,7 @@ export default function AdminDriverVerificationPage() {
       const blob = await response.blob()
       if (photoUrl) URL.revokeObjectURL(photoUrl)
       setPhotoUrl(URL.createObjectURL(blob))
-      setPhotoDriverId(driverId)
+      setPhotoKey(key)
     } catch (err) {
       setError(err.message || 'Unable to load the photo.')
     } finally {
@@ -285,7 +309,7 @@ export default function AdminDriverVerificationPage() {
   function closePhoto() {
     if (photoUrl) URL.revokeObjectURL(photoUrl)
     setPhotoUrl('')
-    setPhotoDriverId(null)
+    setPhotoKey('')
   }
 
   async function decideDriver(driverId, decision) {
@@ -302,7 +326,7 @@ export default function AdminDriverVerificationPage() {
         },
       )
       setMessage(`Driver ${decision === 'approve' ? 'approved' : 'rejected'} and told by notification, inbox and email. Vehicle approval is separate.`)
-      if (photoDriverId === driverId) closePhoto()
+      if (photoKey === `driver-${driverId}`) closePhoto()
       await loadApplications()
     } catch (err) {
       setError(err.message || 'Unable to save the driver decision.')
@@ -531,7 +555,7 @@ export default function AdminDriverVerificationPage() {
                   )}
                 </div>
 
-                {photoDriverId === application.driver_id && photoUrl ? (
+                {photoKey === `driver-${application.driver_id}` && photoUrl ? (
                   <div className="stack stack-sm">
                     <img
                       className="photo-preview"
@@ -550,10 +574,11 @@ export default function AdminDriverVerificationPage() {
                       type="button"
                       className="btn btn-sm"
                       disabled={Boolean(busy) || !application.photo_available}
-                      onClick={() => viewPhoto(application.driver_id)}
+                      onClick={() => viewPhoto(`driver-${application.driver_id}`,
+                        `/api/v1/admin/driver-applications/${application.driver_id}/photo`)}
                     >
                       <Camera size={16} aria-hidden="true" />
-                      {busy === `photo-${application.driver_id}`
+                      {busy === `photo-driver-${application.driver_id}`
                         ? 'Loading photo…'
                         : application.photo_available
                           ? 'View face photo'
@@ -609,9 +634,34 @@ export default function AdminDriverVerificationPage() {
                             <p className="muted small">
                               <span className="plate">{vehicle.plate_number}</span> · {vehicle.capacity} {vehicle.capacity === 1 ? 'seat' : 'seats'}
                             </p>
+                            {vehicleName(vehicle) && <p className="small">{vehicleName(vehicle)}</p>}
                           </div>
                           <StatusBadge status={vehicle.is_approved ? 'approved' : 'pending'} kind="verification" />
                         </div>
+                        {vehicle.details_needed && (
+                          <p className="small" style={{ color: 'var(--laterite-700)' }}>
+                            Missing: {[!vehicle.make_model && 'make and model', !vehicle.year && 'year',
+                              !vehicle.color && 'colour', !vehicle.photo_available && 'vehicle photo'].filter(Boolean).join(', ')}.
+                            The driver is asked to add them in the app.
+                          </p>
+                        )}
+                        {photoKey === `vehicle-${vehicle.id}` && photoUrl ? (
+                          <div className="stack stack-sm">
+                            <img className="vehicle-photo" src={photoUrl}
+                              alt={`Vehicle photo for plate ${vehicle.plate_number}`} />
+                            <div>
+                              <button type="button" className="btn btn-sm" onClick={closePhoto}>Close photo</button>
+                            </div>
+                          </div>
+                        ) : vehicle.photo_available && (
+                          <div>
+                            <button type="button" className="btn btn-sm" disabled={Boolean(busy)}
+                              onClick={() => viewPhoto(`vehicle-${vehicle.id}`, `/api/v1/admin/driver-vehicles/${vehicle.id}/photo`)}>
+                              <Camera size={16} aria-hidden="true" />
+                              {busy === `photo-vehicle-${vehicle.id}` ? 'Loading photo…' : 'View vehicle photo'}
+                            </button>
+                          </div>
+                        )}
                         <div className="row">
                           <button
                             type="button"

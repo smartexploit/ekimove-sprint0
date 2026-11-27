@@ -115,6 +115,11 @@ class Vehicle(Base):
     plate_number: Mapped[str] = mapped_column(String(32), unique=True, index=True)
     capacity: Mapped[int] = mapped_column(Integer)
     is_approved: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # What the vehicle is, so reviewers can check it and passengers can spot it.
+    make_model: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    color: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    photo_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
 
 class Zone(Base):

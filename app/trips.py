@@ -17,6 +17,7 @@ from app.auth import get_current_user, has_permission
 from app.config import settings
 from app.database import get_db
 from app.dispatch import haversine_m
+from app.driver_applications import vehicle_name
 from app.points import request_point
 from app.models import (
     AuditLog,
@@ -168,6 +169,7 @@ def tracking_view(db: Session, ride: Ride, *, include_pin: bool, public: bool) -
             "rating": rating_summary(db, driver_user.id) if driver_user else None,
             "vehicle_type": vehicle.vehicle_type if vehicle else request.vehicle_type,
             "plate_number": vehicle.plate_number if vehicle else None,
+            "vehicle_name": vehicle_name(vehicle),
         },
         "driver_location": location,
         "heading_to": "pickup" if ride.status in ("assigned", "driver_arriving") else "destination",
@@ -317,6 +319,7 @@ def trip_receipt(ride_id: int, current_user: User = Depends(get_current_user), d
         "destination": request.destination_text,
         "vehicle_type": request.vehicle_type,
         "plate_number": vehicle.plate_number if vehicle else None,
+        "vehicle_name": vehicle_name(vehicle),
         "passenger_count": request.passenger_count,
         "passenger_name": passenger.full_name if passenger else None,
         "driver_name": short_name(driver_user.full_name if driver_user else None),

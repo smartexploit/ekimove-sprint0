@@ -48,7 +48,7 @@ export default function ReceiptPage() {
             <dl className="rows small">
               <div><dt>From</dt><dd>{receipt.origin}</dd></div>
               <div><dt>To</dt><dd>{receipt.destination}</dd></div>
-              <div><dt>Vehicle</dt><dd>{vehicleLabel(receipt.vehicle_type)}{receipt.plate_number ? ` · ${receipt.plate_number}` : ''}</dd></div>
+              <div><dt>Vehicle</dt><dd>{receipt.vehicle_name || vehicleLabel(receipt.vehicle_type)}{receipt.plate_number ? ` · ${receipt.plate_number}` : ''}</dd></div>
               <div><dt>Driver</dt><dd>{receipt.driver_name || '—'}</dd></div>
               <div><dt>Passenger</dt><dd>{receipt.passenger_name}</dd></div>
               {receipt.started_at && <div><dt>Started</dt><dd>{formatDateTime(receipt.started_at)}</dd></div>}
