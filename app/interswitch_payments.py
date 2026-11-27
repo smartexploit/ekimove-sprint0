@@ -1,5 +1,8 @@
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
+import hashlib
+import hmac
+import json
 import re
 from pydantic import BaseModel, Field, field_validator
 from uuid import uuid4
@@ -7,7 +10,7 @@ from uuid import uuid4
 import requests
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
@@ -193,36 +196,7 @@ def verify_interswitch(
             detail="Payment has not been verified. Check status and retry later.",
         )
 
-    # Atomically confirm only if another request has not already done so.
-    confirmation_time = datetime.now(timezone.utc)
-    confirmation = db.execute(
-        update(Payment)
-        .where(
-            Payment.id == payment.id,
-            Payment.status.in_(("pending", "awaiting_confirmation")),
-        )
-        .values(
-            status="confirmed",
-            confirmed_at=confirmation_time,
-        )
-    )
-
-    if confirmation.rowcount == 1:
-        db.add(AuditLog(
-            actor_user_id=user.id,
-            action="payment.interswitch_verified",
-            entity_type="payment",
-            entity_id=str(payment.id),
-            details="Provider requery returned success and matching amount.",
-        ))
-        paid_ride = db.get(Ride, payment.ride_id)
-        if paid_ride is not None:
-            from app import notifications  # avoid an import cycle
-
-            notifications.payment_confirmed(db, paid_ride)
-        db.commit()
-    else:
-        db.rollback()
+    confirm_payment(db, payment, actor_user_id=user.id, how="Provider requery returned success and matching amount.")
 
     # Read the committed state instead of returning a potentially stale ORM object.
     confirmed_payment = db.scalar(
@@ -310,3 +284,74 @@ def interswitch_says_paid(payment: Payment) -> bool:
         and provider_amount == amount_kobo
         and returned_reference == payment.provider_transaction_ref
     )
+
+
+def confirm_payment(db: Session, payment: Payment, *, actor_user_id: int | None, how: str) -> bool:
+    """Mark a card payment confirmed once, telling the passenger and driver. True if this call did it."""
+    confirmation = db.execute(
+        update(Payment)
+        .where(
+            Payment.id == payment.id,
+            Payment.status.in_(("pending", "awaiting_confirmation")),
+        )
+        .values(status="confirmed", confirmed_at=datetime.now(timezone.utc))
+    )
+    if confirmation.rowcount != 1:
+        db.rollback()
+        return False
+    db.add(AuditLog(
+        actor_user_id=actor_user_id,
+        action="payment.interswitch_verified",
+        entity_type="payment",
+        entity_id=str(payment.id),
+        details=how,
+    ))
+    paid_ride = db.get(Ride, payment.ride_id)
+    if paid_ride is not None:
+        from app import notifications  # avoid an import cycle
+
+        notifications.payment_confirmed(db, paid_ride)
+    db.commit()
+    return True
+
+
+@router.post("/interswitch/webhook", include_in_schema=False)
+async def interswitch_webhook(request: Request, db: Session = Depends(get_db)) -> dict:
+    """Interswitch tells us a checkout finished, even if the passenger never came back.
+
+    The message must carry a valid X-Interswitch-Signature, and even then we
+    only trust Interswitch's own transaction check, never the message itself.
+    """
+    secret = settings.interswitch_webhook_secret
+    if not (secret and card_payments_enabled()):
+        raise HTTPException(status_code=503, detail="Interswitch notifications are not set up.")
+
+    raw = await request.body()
+    expected = hmac.new(secret.encode(), raw, hashlib.sha512).hexdigest()
+    signature = request.headers.get("x-interswitch-signature", "").strip().lower()
+    if not signature or not hmac.compare_digest(expected, signature):
+        raise HTTPException(status_code=401, detail="Invalid signature.")
+
+    try:
+        event = json.loads(raw)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid JSON.") from None
+    if not isinstance(event, dict) or event.get("event") != "TRANSACTION.COMPLETED":
+        return {"status": "ignored"}
+    data = event.get("data") if isinstance(event.get("data"), dict) else {}
+    reference = str(data.get("merchantReference") or "").strip()
+    if not reference.startswith("EKIMOVE-"):
+        return {"status": "ignored"}
+
+    payment = db.scalar(select(Payment).where(Payment.provider_transaction_ref == reference,
+                                              Payment.method == "interswitch"))
+    if payment is None:
+        return {"status": "ignored"}
+    if payment.status not in ("pending", "awaiting_confirmation"):
+        return {"status": "already_done"}
+    # A 502/503 here makes Interswitch retry later, which is what we want.
+    if not interswitch_says_paid(payment):
+        return {"status": "not_paid"}
+    confirm_payment(db, payment, actor_user_id=None,
+                    how="Interswitch notification, confirmed by provider requery with matching amount.")
+    return {"status": "confirmed"}

@@ -8539,3 +8539,130 @@ def test_drivers_cannot_change_someone_elses_vehicle(client, monkeypatch):
     response = client.post(f"/api/v1/driver-applications/me/vehicles/{theirs}/details", headers=driver,
                            data={"make_model": "Honda Ace", "year": "2018", "color": "Black"})
     assert response.status_code == 404
+
+
+# --- Interswitch notifications (webhook) ---
+
+def _interswitch_checkout(client, monkeypatch, secret="isw-webhook-secret"):
+    monkeypatch.setattr(settings, "interswitch_enabled", True)
+    monkeypatch.setattr(settings, "interswitch_merchant_code", "TEST-MERCHANT")
+    monkeypatch.setattr(settings, "interswitch_pay_item_id", "TEST-PAYITEM")
+    monkeypatch.setattr(settings, "interswitch_webhook_secret", secret)
+    passenger_headers, _, request_id = create_assigned_ride(client)
+    ride_id = get_ride_id_from_request(client, request_id, passenger_headers)
+    started = client.post(f"/api/v1/payments/rides/{ride_id}/interswitch/initiate", headers=passenger_headers,
+                          json={"customer_email": "passenger@example.com"})
+    assert started.status_code == 200, started.text
+    return ride_id, started.json()["checkout"]
+
+
+def _send_interswitch_event(client, body: dict, secret="isw-webhook-secret", signature=None):
+    import hashlib
+    import hmac as hmac_module
+
+    raw = json.dumps(body).encode()
+    sig = signature if signature is not None else hmac_module.new(secret.encode(), raw, hashlib.sha512).hexdigest()
+    return client.post("/api/v1/payments/interswitch/webhook", content=raw,
+                       headers={"Content-Type": "application/json", "X-Interswitch-Signature": sig})
+
+
+def _fake_requery(monkeypatch, checkout, code="00"):
+    import app.interswitch_payments as interswitch_module
+
+    calls = []
+
+    class FakeResponse:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"ResponseCode": code, "Amount": str(checkout["amount"]),
+                    "MerchantReference": checkout["txn_ref"]}
+
+    monkeypatch.setattr(interswitch_module.requests, "get", lambda *a, **k: calls.append(k) or FakeResponse())
+    return calls
+
+
+def _payment_status(client, ride_id):
+    generator = client.app.dependency_overrides[get_db]()
+    db = next(generator)
+    try:
+        return db.scalar(select(Payment).where(Payment.ride_id == ride_id)).status
+    finally:
+        generator.close()
+
+
+def test_interswitch_webhook_confirms_after_requery(client, monkeypatch):
+    ride_id, checkout = _interswitch_checkout(client, monkeypatch)
+    calls = _fake_requery(monkeypatch, checkout)
+    event = {"event": "TRANSACTION.COMPLETED", "uuid": "e1", "timestamp": 1,
+             "data": {"merchantReference": checkout["txn_ref"], "amount": checkout["amount"], "responseCode": "00"}}
+
+    response = _send_interswitch_event(client, event)
+    assert response.status_code == 200 and response.json() == {"status": "confirmed"}
+    assert len(calls) == 1 and calls[0]["params"]["transactionreference"] == checkout["txn_ref"]
+    assert _payment_status(client, ride_id) == "confirmed"
+    # Retries of the same notification change nothing.
+    assert _send_interswitch_event(client, event).json() == {"status": "already_done"}
+    assert len(calls) == 1
+
+
+def test_interswitch_webhook_trusts_requery_not_the_message(client, monkeypatch):
+    ride_id, checkout = _interswitch_checkout(client, monkeypatch)
+    _fake_requery(monkeypatch, checkout, code="51")
+    event = {"event": "TRANSACTION.COMPLETED",
+             "data": {"merchantReference": checkout["txn_ref"], "responseCode": "00"}}
+    assert _send_interswitch_event(client, event).json() == {"status": "not_paid"}
+    assert _payment_status(client, ride_id) == "pending"
+
+
+@pytest.mark.parametrize("signature", ["", "0" * 128, "not-hex"])
+def test_interswitch_webhook_rejects_bad_signatures(client, monkeypatch, signature):
+    ride_id, checkout = _interswitch_checkout(client, monkeypatch)
+    calls = _fake_requery(monkeypatch, checkout)
+    event = {"event": "TRANSACTION.COMPLETED", "data": {"merchantReference": checkout["txn_ref"]}}
+    assert _send_interswitch_event(client, event, signature=signature).status_code == 401
+    assert _send_interswitch_event(client, event, secret="someone-elses-secret").status_code == 401
+    assert calls == [] and _payment_status(client, ride_id) == "pending"
+
+
+def test_interswitch_webhook_ignores_other_events_and_is_off_without_secret(client, monkeypatch):
+    _ride_id, checkout = _interswitch_checkout(client, monkeypatch)
+    calls = _fake_requery(monkeypatch, checkout)
+    assert _send_interswitch_event(client, {"event": "TRANSACTION.CREATED",
+                                            "data": {"merchantReference": checkout["txn_ref"]}}).json() == {
+        "status": "ignored"}
+    assert _send_interswitch_event(client, {"event": "TRANSACTION.COMPLETED",
+                                            "data": {"merchantReference": "OTHER-SHOP-1"}}).json() == {
+        "status": "ignored"}
+    assert calls == []
+    monkeypatch.setattr(settings, "interswitch_webhook_secret", None)
+    assert _send_interswitch_event(client, {"event": "TRANSACTION.COMPLETED"}).status_code == 503
+
+
+def test_launch_checklist_shows_card_payment_state(client, monkeypatch):
+    from app.launch_checklist import checklist
+
+    def card_item():
+        generator = client.app.dependency_overrides[get_db]()
+        db = next(generator)
+        try:
+            return next(i for i in checklist(db) if i["key"] == "interswitch")
+        finally:
+            generator.close()
+
+    monkeypatch.setattr(settings, "interswitch_enabled", False)
+    assert card_item()["status"] == "warn" and "off" in card_item()["detail"]
+    monkeypatch.setattr(settings, "interswitch_enabled", True)
+    monkeypatch.setattr(settings, "interswitch_merchant_code", None)
+    assert card_item()["status"] == "fail"
+    monkeypatch.setattr(settings, "interswitch_merchant_code", "MX231877")
+    monkeypatch.setattr(settings, "interswitch_pay_item_id", "PAY-1")
+    monkeypatch.setattr(settings, "interswitch_mode", "TEST")
+    assert "test mode" in card_item()["detail"]
+    monkeypatch.setattr(settings, "interswitch_mode", "LIVE")
+    monkeypatch.setattr(settings, "interswitch_webhook_secret", None)
+    assert card_item()["status"] == "warn"
+    monkeypatch.setattr(settings, "interswitch_webhook_secret", "s")
+    assert card_item()["status"] == "ok"
+    assert "MX231877" not in json.dumps(card_item())

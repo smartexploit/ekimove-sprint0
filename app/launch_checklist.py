@@ -116,6 +116,24 @@ def checklist(db: Session) -> list[dict]:
               "Passengers get their own account number for instant transfers." if accounts
               else "Passengers pay by transfer to the business account and staff confirm it.",
               "Ask Paystack to enable Dedicated Virtual Accounts, then set PAYSTACK_VIRTUAL_ACCOUNTS_ENABLED=true."))
+    from app.interswitch_payments import card_payments_enabled  # avoid an import cycle
+
+    card_mode = (settings.interswitch_mode or "").strip().upper()
+    if not settings.interswitch_enabled:
+        status, detail = WARN, "Card payments are off, so passengers pay by bank transfer only."
+    elif not card_payments_enabled():
+        status, detail = FAIL, "Card payments are switched on but the merchant code or pay item ID is missing."
+    elif card_mode != "LIVE":
+        status, detail = WARN, "Interswitch card payments are in test mode, so no real money moves."
+    elif not settings.interswitch_webhook_secret:
+        status, detail = WARN, ("Card payments are live, but a passenger who closes the page after paying must "
+                                "come back and tap Verify payment.")
+    else:
+        status, detail = OK, "Interswitch card payments are live and confirm automatically."
+    add(_item(g, "interswitch", "Card payments (Interswitch)", status, detail,
+              "After Interswitch approves the business, set INTERSWITCH_MERCHANT_CODE, INTERSWITCH_PAY_ITEM_ID, "
+              "INTERSWITCH_MODE=LIVE and INTERSWITCH_ENABLED=true, then add the webhook address and set "
+              "INTERSWITCH_WEBHOOK_SECRET (see the README)."))
     bank = bool(settings.bank_transfer_account_number and settings.bank_transfer_account_name
                 and settings.bank_transfer_bank_name)
     add(_item(g, "bank", "Business bank account", OK if bank else WARN,

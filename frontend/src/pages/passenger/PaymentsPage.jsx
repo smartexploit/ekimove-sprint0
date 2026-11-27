@@ -126,6 +126,26 @@ export default function PaymentsPage() {
       active = false
     }
   }, [effectiveRideId])
+  // Coming back from Interswitch checkout (?txnref=…): check the payment straight
+  // away, so the passenger doesn't have to tap "Verify payment" themselves.
+  const returnedRef = searchParams.get('txnref')
+  useEffect(() => {
+    if (!returnedRef || !effectiveRideId) return undefined
+    let active = true
+    verifyInterswitchPayment(Number(effectiveRideId))
+      .then((result) => {
+        if (!active) return
+        setPayment(result)
+        setMessage(result.status === 'confirmed' ? 'Payment confirmed by Interswitch.'
+          : `Payment status: ${result.status.replaceAll('_', ' ')}.`)
+      })
+      .catch(() => {
+        if (active) setMessage('We couldn’t confirm the card payment yet. If you paid, tap “Verify payment” in a minute.')
+      })
+    return () => {
+      active = false
+    }
+  }, [returnedRef, effectiveRideId])
   const { instant_transfers: instant, card_payments: card } = useBusinessInfo()
   const cardOn = Boolean(card?.enabled)
   const [instantUnavailable, setInstantUnavailable] = useState(false)

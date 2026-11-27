@@ -105,6 +105,15 @@ Passengers pay by bank transfer into a **personal EkiMove account number** (a Pa
 
 **Card payments (Interswitch)** are off until EkiMove has a live merchant account: set `INTERSWITCH_ENABLED=true` together with `INTERSWITCH_MERCHANT_CODE`, `INTERSWITCH_PAY_ITEM_ID` and `INTERSWITCH_MODE=LIVE` to show the "Card or wallet" option again. While it's off, passengers only see bank transfer, and any card checkout started earlier switches to bank transfer when they tap "I've sent the money" (the old card reference is kept in the audit log). While a ride is unpaid, passengers can switch between card and transfer; once a transfer reference is submitted, card checkout is blocked so nobody pays twice.
 
+**Interswitch notifications:** when a passenger pays by card and closes the page before coming back, Interswitch's `TRANSACTION.COMPLETED` webhook confirms the payment instead. The app checks the `X-Interswitch-Signature` (HMAC-SHA512 of the raw body with the webhook secret), then asks Interswitch itself whether the reference was paid in full before confirming; the message alone is never trusted. Passengers who do come back are checked automatically, without tapping "Verify payment".
+
+**Switching card payments on (after Interswitch approves the business):**
+1. In Quickteller Business, switch to **Live** and open **Developer Tools**. Copy the **merchant code** (e.g. `MX…`) and the **pay item ID**.
+2. Still in Developer Tools, open **Webhooks**, enter `https://<your API address>/api/v1/payments/interswitch/webhook`, tick the **Transactions** events, and copy the **webhook secret**.
+3. On the `ekimove-api` service in Render → Environment, add `INTERSWITCH_MERCHANT_CODE`, `INTERSWITCH_PAY_ITEM_ID`, `INTERSWITCH_MODE=LIVE`, `INTERSWITCH_WEBHOOK_SECRET` and finally `INTERSWITCH_ENABLED=true`, then save (Render restarts the API).
+4. Check *Admin → Launch checklist*: "Card payments (Interswitch)" should be green. Make one small real card payment on a test ride and confirm it shows as paid, and that the money settles into the business bank account.
+To switch card payments off again (e.g. a problem with Interswitch), set `INTERSWITCH_ENABLED=false`; bank transfers keep working.
+
 ## Driver earnings and payouts
 EkiMove keeps `COMMISSION_PERCENT` (10% by default) of every fare; the driver keeps the rest.
 

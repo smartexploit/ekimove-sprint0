@@ -110,6 +110,9 @@ class Settings(BaseSettings):
     interswitch_mode: str = "TEST"
     interswitch_requery_base_url: str = "https://sandbox.interswitchng.com/collections/api/v1/gettransaction.json"
     interswitch_live_requery_base_url: str = "https://webpay.interswitchng.com/collections/api/v1/gettransaction.json"
+    # Secret from Quickteller Business → Developer Tools → Webhooks. With it set,
+    # card payments confirm even when the passenger closes the page after paying.
+    interswitch_webhook_secret: str | None = None
 
     # Paystack dedicated virtual accounts: every passenger gets a personal
     # account number, and transfers to it confirm payments automatically
